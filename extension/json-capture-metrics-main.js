@@ -24,7 +24,7 @@
     error_file: ["background.js", "platform-content.js", "chatgpt-json-capture.js", "chatgpt-fetch-main.js", "claude-json-capture.js", "claude-fetch-main.js", "network-json-capture.js", "network-fetch-main.js", "network-json-data.js"],
     failure_site: [...operations, "capture_hook", "capture_session", "capture_history", "capture_attachment_descriptor", "capture_attachment_body", "capture_serialize", "clipboard_write"],
     capture_request_stage: ["hook", "session", "history", "attachment_descriptor", "attachment_body", "serialize"],
-    capture_detail: ["auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "non_json_response", "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "count_mismatch", "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "attachment_size_limit", "size_limit", "timeout", "conversation_changed", "unsupported_content", "routing_unavailable"],
+    capture_detail: ["auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "non_json_response", "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "count_mismatch", "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "attachment_size_limit", "size_limit", "timeout", "conversation_changed", "unsupported_content", "routing_unavailable", "invalid_utf8"],
     document_ready_state: ["loading", "interactive", "complete"],
     destination_tab_status: ["loading", "complete"],
     summary_failed_provider: ["tokenharbor", "openrouter", "gemini", "mistral"],
@@ -68,6 +68,11 @@
     failure_abort: ["none", "capture_timeout", "attachment_failed", "other"],
     failure_online: ["online", "offline", "unknown"],
     failure_content_type: ["text", "json", "html", "octet_stream", "other", "missing"],
+    // Type clues only: never a filename, arbitrary suffix/header or body bytes.
+    failure_file_extension: ["txt", "md", "markdown", "csv", "json", "py", "js", "ts", "tsx", "jsx", "java", "kt", "swift", "c", "h", "cpp", "hpp", "cs", "go", "rs", "rb", "php", "sh", "bash", "zsh", "lua", "r", "scala", "dart", "html", "htm", "css", "scss", "vue", "svelte", "xml", "yaml", "yml", "toml", "tsv", "sql", "ipynb", "log", "other"],
+    failure_response_charset: ["utf8", "utf16", "utf16le", "utf16be", "utf32", "utf32le", "utf32be", "latin1", "windows1252", "ascii", "other", "missing"],
+    failure_body_hint: ["utf8_bom", "utf16le_bom", "utf16be_bom", "utf32le_bom", "utf32be_bom", "utf16le_or_utf32le_bom", "zip_signature", "gzip_signature", "pdf_signature", "png_signature", "jpeg_signature", "gif_signature", "ole_signature", "unrecognized"],
+    failure_decode_stage: ["chunk", "final_flush"],
     numeric_saturated: ["lower_bound"]
   };
   const jsonAttemptNumbers = ["adapter_version", "failure_value", "failure_limit", "http_status", "raw_bytes", "raw_limit_bytes",
@@ -87,7 +92,7 @@
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
     "editor_seen", "editor_connected", "draft_present", "paste_populated", "paste_stable", "user_handled",
-    "summary_cache_hit", "summary_fallback", "events_truncated", "destination_route_allowed", "destination_platform_match"];
+    "summary_cache_hit", "summary_fallback", "events_truncated", "destination_route_allowed", "destination_platform_match", "destination_auth_prompt"];
   const numbers = ["duration_ms", "deadline_remaining_ms", "capture_ms", "capture_chars", "capture_bytes",
     "candidate_turns", "captured_turns", "useful_turns", "raw_candidate_chars", "initial_rendered_turns",
     "sweep_scrolls", "sweep_stale_scrolls", "sweep_quiet_checks", "capture_retries", "expanded_blocks",
@@ -214,6 +219,15 @@
     if (operation?.startsWith("paste_") || operation === "editor_wait") return "paste_failed";
     return "unknown_error";
   }
+  // False means no explicit login/signup route was observed, not signed in.
+  // Only inspect sites already covered by the manifest; never return URL data.
+  function authPromptFromUrl(url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" || !["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"].includes(parsed.hostname)) return undefined;
+      return /^\/(?:a\/|auth\/)?(?:log[-_]?in|sign[-_]?in|sign[-_]?up|register)(?:\/|$)/i.test(parsed.pathname);
+    } catch { return undefined; }
+  }
   function claudePage(url) {
     try {
       const parsed = new URL(url);
@@ -231,7 +245,7 @@
     update(target, { ...errorDetails(error, target?.last_operation), error_code: code, error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
-  const api = { schema, jsonAttemptSchema, validateJsonAttempt, jsonAttempt, codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage };
+  const api = { schema, jsonAttemptSchema, validateJsonAttempt, jsonAttempt, codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage, authPromptFromUrl };
   root.CapTransferDiagnostics = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

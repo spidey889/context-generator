@@ -177,7 +177,7 @@ function checkTransferOperation(operation) {
   checkTransferDeadline(operation?.deadlineAt);
 }
 
-function cancelTransferOperation(operation, { closeDestinations = false } = {}) {
+function cancelTransferOperation(operation, { closeDestinations = false, waitForDestinations = false } = {}) {
   const newlyCancelled = !operation.controller.signal.aborted;
   if (newlyCancelled) operation.controller.abort(createTransferCancelledError());
   // Revoke ownership before touching browser tabs, then submit closure before
@@ -185,6 +185,21 @@ function cancelTransferOperation(operation, { closeDestinations = false } = {}) 
   // Association alone never grants permission to close a pre-existing tab.
   const closing = closeDestinations
     ? Promise.all([...operation.createdTabIds].map(tabId => chrome.tabs.remove(tabId).catch(() => {}))) : undefined;
+  if (waitForDestinations) {
+    // Manual takeover keeps tabs open. Acknowledge only after their guards are
+    // revoked; aborting the worker alone cannot stop a paste already dispatched.
+    return Promise.all([...operation.tabIds].filter(tabId => tabId !== operation.sourceTabId).map(async tabId => {
+      try {
+        const reply = await sendMessageBeforeDeadline(tabId, { type: "CANCEL_TRANSFER", transferId: operation.transferId }, Date.now() + 3000, "destination cancellation");
+        return reply?.ok === true;
+      } catch (error) {
+        if (/Receiving end does not exist|Could not establish connection/.test(String(error?.message || ""))) return true;
+        try { await chrome.tabs.get(tabId); }
+        catch (tabError) { return /No tab with id/i.test(String(tabError?.message || "")); }
+        return false;
+      }
+    })).then(results => results.every(Boolean));
+  }
   if (newlyCancelled) {
     for (const tabId of operation.tabIds) {
       chrome.tabs.sendMessage(tabId, { type: "CANCEL_TRANSFER", transferId: operation.transferId }).catch(() => {});
@@ -196,9 +211,11 @@ function cancelTransferOperation(operation, { closeDestinations = false } = {}) 
 async function checkTransferSource(operation) {
   checkTransferOperation(operation);
   if (!operation) return;
-  try { await chrome.tabs.get(operation.sourceTabId); }
+  let source;
+  try { source = await chrome.tabs.get(operation.sourceTabId); }
   catch { cancelTransferOperation(operation); }
   checkTransferOperation(operation);
+  return source;
 }
 
 async function waitForTransferWork(work, operation) {
@@ -229,7 +246,9 @@ async function checkDestinationTransfer(transferId, sourceTabId) {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !changes[LAST_TRANSFER_STATS_STORAGE_KEY]) return;
-  scheduleRawTranscriptExpiry(changes[LAST_TRANSFER_STATS_STORAGE_KEY].newValue || null);
+  scheduleRawTranscriptExpiry(changes[LAST_TRANSFER_STATS_STORAGE_KEY].newValue || null).catch(() => {
+    console.debug("[Context Generator] Raw transcript expiry alarm unavailable; retrying on startup.");
+  });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -266,7 +285,7 @@ async function scheduleRawTranscriptExpiry(stats) {
     return;
   }
 
-  chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
+  await chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
 }
 
 async function expireStoredRawTranscript() {
@@ -277,7 +296,7 @@ async function expireStoredRawTranscript() {
     if (!expiresAt) return;
 
     if (expiresAt > Date.now()) {
-      chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
+      await chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
       return;
     }
 
@@ -311,14 +330,37 @@ function initializeTelemetryDelivery() {
   telemetryDeliveryChain = (async () => {
     do {
       telemetryDeliveryRequested = false;
+      let recoveryUnavailable = false;
       await enqueueTelemetryWork(async () => {
         await getOrCreateTelemetryInstallId();
-        await restoreActiveTransferTelemetry();
+        try {
+          const restored = await restoreActiveTransferTelemetry();
+          await recoverPendingTransferTelemetry(restored);
+        } catch {
+          // Active snapshots are recovery aids. Their failure must not stop a
+          // healthy local outbox from reaching the database.
+          console.warn("cap_context_telemetry", { reason: "active_storage_unavailable" });
+          recoveryUnavailable = true;
+        }
       });
       await flushTelemetryOutbox();
+      if (recoveryUnavailable) await enqueueTelemetryWork(async () => {
+        // An empty local queue does not prove that the unreadable fallback is
+        // empty. Keep a wakeup even if flushing just cleared the ordinary alarm.
+        const diagnostics = await readTelemetryDiagnostics();
+        await chrome.alarms.create(TELEMETRY_RETRY_ALARM, {
+          when: Math.min(Date.now() + TELEMETRY_CONFIG_RETRY_BASE_MS, diagnostics.retry?.nextAttemptAt || Infinity)
+        });
+      });
     } while (telemetryDeliveryRequested);
-  })().catch(() => {
-    chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: 5 });
+  })().catch(async () => {
+    try {
+      await chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: 5 });
+    } catch {
+      // Reload/shutdown can reject even this fallback with "No SW". The durable
+      // outbox and retry timestamp remain available to the next worker startup.
+      console.debug("[Context Generator] Telemetry retry alarm unavailable; saved reports retry on startup.");
+    }
   }).finally(() => {
     telemetryDeliveryRunning = false;
     if (telemetryDeliveryRequested) initializeTelemetryDelivery();
@@ -333,18 +375,21 @@ function enqueueTelemetryWork(work) {
 
 async function recordTransferTelemetry(event, sourceTabId = null) {
   const sanitizedEvent = sanitizeTransferTelemetryEvent(event);
-  if (!sanitizedEvent) return;
+  if (!sanitizedEvent) return false;
   // Once capture has resolved the durable identity, later progress can update
   // its memory snapshot without waiting behind unrelated storage writes.
   updatePreparedSummaryTelemetry(sanitizedEvent);
   return enqueueTelemetryWork(async () => {
-    await restoreActiveTransferTelemetry();
+    try { await restoreActiveTransferTelemetry(); }
+    catch { console.warn("cap_context_telemetry", { reason: "active_storage_unavailable" }); }
     const known = activeTransferTelemetry.get(sanitizedEvent.attemptId);
     if (known && !sameTransferIdentity(known, sanitizedEvent)) {
       await recordTelemetryDiagnostic("identity_conflict", makeTelemetryPayload(sanitizedEvent, null));
-      return;
+      return false;
     }
-    const queuedIdentity = (await readTelemetryOutbox()).find(entry => entry.payload.attempt_id === sanitizedEvent.attemptId)?.payload;
+    let queuedIdentity;
+    try { queuedIdentity = (await readTelemetryOutbox()).find(entry => entry.payload.attempt_id === sanitizedEvent.attemptId)?.payload; }
+    catch { console.warn("cap_context_telemetry", { reason: "outbox_storage_unavailable" }); }
     const mergedEvent = mergeTransferTelemetryEvents(known, {
       ...sanitizedEvent, extensionVersion: queuedIdentity?.extension_version || known?.extensionVersion || chrome.runtime.getManifest?.().version || null
     });
@@ -356,10 +401,39 @@ async function recordTransferTelemetry(event, sourceTabId = null) {
     const installId = await getOrCreateTelemetryInstallId();
     const payload = makeTelemetryPayload(mergedEvent, installId);
     updatePreparedSummaryTelemetry(mergedEvent, installId);
-    await appendTelemetryOutbox(payload);
-    await persistActiveTransferTelemetry(mergedEvent.attemptId);
-    initializeTelemetryDelivery();
+    return queueActiveTransferTelemetry(payload, mergedEvent.attemptId);
   });
+}
+
+async function queueActiveTransferTelemetry(payload, attemptId) {
+  let queued = false;
+  try {
+    queued = await appendTelemetryOutbox(payload);
+    if (!queued) return false; // A diagnosed identity conflict is not recoverable.
+  } catch {
+    console.warn("cap_context_telemetry", { reason: "outbox_storage_unavailable" });
+  }
+  try {
+    // Preserve a failed queue append in the existing active store. The pending
+    // bit survives worker restart and is cleared only after an outbox commit.
+    await persistActiveTransferTelemetry(attemptId, !queued);
+  } catch (error) {
+    console.warn("cap_context_telemetry", { reason: "active_storage_unavailable" });
+    if (!queued) throw error;
+  } finally { initializeTelemetryDelivery(); }
+  return true;
+}
+
+async function recoverPendingTransferTelemetry(entries) {
+  const installId = await getOrCreateTelemetryInstallId();
+  for (const [attemptId, entry] of Object.entries(entries)) {
+    const event = activeTransferTelemetry.get(attemptId);
+    if (entry?.outboxPending !== true || !event || entry.expiresAt <= Date.now()) continue;
+    await appendTelemetryOutbox(makeTelemetryPayload(event, installId));
+    // Replaying a committed revision after a crash is safe: server writes are
+    // idempotent. Keeping this marker after ordinary delivery would loop forever.
+    await persistActiveTransferTelemetry(attemptId, false);
+  }
 }
 
 function updatePreparedSummaryTelemetry(event, installId = null) {
@@ -447,10 +521,11 @@ async function restoreActiveTransferTelemetry() {
     const event = sanitizeTransferTelemetryEvent(entry?.event, false);
     if (!event || event.attemptId !== attemptId) continue;
     if (!Number.isFinite(entry.expiresAt) || entry.expiresAt <= Date.now()) {
-      if (event.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(event, null));
+      await recordActiveTelemetryDrop(event, entry, true);
       continue;
     }
-    retained[attemptId] = { event, tabId: Number.isInteger(entry.tabId) ? entry.tabId : null, expiresAt: entry.expiresAt };
+    retained[attemptId] = { event, tabId: Number.isInteger(entry.tabId) ? entry.tabId : null, expiresAt: entry.expiresAt,
+      ...(entry.outboxPending === true ? { outboxPending: true } : {}) };
     activeTransferTelemetry.set(attemptId, event);
     if (Number.isInteger(entry.tabId)) activeTransferSourceTabs.set(attemptId, entry.tabId);
     const confirmation = sanitizeSummaryConfirmation(entry);
@@ -472,9 +547,21 @@ async function restoreActiveTransferTelemetry() {
   if (JSON.stringify(entries) !== JSON.stringify(retained)) {
     await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: retained });
   }
+  return retained;
 }
 
-async function persistActiveTransferTelemetry(attemptId) {
+async function recordActiveTelemetryDrop(event, entry, expired = false) {
+  if (entry.outboxPending === true) {
+    const payload = { ...makeTelemetryPayload(event, null), ...(sanitizeSummaryConfirmation(entry) || {}) };
+    const priority = telemetryDeliveryPriority(payload);
+    await recordTelemetryDiagnostic(`${expired ? "expired" : "overflow"}_${priority === 2 ? "terminal" : priority === 1 ? "confirmation" : "progress"}`,
+      payload);
+  } else if (event.status === "started") {
+    await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(event, null));
+  }
+}
+
+async function persistActiveTransferTelemetry(attemptId, outboxPending = null) {
   const activeStorage = chrome.storage.session || chrome.storage.local;
   const stored = await activeStorage.get(TELEMETRY_ACTIVE_STORAGE_KEY);
   const entries = stored?.[TELEMETRY_ACTIVE_STORAGE_KEY] || {};
@@ -484,7 +571,7 @@ async function persistActiveTransferTelemetry(attemptId) {
   for (const [id, entry] of Object.entries(entries)) {
     if (entry?.expiresAt > Date.now()) continue;
     const event = sanitizeTransferTelemetryEvent(entry?.event, false);
-    if (event?.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(event, null));
+    if (event) await recordActiveTelemetryDrop(event, entry, true);
     delete entries[id];
     activeTransferTelemetry.delete(id);
     preparedSummaryTelemetry.delete(id);
@@ -495,15 +582,23 @@ async function persistActiveTransferTelemetry(attemptId) {
     event: currentEvent,
     tabId: currentSourceTabId ?? null,
     expiresAt: Math.max(Date.now() + TELEMETRY_ACTIVE_MAX_AGE_MS, transferOperations.get(attemptId)?.expiresAt || 0),
+    ...((outboxPending ?? entries[attemptId]?.outboxPending) === true ? { outboxPending: true } : {}),
     ...(currentConfirmation || {})
   };
   if (currentEvent) activeTransferTelemetry.set(attemptId, currentEvent);
   if (Number.isInteger(currentSourceTabId)) activeTransferSourceTabs.set(attemptId, currentSourceTabId);
   if (currentConfirmation) summaryProofs.set(attemptId, currentConfirmation);
   while (Object.keys(entries).length > TELEMETRY_OUTBOX_MAX_ENTRIES) {
-    const oldestId = Object.keys(entries).find(id => entries[id].event?.status !== "started") || Object.keys(entries)[0];
+    // Already queued snapshots can be discarded before this store's only copy
+    // of an unsent report. Among pending copies, retain outcomes and proofs first.
+    const priority = entry => entry.outboxPending === true
+      ? 2 + telemetryDeliveryPriority({ status: entry.event?.status, summary_proof: entry.summary_proof })
+      : entry.event?.status === "started" ? 1 : 0;
+    const oldestId = Object.keys(entries).reduce((selected, id) =>
+      selected === null || priority(entries[id]) < priority(entries[selected]) ? id : selected, null);
     const removed = entries[oldestId];
-    if (removed.event?.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(removed.event, null));
+    const removedEvent = sanitizeTransferTelemetryEvent(removed.event, false);
+    if (removedEvent) await recordActiveTelemetryDrop(removedEvent, removed);
     delete entries[oldestId];
     activeTransferTelemetry.delete(oldestId);
     preparedSummaryTelemetry.delete(oldestId);
@@ -518,12 +613,24 @@ async function recordUserCancelledTransfersForTab(tabId) {
 }
 
 async function recordInterruptedTransfersForTab(tabId, failureReason, errorCode, interruptedAt = Infinity) {
-  await enqueueTelemetryWork(() => restoreActiveTransferTelemetry());
+  const restored = await enqueueTelemetryWork(async () => {
+    try { await restoreActiveTransferTelemetry(); return true; }
+    catch {
+      console.warn("cap_context_telemetry", { reason: "active_storage_unavailable" });
+      return false;
+    }
+  });
   const work = [];
   for (const [attemptId, sourceTabId] of activeTransferSourceTabs.entries()) {
     if (sourceTabId !== tabId) continue;
     const active = activeTransferTelemetry.get(attemptId);
     if (!active || active.status !== "started") continue;
+    if (!restored) {
+      // A session read failure must not hide a real tab interruption when this
+      // worker still has a live, identity-matched snapshot. Never revive expiry.
+      const prepared = preparedSummaryTelemetry.get(attemptId);
+      if (!prepared || prepared.expiresAt <= Date.now() || !sameTransferIdentity(prepared.event, active)) continue;
+    }
     // Storage work can finish after the new document starts its next transfer.
     // A delayed interruption must never finalize that newer attempt.
     if (Date.parse(active.attemptedAt) > interruptedAt) continue;
@@ -686,11 +793,11 @@ async function appendTelemetryOutbox(payload) {
   const previousIndex = outbox.findIndex(entry => entry.payload.attempt_id === payload.attempt_id);
   if (previousIndex !== -1 && !samePayloadIdentity(outbox[previousIndex].payload, payload)) {
     await recordTelemetryDiagnostic("identity_conflict", payload);
-    return;
+    return false;
   }
   const previous = previousIndex === -1 ? null : outbox[previousIndex];
   const mergedPayload = previous ? mergeTelemetryPayloads(previous.payload, payload) : payload;
-  if (previous && JSON.stringify(previous.payload) === JSON.stringify(mergedPayload)) return;
+  if (previous && JSON.stringify(previous.payload) === JSON.stringify(mergedPayload)) return true;
   const entry = {
     // A revision gets a new delivery ID so an in-flight acknowledgement cannot
     // remove a newer terminal report or proof appended during its request.
@@ -704,6 +811,7 @@ async function appendTelemetryOutbox(payload) {
   // stopping after this write must never leave an oversized or unsanitized queue.
   const retained = await compactTelemetryOutbox(outbox);
   await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: retained });
+  return true;
 }
 
 async function flushTelemetryOutbox() {
@@ -713,7 +821,7 @@ async function flushTelemetryOutbox() {
       const diagnostics = await readTelemetryDiagnostics();
       if (!outbox.length) return null;
       if (diagnostics.retry?.nextAttemptAt > Date.now()) {
-        chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: diagnostics.retry.nextAttemptAt });
+        await chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: diagnostics.retry.nextAttemptAt });
         return false;
       }
       return outbox.reduce((selected, entry) => !selected || telemetryDeliveryPriority(entry.payload) > telemetryDeliveryPriority(selected.payload)
@@ -867,7 +975,7 @@ async function scheduleTelemetryRetry(result) {
   diagnostics.retry = { failures, nextAttemptAt, kind: result.kind, ...(result.status ? { httpStatus: result.status } : {}) };
   await chrome.storage.local.set({ [TELEMETRY_DIAGNOSTICS_STORAGE_KEY]: diagnostics });
   await recordTelemetryDiagnostic(result.kind === "configuration" ? "configuration_retry" : "transient_retry", null, result);
-  chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: nextAttemptAt });
+  await chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: nextAttemptAt });
 }
 
 async function deliverTelemetryPayload(payload) {
@@ -877,6 +985,8 @@ async function deliverTelemetryPayload(payload) {
   try {
     const response = await fetch(TELEMETRY_ENDPOINT_URL, {
       method: "POST",
+      credentials: "omit",
+      redirect: "error",
       headers: {
         "Content-Type": "application/json",
         "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
@@ -884,7 +994,9 @@ async function deliverTelemetryPayload(payload) {
       body: JSON.stringify(payload),
       signal: controller.signal
     });
-    if (response.ok) return { kind: "delivered", status: response.status };
+    // Only the recorder's explicit acknowledgement permits removing a report.
+    // A redirected HTML page or an accidental 200/202 cannot confirm a commit.
+    if (response.status === 204) return { kind: "delivered", status: response.status };
     const status = response.status;
     let code = null;
     try {
@@ -952,7 +1064,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     // Retain a cancelled token even if Escape beats the first preparation
     // message. Late requests for this attempt must never start new work.
+    const knownOperation = Boolean(operation);
     if (!operation) operation = getTransferOperation(message.transferId, sender.tab);
+    if (message.preserveDestination === true) {
+      if (operation.sourceTabId !== tabId) { sendResponse({ ok: false }); return false; }
+      // A restarted worker may have lost the destination inventory. Latch the
+      // cancellation, but keep recovery cautious rather than claiming revocation.
+      cancelTransferOperation(operation, { waitForDestinations: true }).then(ok => sendResponse({ ok: ok && knownOperation }));
+      return true;
+    }
     cancelTransferOperation(operation, { closeDestinations: true }).then(() => sendResponse({ ok: true }));
     return true;
   }
@@ -1005,7 +1125,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "RECORD_TRANSFER_TELEMETRY") {
     recordTransferTelemetry(message.event, sender?.tab?.id)
-      .then(() => sendResponse({ ok: true }))
+      .then(accepted => sendResponse({ ok: accepted === true }))
       .catch(() => sendResponse({ ok: false }));
     return true;
   }
@@ -1042,9 +1162,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     summarizeWithBackend(message.conversation, message.transferId, message.deadlineAt, sender?.tab, message.messages, message.platform)
       .then((result) => sendResponse({ ok: true, summary: result.summary, timing: result.timing }))
       .catch((error) => {
-        if (error.code !== "user_cancelled") {
+        // The source recovers summary-service failures with a verified local
+        // carry. Only terminal errors should advertise a failed transfer here.
+        const terminal = ["request_too_large", "transfer_timeout", "extension_reloaded"].includes(error.code);
+        if (terminal) {
           console.error("[Context Generator Relay]", error);
           setBadge("ERR", "#b42318", 5000);
+        } else if (error.code !== "user_cancelled") {
+          console.info?.("[Cap Context] Summary unavailable; local carry recovery is available.", {
+            code: error.diagnostics?.error_code || error.code || "summary_failed"
+          });
         }
         sendResponse({
           ok: false,
@@ -1066,7 +1193,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message.transferId,
       message.deferFinalActivation === true,
       message.deadlineAt,
-      sender?.tab
+      sender?.tab,
+      message.localDirect === true
     )
       .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [], diagnostics: result?.diagnostics || null }))
       .catch((error) => {
@@ -1131,10 +1259,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}) {
+async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}, debug = {}) {
   // Older deployments return ordinary JSON. The new stream still has exactly
   // one authoritative final result; previews never become pasted context.
-  if (!response.headers?.get("content-type")?.includes("application/x-ndjson")) return response.json();
+  debug.phase = "response_body";
+  debug.format = response.headers?.get("content-type")?.includes("application/x-ndjson") ? "ndjson" : "json";
+  if (debug.format === "json") return response.json().catch(markInterruptedSummaryResponse);
+  debug.bytes = 0; debug.chunks = 0; debug.events = 0;
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "", result, eof = false;
@@ -1145,7 +1276,10 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
       if (!line) continue;
+      debug.phase = "stream_json_parse";
       const event = JSON.parse(line);
+      debug.events++;
+      debug.phase = "stream_event_validation";
       if (result || !["reset", "delta", "result"].includes(event.type)) throw new Error("Invalid summary stream");
       if (event.type === "reset") {
         tail = ""; hasKeyContext = false; nearEnd = false;
@@ -1162,26 +1296,57 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
       if (event.type === "result") {
         if (!event.data || typeof event.data !== "object") throw new Error("Invalid summary stream result");
         result = event.data;
+        debug.final_result = true;
       }
     }
   };
   try {
     while (!eof) {
       checkDeadline();
-      const chunk = await reader.read();
+      debug.phase = "stream_read";
+      const chunk = await reader.read().catch(markInterruptedSummaryResponse);
       checkDeadline();
       eof = chunk.done;
+      debug.eof = eof;
+      if (!eof) {
+        debug.bytes += chunk.value.byteLength;
+        debug.chunks++;
+        debug.last_chunk_at = new Date().toISOString();
+      }
+      debug.phase = "stream_utf8_decode";
       buffer += eof ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
       consume();
       // A buffered final result needs immediate delivery, not another switch.
-      if (!result && nearEnd) onNearEnd(true);
+      if (!result && nearEnd) { debug.phase = "near_end_callback"; onNearEnd(true); }
     }
+    debug.phase = "stream_completion_validation";
     if (buffer.trim() || !result) throw new Error("Summary stream ended before completion");
     return result;
   } finally {
     if (!eof) { try { reader.cancel().catch(() => {}); } catch {} }
     reader.releaseLock();
   }
+}
+
+function logSummaryResponseFailure(debug, error) {
+  // Local-only metadata: never store response text, arbitrary error messages,
+  // URLs, auth headers or stack traces. The Vercel ID can correlate server logs.
+  const message = String(error?.message || "");
+  const entry = { ...debug, failed_at: new Date().toISOString(),
+    error_name: ["TypeError", "SyntaxError", "AbortError", "TimeoutError", "Error"].includes(error?.name) ? error.name : "Other",
+    error_kind: /network|fetch|connection|terminated|aborted/i.test(message) ? "network_or_abort"
+      : /utf|encoded|encoding/i.test(message) ? "encoding"
+      : /json/i.test(message) ? "json"
+      : /stream ended before completion/i.test(message) ? "stream_incomplete" : "other" };
+  console.info?.("[Cap Context] Summary response failure (local diagnostic)", entry);
+  // Keep only the latest failure; logging must never delay or replace fallback.
+  try { Promise.resolve(chrome.storage.local.set({ "context-generator-summary-response-debug-v1": entry })).catch(() => {}); } catch {}
+}
+
+function markInterruptedSummaryResponse(error) {
+  // Tag only rejected body reads, not malformed JSON, UTF-8 or summary content.
+  if (error?.name === "TypeError") error.summaryResponseInterrupted = true;
+  throw error;
 }
 
 async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null, sourceTab = null, messages = null, platform = null) {
@@ -1266,15 +1431,36 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
 }
 
 async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }) {
+  const startedAt = nowMs();
+  const retryDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    requestSignal?.throwIfAborted();
+    checkTransferDeadline(deadlineAt);
+    try {
+      const result = await fetchSummaryFromBackendOnce(conversationText, transferId, deadlineAt, requestSignal, onNearEnd, payload, retryDeadlineAt);
+      result.timing.attempt = attempt;
+      result.timing.summaryMs = Math.round(nowMs() - startedAt);
+      return result;
+    } catch (error) {
+      if (attempt === 2 || !error.summaryResponseInterrupted) throw error;
+      // Restart the whole response once, with the same identity and total time
+      // budget. Partial text and near-end hints never survive the failed read.
+      onNearEnd(false);
+    }
+  }
+}
+
+async function fetchSummaryFromBackendOnce(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }, retryDeadlineAt = Infinity) {
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
   const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "summary_request" };
   let responseReceived = false;
+  const responseDebug = { attempt_id: transferId, started_at: new Date().toISOString(), phase: "request" };
   const controller = new AbortController();
   const onCancel = () => controller.abort(requestSignal.reason);
   requestSignal?.addEventListener("abort", onCancel, { once: true });
   if (requestSignal?.aborted) onCancel();
-  const requestDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity);
+  const requestDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity, retryDeadlineAt);
   const timeout = setTimeout(() => controller.abort(), Math.max(0, requestDeadlineAt - Date.now()));
   const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
   const checkSummaryDeadline = () => {
@@ -1321,6 +1507,11 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       signal: controller.signal
     });
     responseReceived = true;
+    responseDebug.phase = "response_headers";
+    responseDebug.headers_at = new Date().toISOString();
+    responseDebug.http_status = response.status;
+    const vercelId = response.headers?.get("x-vercel-id");
+    if (typeof vercelId === "string" && /^[a-zA-Z0-9:;._=-]{1,160}$/.test(vercelId)) responseDebug.vercel_request_id = vercelId;
     globalThis.CapTransferDiagnostics?.update(diagnostics, { summary_http_status: response.status,
       summary_fetch_ms: Math.round(nowMs() - fetchStartedAt), last_operation: "summary_response" });
     checkSummaryDeadline();
@@ -1332,7 +1523,8 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     }
 
     const parseStartedAt = nowMs();
-    const data = await readSummaryResponse(response, checkSummaryDeadline, onNearEnd);
+    const data = await readSummaryResponse(response, checkSummaryDeadline, onNearEnd, responseDebug);
+    responseDebug.phase = "summary_validation";
     const parseMs = Math.round(nowMs() - parseStartedAt);
     if (data?.ok === false || (data?.code && !data?.summary?.trim())) {
       throw createSummaryBackendPayloadError(data, data?.status || response.status);
@@ -1349,14 +1541,11 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       // keep the serialized write queued if storage stalls or the wait expires.
       await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
         const active = activeTransferTelemetry.get(transferId);
-        if (active) summaryProofs.set(transferId, confirmation);
-        try {
-          await appendTelemetryOutbox({ ...telemetry, last_stage: "summary_completed", ...confirmation });
-        } finally {
-          // Retain the receipt in session storage even if the local outbox
-          // failed. Neither telemetry store may discard a successful summary.
-          if (active) await persistActiveTransferTelemetry(transferId);
+        if (active) {
+          summaryProofs.set(transferId, confirmation);
+          activeTransferTelemetry.set(transferId, mergeTransferTelemetryEvents(active, { ...active, lastStage: "summary_completed" }));
         }
+        await queueActiveTransferTelemetry({ ...telemetry, last_stage: "summary_completed", ...confirmation }, transferId);
       }), controller.signal);
       initializeTelemetryDelivery();
     }
@@ -1377,6 +1566,10 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     };
     return { summary, timing };
   } catch (error) {
+    responseDebug.elapsed_ms = Math.round(nowMs() - summaryStartedAt);
+    responseDebug.aborted = controller.signal.aborted;
+    responseDebug.deadline_remaining_ms = Math.max(0, requestDeadlineAt - Date.now());
+    if (responseReceived) logSummaryResponseFailure(responseDebug, error);
     let failure = error;
     try { checkSummaryDeadline(); } catch (deadlineError) { failure = deadlineError; }
     const fallback = controller.signal.aborted ? "summary_timeout" : responseReceived ? "summary_invalid_response" : "summary_transport_failed";
@@ -1531,8 +1724,9 @@ function createTransferTimeoutError() {
 }
 
 async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null,
-  deferFinalActivation = false, deadlineAt = null, sourceTab = null) {
+  deferFinalActivation = false, deadlineAt = null, sourceTab = null, localDirect = false) {
   const trace = createBackgroundTrace();
+  trace.localDirect = localDirect;
   trace.diagnostics = { version: 1, diagnostics_revision: 3 };
   globalThis.CapTransferDiagnostics?.event(trace.diagnostics, "paste_start", 0, "delivery_events");
   recordDeliveryDiagnostics(transferId, destinationId, sourceTab, trace.diagnostics);
@@ -1570,7 +1764,8 @@ async function transferToDestinationObserved(
   }
 
   checkTransferDeadline(deadlineAt);
-  await checkTransferSource(operation);
+  if (trace.localDirect) checkTransferOperation(operation);
+  else await checkTransferSource(operation);
   trace.deadlineAt = deadlineAt;
   trace.operation = operation;
   const destination = DESTINATIONS[destinationId];
@@ -1588,7 +1783,8 @@ async function transferToDestinationObserved(
 
   if (preparedTabId) operation?.tabIds.add(preparedTabId);
   if (preparedTabId && await isPreparedDestinationTabUsable(preparedTabId, destinationId, operation, trace.diagnostics)) {
-    await checkTransferSource(operation);
+    if (trace.localDirect) checkTransferOperation(operation);
+    else await checkTransferSource(operation);
     checkTransferDeadline(deadlineAt);
     preparedAttempted = true;
     destinationTabId = preparedTabId;
@@ -1610,14 +1806,15 @@ async function transferToDestinationObserved(
     }
   } else if (preparedTabId) {
     // These checks describe the rejected prepared tab, not its replacement.
-    if ((destinationId === "claude" && trace.diagnostics.claude_page)
-      || (destinationId === "gemini" && typeof trace.diagnostics.destination_platform_match === "boolean")) {
+    if (typeof trace.diagnostics.destination_platform_match === "boolean") {
       trace.diagnostics.prepared_diagnostics = { version: 1, diagnostics_revision: 3, claude_page: trace.diagnostics.claude_page,
+        destination_auth_prompt: trace.diagnostics.destination_auth_prompt,
         destination_platform_match: trace.diagnostics.destination_platform_match,
         destination_route_allowed: trace.diagnostics.destination_route_allowed };
       delete trace.diagnostics.claude_page;
       delete trace.diagnostics.destination_platform_match;
       delete trace.diagnostics.destination_route_allowed;
+      delete trace.diagnostics.destination_auth_prompt;
     }
     markBackgroundTrace(trace, "prepared tab rejected", {
       tabId: preparedTabId,
@@ -1647,7 +1844,7 @@ async function transferToDestinationObserved(
       globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { recovery_error_code: previous?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult) });
       delete trace.diagnostics.error_code;
       delete trace.diagnostics.error_origin;
-      for (const key of ["claude_page", "destination_platform_match", "destination_route_allowed", "destination_message_count"]) delete trace.diagnostics[key];
+      for (const key of ["claude_page", "destination_platform_match", "destination_route_allowed", "destination_message_count", "destination_auth_prompt"]) delete trace.diagnostics[key];
     }
     if (recoveringPreparedTab) markBackgroundTrace(trace, "fresh recovery");
     if (preparedAttempted) {
@@ -1691,7 +1888,7 @@ async function transferToDestinationObserved(
   }
 
   await checkTransferSource(operation);
-  if (!deferFinalActivation && !destination.focusBeforePaste && operation?.earlyRevealedTabId !== destinationTabId) {
+  if (!deferFinalActivation && !destination.focusBeforePaste && !trace.localDirect && operation?.earlyRevealedTabId !== destinationTabId) {
     markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
     await activateDestinationTab(destinationTabId, deadlineAt, operation);
     markBackgroundTrace(trace, "final tab activate done", { tabId: destinationTabId });
@@ -1703,7 +1900,8 @@ async function transferToDestinationObserved(
     markBackgroundTrace(trace, "destination already revealed", { tabId: destinationTabId });
   }
   checkTransferOperation(operation);
-  await setBadge("OK", "#1f8f4d", 2500);
+  // A badge is optional presentation, not an acknowledgement prerequisite.
+  setBadge("OK", "#1f8f4d", 2500).catch(() => {});
   return {
     timing: {
       totalMs: Math.round(nowMs() - trace.startedAt),
@@ -1729,7 +1927,8 @@ async function isPreparedDestinationTabUsable(tabId, destinationId, operation = 
     try { routeAllowed = Boolean(DESTINATION_LANDING_PATHS[destinationId]?.includes(new URL(currentOrPendingUrl).pathname.replace(/\/+$/, "") || "/")); }
     catch { /* An invalid URL is unusable; observing it must not cancel a live tab. */ }
     globalThis.CapTransferDiagnostics?.update(diagnostics, {
-      destination_platform_match: platformMatches, destination_route_allowed: routeAllowed
+      destination_platform_match: platformMatches, destination_route_allowed: routeAllowed,
+      destination_auth_prompt: globalThis.CapTransferDiagnostics?.authPromptFromUrl(currentOrPendingUrl)
     });
     return platformMatches && routeAllowed;
   } catch {
@@ -1747,12 +1946,13 @@ async function pasteIntoDestinationWithActivation(
   transferId,
   trace
 ) {
-  await checkTransferSource(trace?.operation);
+  if (trace?.localDirect) checkTransferOperation(trace?.operation);
+  else await checkTransferSource(trace?.operation);
   checkTransferDeadline(trace?.deadlineAt);
   // Focus is a paste prerequisite on these destinations, independent of whether
   // final activation is deferred. Near-end reveal already provides that focus;
   // ordinary callers sequence the source completion cue first.
-  if (destination.focusBeforePaste && trace?.operation?.earlyRevealedTabId !== tabId) {
+  if ((destination.focusBeforePaste || trace?.localDirect) && trace?.operation?.earlyRevealedTabId !== tabId) {
     markBackgroundTrace(trace, "tab activate before paste start", { tabId });
     await activateDestinationTab(tabId, trace?.deadlineAt, trace?.operation, trace?.operation,
       destinationId === "claude" ? trace?.diagnostics : null);
@@ -1789,7 +1989,6 @@ async function pasteIntoDestinationWithActivation(
 async function prepareDestination(destinationId, deadlineAt = null, sourceTab = null, transferId = null) {
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   checkTransferDeadline(deadlineAt);
-  await checkTransferSource(operation);
   const startedAt = nowMs();
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
@@ -1807,12 +2006,12 @@ async function prepareDestination(destinationId, deadlineAt = null, sourceTab = 
 
 async function createDestinationTab(destination, options = {}) {
   try {
-    await checkTransferSource(options.operation);
+    const checkedSource = await checkTransferSource(options.operation);
     let placement = {};
     if (Number.isInteger(options.sourceTab?.id)) {
       // The user can focus a different window while capture runs. Resolve the
       // source's current position rather than opening in Chrome's current window.
-      const source = await chrome.tabs.get(options.sourceTab.id);
+      const source = checkedSource?.id === options.sourceTab.id ? checkedSource : await chrome.tabs.get(options.sourceTab.id);
       placement = { windowId: source.windowId, index: source.index + 1, openerTabId: source.id };
     }
     checkTransferOperation(options.operation);
@@ -2214,16 +2413,24 @@ function getPlatformFromUrl(url) {
 }
 
 async function setBadge(text, color, timeoutMs) {
-  await chrome.action.setBadgeBackgroundColor({ color });
-  await chrome.action.setBadgeText({ text });
+  // Toolbar decoration is optional, including in error handlers. A worker
+  // teardown must not turn a badge failure into another uncaught error.
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color });
+    await chrome.action.setBadgeText({ text });
 
-  if (timeoutMs) {
-    setTimeout(clearBadge, timeoutMs);
+    if (timeoutMs) setTimeout(clearBadge, timeoutMs);
+  } catch {
+    console.debug("[Context Generator] Toolbar badge unavailable.");
   }
 }
 
-function clearBadge() {
-  chrome.action.setBadgeText({ text: "" });
+async function clearBadge() {
+  try {
+    await chrome.action.setBadgeText({ text: "" });
+  } catch {
+    console.debug("[Context Generator] Toolbar badge unavailable.");
+  }
 }
 
 function createBackgroundTrace() {

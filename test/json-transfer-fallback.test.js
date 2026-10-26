@@ -369,7 +369,7 @@ test("closing the picker immediately releases its snapshot and drops late result
   }
 });
 
-test("cancelling during handoff immediately releases the picker capture and its navigation timer", async () => {
+test("cancelling during destination preparation immediately releases the picker capture and its navigation timer", async () => {
   const start = source.indexOf("  function finishTransferTrace(");
   const end = source.indexOf("  function formatTraceDetail(", start);
   assert.ok(start >= 0 && end > start);
@@ -388,10 +388,11 @@ test("cancelling during handoff immediately releases the picker capture and its 
     context.startPickerJsonCapture(); await started.promise;
     const entry = context.pickerJsonCapture, pending = entry.promise;
     if (ready) { response.resolve({ text: "Cancelled snapshot", messageTurnCount: 2 }); await pending; }
-    context.transitionDestinationSheetToHandoff = async () => {
+    context.prepareDestinationTab = async () => {
       context.cancelSourceTransfer(context.activeTransferTrace.id);
       assert.equal(context.pickerJsonCapture, null);
       assert.equal(timers.size, 0);
+      return { tabId: 42 };
     };
     await context.start("claude");
     assert.equal(entry.promise, null);
@@ -441,6 +442,64 @@ const transientError = (reason = "request_failed", detail = "network_error", sta
   captureFailureReason: reason,
   diagnostics: { version: 1, capture_detail: detail, capture_request_stage: "history", failure_site: "capture_history",
     ...(status === undefined ? {} : { capture_http_status: status }) }
+});
+
+test("only DeepSeek -> ChatGPT retries an oversized picker file as a separate-upload note", async () => {
+  for (const destination of ["chatgpt", "claude"]) {
+    const { context, calls } = harness("deepseek", { mode: "success" });
+    const options = [], omittedFiles = [{ name: "original.txt", bytes: 13099028 }];
+    context.window.__capCaptureNetworkJson = async (_path, omitLargeFiles) => {
+      calls.json++; options.push(Boolean(omitLargeFiles));
+      if (!omitLargeFiles) throw Object.assign(transientError("size_limit", "attachment_size_limit"), {
+        jsonCapture: { outcome: "failed", failure_check: "supported_files_limit", files_supported: 1 } });
+      return { text: "Complete chat with separate-file notice", messageTurnCount: 2, omittedFiles,
+        jsonCapture: { outcome: "partial", files_supported: 1 } };
+    };
+    context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+    await context.start(destination);
+    assert.deepEqual(options, destination === "chatgpt" ? [false, true] : [false]);
+    assert.equal(calls.dom, 0);
+    assert.equal(calls.flows.length, destination === "chatgpt" ? 1 : 0);
+    if (calls.flows.length) {
+      assert.equal(calls.flows[0].trace.omittedFiles, omittedFiles);
+      assert.equal(calls.flows[0].trace.diagnostics.json_attempts.length, 2);
+    }
+  }
+});
+
+test("a failed separate-file capture cannot silently deliver a smaller DOM subset", async () => {
+  const { context, calls } = harness("deepseek");
+  context.window.__capCaptureNetworkJson = async () => {
+    calls.json++;
+    throw Object.assign(transientError(), { jsonCapture: { outcome: "failed", failure_check: "network_error",
+      files_supported: 2, files_declared_bytes: 13099028 } });
+  };
+  await context.start("chatgpt");
+  assert.equal(calls.json, 2);
+  assert.equal(calls.dom + calls.flows.length, 0);
+  assert.equal(calls.errors.length, 1);
+});
+
+test("DeepSeek attachment decoding keeps its single retry, DOM fallback and precise failure diagnosis", async () => {
+  const { context, calls } = harness("deepseek");
+  context.window.__capCaptureNetworkJson = async () => {
+    calls.json++;
+    const error = transientError("request_failed", "invalid_utf8", 200);
+    error.diagnostics.capture_request_stage = "attachment_body";
+    error.diagnostics.failure_site = "capture_attachment_body";
+    error.jsonCapture = { outcome: "failed", failure_check: "invalid_utf8", failure_stage: "attachment_body",
+      failure_file_extension: "csv", failure_response_charset: "missing", failure_body_hint: "unrecognized", failure_decode_stage: "chunk" };
+    throw error;
+  };
+  await context.start("gemini");
+  assert.equal(calls.json, 2);
+  assert.equal(calls.dom, 1);
+  assert.equal(calls.flows.length, 1);
+  const diagnostics = calls.flows[0].trace.diagnostics;
+  assert.equal(diagnostics.capture_detail, "invalid_utf8");
+  assert.deepEqual(Array.from(diagnostics.json_attempts, value => [value.mode, value.failure_check]),
+    [["fresh", "invalid_utf8"], ["retry", "invalid_utf8"]]);
+  assert.doesNotMatch(JSON.stringify(diagnostics), /MUST_NOT_APPEAR/);
 });
 
 test("JSON attempt observations survive source-to-destination handoff and one retry", async () => {

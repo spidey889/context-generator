@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
+const { isDeepStrictEqual } = require("node:util");
 
 const PUBLIC_PAGES = new Set(["index.html", "privacy.html"]);
 const DOCUMENTS = new Set(["README.md", "LOGIC.md", "CHANGELOG.md", "PRIVACY.md", "LICENSE", "CNAME"]);
@@ -26,15 +27,44 @@ function pageStructure(source) {
   return JSON.stringify({ scripts, tags });
 }
 
-function classifyChanges(changes, readPage) {
+function manifestVersion(value) {
+  // Chrome compares up to four integer components, padding missing ones with 0.
+  // https://developer.chrome.com/docs/extensions/reference/manifest/version
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,4})(?:\.(?:0|[1-9]\d{0,4})){0,3}$/.test(value)) return null;
+  const parts = value.split(".").map(Number);
+  if (parts.some(part => part > 65535) || parts.every(part => part === 0)) return null;
+  return [...parts, ...Array(4 - parts.length).fill(0)];
+}
+
+function isVersionOnlyBump(baseSource, headSource) {
+  try {
+    const before = JSON.parse(baseSource);
+    const after = JSON.parse(headSource);
+    const oldVersion = manifestVersion(before?.version);
+    const newVersion = manifestVersion(after?.version);
+    if (!oldVersion || !newVersion) return false;
+    const firstDifference = newVersion.findIndex((part, index) => part !== oldVersion[index]);
+    // Comparing the whole parsed manifest keeps permissions, scripts and every
+    // other field on the full gate even when a version bump accompanies them.
+    return firstDifference !== -1 && newVersion[firstDifference] > oldVersion[firstDifference]
+      && isDeepStrictEqual({ ...before, version: after.version }, after);
+  } catch { return false; }
+}
+
+function classifyChanges(changes, readFile) {
   for (const change of changes) {
     const { path, oldMode, newMode } = change;
     // Symlinks/submodules must not masquerade as harmless images or docs.
     if (![oldMode, newMode].every(mode => mode === "100644" || mode === "000000")) return "full";
+    if (path === "extension/manifest.json") {
+      if (oldMode === "000000" || newMode === "000000" || typeof readFile !== "function"
+          || !isVersionOnlyBump(readFile(path, "base"), readFile(path, "head"))) return "full";
+      continue;
+    }
     if (DOCUMENTS.has(path) || /^docs\/[^\n]+\.md$/.test(path)
         || /^brag\/[^\n]+\.(?:png|jpe?g|webp|avif|gif|mp4|webm)$/.test(path)) continue;
     if (!PUBLIC_PAGES.has(path) || oldMode === "000000" || newMode === "000000") return "full";
-    if (pageStructure(readPage(path, "base")) !== pageStructure(readPage(path, "head"))) return "full";
+    if (pageStructure(readFile(path, "base")) !== pageStructure(readFile(path, "head"))) return "full";
   }
   return "light";
 }
@@ -86,7 +116,7 @@ if (require.main === module) {
       ref: process.env.GITHUB_REF
     });
   } catch { console.warn("Event metadata unavailable; running full checks."); }
-  console.log(`Offline checks: ${scope.mode === "light" ? "lightweight site/documentation validation" : "full regression suite"}`);
+  console.log(`Offline checks: ${scope.mode === "light" ? "lightweight manifest/site/documentation validation" : "full regression suite"}`);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `mode=${scope.mode}\nbase=${scope.base}\n`);
 }
 

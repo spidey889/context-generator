@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "cap context",
   "description": "Carry conversation context between Claude, ChatGPT, Gemini, Grok, and DeepSeek.",
-  "version": "1.4.24",
+  "version": "1.4.28",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
@@ -22,9 +22,8 @@
     "https://context-generator-five.vercel.app/*"
   ],
   "background": {
-  "service_worker": "background.js",
-  "scripts": ["transfer-diagnostics.js", "background.js"]
-},
+    "service_worker": "background.js"
+  },
   "action": {
     "default_title": "Carry context to another AI",
     "default_icon": {
@@ -98,11 +97,5 @@
         "https://chat.deepseek.com/*"
       ]
     }
-  ],
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "{8f4d7c20-9f3b-4b7e-9c11-2f4cbe2d41a9}",
-      "data_collection_permissions": { "required": ["personalCommunications"] }
-    }
-  }
+  ]
 }

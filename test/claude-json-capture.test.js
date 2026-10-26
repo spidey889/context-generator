@@ -715,10 +715,8 @@ function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {
     createTransferTrace: () => ({}), startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
     getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
     showErrorOverlay: error => calls.errors.push(error), clearRunningResetTimer: noop, resetRunningFlag: noop,
-    transitionDestinationSheetToHandoff: async () => {
-      if (navigateDuringHandoff) window.location.pathname = "/chat/other";
-    }, showOverlay: noop, releaseDestinationSheetBackdrop: noop,
-    prepareDestinationTab: async () => { calls.prepared++; return {}; }, advanceTransferTelemetryStage: noop,
+    transitionDestinationSheetToHandoff: async () => {}, showOverlay: noop, releaseDestinationSheetBackdrop: noop,
+    prepareDestinationTab: async () => { calls.prepared++; if (navigateDuringHandoff) window.location.pathname = "/chat/other"; return {}; }, advanceTransferTelemetryStage: noop,
     prepareSourceForCapture: async () => { calls.dom++; }, setHandoffProgress: noop,
     createConversationCapture: text => text, scrapeConversationTextWhenReady: async () => { calls.dom++; return "DOM"; },
     markCaptureDone: noop, runContextFlow: () => { calls.flow++; }, getSafeTelemetryFailureReason: () => "capture_failed"
@@ -735,7 +733,7 @@ test("Claude JSON picker captures API-only history with zero rendered turns", as
   assert.deepEqual(dom.calls, { capture: 0, flow: 0, prepared: 0, dom: 0, errors: ["No conversation"] });
   const navigated = pickerHarness({ navigateDuringHandoff: true });
   await navigated.run();
-  // Only data-free tab preparation overlaps handoff motion. A route change
+  // Only data-free tab preparation overlaps capture. A route change
   // still forbids native capture, summary dispatch and insertion.
   assert.equal(navigated.calls.prepared, 1);
   assert.equal(navigated.calls.capture + navigated.calls.flow, 0);

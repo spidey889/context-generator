@@ -8,7 +8,8 @@ async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
   // Historical validators predate file-download detail. The forward migration
   // below independently checks the complete current contract.
   for (const key of ["failure_phase", "failure_error_type", "failure_response_type", "failure_abort", "failure_online",
-    "failure_content_type", "failure_http_status", "failure_file_index", "failure_file_bytes", "failure_read_bytes", "failure_request_ms"]) delete attemptRules[key];
+    "failure_content_type", "failure_http_status", "failure_file_index", "failure_file_bytes", "failure_read_bytes", "failure_request_ms",
+    "failure_file_extension", "failure_response_charset", "failure_body_hint", "failure_decode_stage"]) delete attemptRules[key];
   if (!sql.includes('"raw_response_stream_limit"')) attemptRules.failure_check.values = attemptRules.failure_check.values
     .filter(value => !["raw_response_stream_limit", "raw_remaining_files_limit"].includes(value));
   const attempt = { outcome: "failed", mode: "prefetch", failure_check: "raw_total_stream_limit", failure_value: 6000001,
@@ -38,6 +39,8 @@ async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
   // These historical migrations precede the additive TokenHarbor provider label.
   // Its later migration verifies the complete current schema separately.
   const historicalSchema = structuredClone(contract.schema);
+  delete historicalSchema.destination_auth_prompt;
+  historicalSchema.capture_detail.values = historicalSchema.capture_detail.values.filter(value => value !== "invalid_utf8");
   historicalSchema.summary_failed_provider.values = historicalSchema.summary_failed_provider.values.filter(provider => provider !== "tokenharbor");
   assert.deepEqual(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);
   assert.deepEqual(JSON.parse(sql.match(attemptRulesDeclaration)[1]), attemptRules);
@@ -73,6 +76,7 @@ async function checkFileDiagnostics(db, sql) {
   const definition = (await rows("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) sql"))[0].sql;
   // At this historical boundary text files still have the 2.1 MB allowance.
   const historicalAttemptSchema = structuredClone(contract.jsonAttemptSchema);
+  for (const key of ["failure_file_extension", "failure_response_charset", "failure_body_hint", "failure_decode_stage"]) delete historicalAttemptSchema[key];
   historicalAttemptSchema.failure_file_bytes.max = 2100000;
   assert.deepEqual(JSON.parse(definition.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalAttemptSchema); checks++;
   const attempt = { outcome: "failed", mode: "prefetch", failure_check: "network_error", failure_stage: "attachment_body",
@@ -97,4 +101,47 @@ async function checkFileDiagnostics(db, sql) {
   assert.deepEqual(await snapshot(), before); checks++;
   return checks;
 }
-module.exports = { checkJsonCaptureDiagnostics, checkFileDiagnostics };
+async function checkAttachmentDecodeDiagnostics(db, sql) {
+  let checks = 0;
+  const rows = async (query, args = []) => (await db.query(query, args)).rows;
+  const snapshot = () => rows(`select
+    (select md5(jsonb_agg(to_jsonb(t) order by attempt_id)::text) from public.transfers t) transfers,
+    (select md5(jsonb_agg(to_jsonb(u) order by user_no)::text) from public.users u) users,
+    (select jsonb_agg(jsonb_build_array(oid::text,proacl,prosecdef,proconfig) order by oid) from pg_proc
+      where oid in ('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure,
+        'public.is_valid_transfer_diagnostics(jsonb,integer)'::regprocedure)) access`);
+  const definition = async () => (await rows("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) sql"))[0].sql;
+  const before = await snapshot(), original = await definition();
+  const attempt = { outcome: "failed", mode: "prefetch", failure_check: "invalid_utf8", failure_stage: "attachment_body",
+    failure_phase: "decode", failure_file_index: 25, failure_file_bytes: 960752, failure_read_bytes: 1043,
+    failure_http_status: 200, failure_file_extension: "csv", failure_response_charset: "missing",
+    failure_body_hint: "unrecognized", failure_decode_stage: "chunk" };
+  const report = changes => ({ version: 1, capture_detail: "invalid_utf8", json_attempts: [{ ...attempt, ...changes }] });
+  assert.equal((await rows("select public.is_valid_transfer_diagnostics($1::jsonb) valid", [JSON.stringify(report())]))[0].valid, false); checks++;
+  await db.exec(sql);
+  assert.deepEqual(await snapshot(), before); checks++;
+  const updated = await definition();
+  assert.deepEqual(JSON.parse(updated.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.schema); checks++;
+  assert.deepEqual(JSON.parse(updated.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.jsonAttemptSchema); checks++;
+  const withoutRules = value => value.replace(/\b(?:attempt_rules|rules) constant jsonb := '[^']+'::jsonb/g, "RULES");
+  assert.equal(withoutRules(updated), withoutRules(original)); checks++;
+  const samples = [{ label: "legacy diagnostics remain valid", value: { version: 1, capture_detail: "network_error" }, expected: true }];
+  for (const key of ["failure_file_extension", "failure_response_charset", "failure_body_hint", "failure_decode_stage"]) {
+    for (const value of [...contract.jsonAttemptSchema[key].values, "PRIVATE_FILE.csv", "https://PRIVATE", null])
+      samples.push({ label: `attachment decode ${key} ${value}`, value: report({ [key]: value }),
+        expected: contract.jsonAttemptSchema[key].values.includes(value) });
+  }
+  for (const key of ["file_name", "file_id", "url", "prefix", "bytes", "content", "raw_error"])
+    samples.push({ label: `reject private field ${key}`, value: report({ [key]: "PRIVATE" }), expected: false });
+  checks += await checkDiagnosticsSamples(db, samples);
+  await db.exec("begin; set local role service_role;");
+  try {
+    await db.query(`select public.record_transfer_event('c0de5726-0000-4000-8000-000000000001'::uuid,
+      'c0de5726-0000-4000-8000-000000000002',now(),'deepseek','gemini',null,'failed','capture_started',
+      'capture_failed','1.4.28',false,null,null,null,null,$1::jsonb)`, [JSON.stringify(report())]);
+    assert.deepEqual((await rows("select diagnostics from public.transfers where attempt_id='c0de5726-0000-4000-8000-000000000001'"))[0].diagnostics, report()); checks++;
+  } finally { await db.exec("rollback; reset role;"); }
+  assert.deepEqual(await snapshot(), before); checks++;
+  return checks;
+}
+module.exports = { checkJsonCaptureDiagnostics, checkFileDiagnostics, checkAttachmentDecodeDiagnostics };

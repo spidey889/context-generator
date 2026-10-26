@@ -113,6 +113,19 @@ test("relay preserves permanent payload failures and retries configuration/netwo
   assert.equal(throttled.code, 429); assert.equal(throttled.headers["retry-after"], "90");
 });
 
+test("relay requires the database writer's explicit acknowledgement and refuses redirects", async t => {
+  relayEnv(t);
+  const request = { method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: payload() };
+  for (const status of [200, 202, 204]) {
+    let options;
+    global.fetch = async (_url, input) => { options = input; return new Response(null, { status }); };
+    const res = response();
+    await relay(request, res);
+    assert.equal(options.redirect, "error");
+    assert.equal(res.code, status === 204 ? 204 : 503);
+  }
+});
+
 clockTest("relay times out both stalled headers and stalled error bodies before the worker deadline", async t => {
   relayEnv(t);
   for (const stalledBody of [false, true]) {

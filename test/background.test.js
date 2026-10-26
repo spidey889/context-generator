@@ -112,6 +112,7 @@ function loadBackgroundForTransferTest({
   windowUpdateImpl,
   sendMessageImpl,
   createTabImpl,
+  badgeImpl,
   firstCreatedTabId = 100,
   useRealTimers = false
 } = {}) {
@@ -146,7 +147,7 @@ function loadBackgroundForTransferTest({
     chrome: {
       action: {
         onClicked: { addListener: listener => { toolbarClickListener = listener; } },
-        setBadgeBackgroundColor: async () => {},
+        setBadgeBackgroundColor: async () => badgeImpl?.(),
         setBadgeText: async options => { operations.badges.push(options.text); }
       },
       alarms: {
@@ -214,8 +215,8 @@ function loadBackgroundForTransferTest({
     operations,
     message(message, sender) { let reply; messageListener(message, sender, value => { reply = value; }); return reply; },
     clickToolbar: toolbarClickListener,
-    cancel(tabId, sender = {}) {
-      return new Promise(resolve => messageListener({ type: "CANCEL_TRANSFER", transferId: "transfer-test" },
+    cancel(tabId, sender = {}, options = {}) {
+      return new Promise(resolve => messageListener({ type: "CANCEL_TRANSFER", transferId: "transfer-test", ...options },
         { id: "cap-context-test", frameId: 0, tab: { id: tabId }, ...sender }, resolve));
     },
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
@@ -227,7 +228,7 @@ function loadBackgroundForTransferTest({
         { tab: senderTab }, resolve
       ));
     },
-    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false, deadlineAt = null, senderTab = null, transferId = "transfer-test") {
+    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false, deadlineAt = null, senderTab = null, transferId = "transfer-test", localDirect = false) {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = messageListener(
           {
@@ -237,6 +238,7 @@ function loadBackgroundForTransferTest({
             preparedTabId,
             transferId,
             deferFinalActivation,
+            localDirect,
             deadlineAt
           },
           { tab: senderTab },
@@ -532,6 +534,103 @@ test("a final result buffered with preview headings skips optional near-end mess
   assert.equal(progressMessages.length, 0);
 });
 
+for (const format of ["stream", "json"]) test(`summary response retry: a broken ${format} body restarts once and discards the old result`, async () => {
+  const requests = [];
+  let cancelled = 0, released = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    requests.push(options.body);
+    if (requests.length > 1) {
+      if (format === "stream") assert.deepEqual([cancelled, released], [1, 1], "Release the failed reader before retrying.");
+      return new Response(JSON.stringify({ summary: "Fresh complete carry" }));
+    }
+    if (format === "json") return { ok: true, status: 200, json: async () => { throw new TypeError("network error"); } };
+    return { ok: true, status: 200, headers: new Headers({ "content-type": "application/x-ndjson" }), body: { getReader() {
+      let reads = 0;
+      return {
+        read: async () => {
+          if (reads++) throw new TypeError("network error");
+          return { done: false, value: new TextEncoder().encode('{"type":"result","data":{"summary":"Discard this interrupted result"}}\n') };
+        },
+        cancel: async () => { cancelled++; }, releaseLock: () => { released++; }
+      };
+    } } };
+  });
+  const result = await sendSummary("Retry the same complete model input.");
+  assert.equal(result.ok, true);
+  assert.equal(result.summary, "Fresh complete carry");
+  assert.equal(result.timing.attempt, 2);
+  assert.deepEqual(requests, [requests[0], requests[0]]);
+  assert.equal((await sendSummary("Retry the same complete model input.")).summary, result.summary);
+  assert.equal(requests.length, 2, "Cache only the accepted retry.");
+});
+
+test("summary response retry: two broken bodies return failure without a third request", async () => {
+  let fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    fetches++;
+    return { ok: true, status: 200, json: async () => { throw new TypeError("network error"); } };
+  });
+  assert.equal((await sendSummary("Both reads fail")).ok, false);
+  assert.equal(fetches, 2);
+});
+
+for (const kind of ["json", "utf8", "content", "http", "fetch"]) test(`summary response retry: ${kind} rejection is not retried`, async () => {
+  let fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    fetches++;
+    if (kind === "fetch") throw new TypeError("network error before response headers");
+    if (kind === "json") return new Response("invalid JSON");
+    if (kind === "content") return new Response('{"summary":42}');
+    if (kind === "http") return new Response('{"error":"Service unavailable"}', { status: 503 });
+    return new Response(new Uint8Array([255]), { headers: { "content-type": "application/x-ndjson" } });
+  });
+  assert.equal((await sendSummary("Reject without retry: " + kind)).ok, false);
+  assert.equal(fetches, 1);
+});
+
+test("summary response retry: the second request cannot renew the total deadline", async () => {
+  let now = Date.now(), fetches = 0;
+  class Clock extends Date { static now() { return now; } }
+  const sendSummary = loadBackgroundForSummaryTest(async () => ({ ok: true, status: 200, json: async () => {
+    if (++fetches === 1) { now += 1000; throw new TypeError("network error"); }
+    now += 319001;
+    return { summary: "Too late for the original budget" };
+  } }), { clock: Clock });
+  assert.equal((await sendSummary("Use one total time budget")).diagnostics.error_code, "summary_timeout");
+  assert.equal(fetches, 2);
+});
+
+test("summary response retry: source cancellation prevents a retry even when the body rejects with TypeError", async () => {
+  let rejectBody, fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    fetches++;
+    return { ok: true, status: 200, json: () => new Promise((_, reject) => { rejectBody = reject; }) };
+  }, { tabs: [{ id: 9 }] });
+  const pending = sendSummary("Cancel before retry", null, 9);
+  await new Promise(setImmediate);
+  await sendSummary.cancel(9);
+  rejectBody(new TypeError("network error"));
+  assert.equal((await pending).code, "user_cancelled");
+  await new Promise(setImmediate);
+  assert.equal(fetches, 1);
+});
+
+test("summary response retry: shared callers use one retry without duplicate requests", async () => {
+  let rejectBody, fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    if (++fetches === 1) return { ok: true, status: 200, json: () => new Promise((_, reject) => { rejectBody = reject; }) };
+    return new Response('{"summary":"Shared fresh carry"}');
+  }, { tabs: [{ id: 9 }, { id: 10 }] });
+  const first = sendSummary("Shared interrupted response", null, 9);
+  await new Promise(setImmediate);
+  const second = sendSummary("Shared interrupted response", null, 10);
+  await new Promise(setImmediate);
+  rejectBody(new TypeError("network error"));
+  assert.equal((await first).summary, "Shared fresh carry");
+  assert.equal((await second).summary, "Shared fresh carry");
+  assert.equal(fetches, 2);
+});
+
 test("truncated summary streams fail and source closure cancels an outstanding streamed body", async () => {
   const encoder = new TextEncoder();
   const truncated = loadBackgroundForSummaryTest(async () => new Response(`${JSON.stringify({ type: "delta", text: "Partial" })}\n`,
@@ -590,6 +689,48 @@ test("Escape cancels an active summary body and rejects late work for that attem
   assert.equal(signal.aborted, true);
   assert.equal((await sendSummary("cancel pending summary", null, 9)).code, "user_cancelled");
   assert.equal(fetches, 1, "A late request cannot restart generation.");
+});
+
+test("manual takeover waits for destination cancellation, keeps its tab and blocks late delivery", async () => {
+  let acknowledge;
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, useRealTimers: true, sendMessageImpl: (_tabId, message) =>
+    message.type === "CANCEL_TRANSFER" ? new Promise(resolve => { acknowledge = resolve; }) : { ok: true }
+  });
+  const prepared = await harness.prepare("chatgpt", sourceTab);
+  assert.equal((await harness.cancel(prepared.tabId, {}, { preserveDestination: true })).ok, false, "Only the source can request manual takeover.");
+  let settled = false;
+  const stopping = harness.cancel(9, {}, { preserveDestination: true }).then(value => { settled = true; return value; });
+  await new Promise(setImmediate);
+  assert.equal(settled, false, "Stopping is not confirmed before the destination revokes its guards.");
+  assert.deepEqual(harness.operations.removed, []);
+  assert.equal((await harness.sendTransfer("chatgpt", prepared.tabId, false, null, sourceTab)).code, "user_cancelled");
+  acknowledge({ ok: true });
+  assert.equal((await stopping).ok, true);
+  assert.ok(harness.operations.sent.every(({ tabId, message }) => message.type !== "CANCEL_TRANSFER" || tabId !== 9));
+  const next = await harness.prepare("chatgpt", sourceTab, null, "after-manual-copy");
+  assert.equal((await harness.sendTransfer("chatgpt", next.tabId, false, null, sourceTab, "after-manual-copy")).ok, true);
+});
+
+test("manual takeover after worker state loss latches cancellation without claiming destination acknowledgement", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab });
+  assert.equal((await harness.cancel(9, {}, { preserveDestination: true })).ok, false);
+  assert.equal((await harness.prepare("gemini", sourceTab)).code, "user_cancelled");
+  assert.deepEqual(harness.operations.removed, []);
+});
+
+for (const result of ["missing", "unknown", "rejected", "timeout"]) test(`manual takeover handles ${result} cancellation acknowledgement without closing tabs`, async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, useRealTimers: true, sendMessageImpl: (_tabId, message) => {
+    if (message.type !== "CANCEL_TRANSFER") return { ok: true };
+    if (result === "timeout") return new Promise(() => {});
+    if (result === "rejected") return { ok: false };
+    throw new Error(result === "missing" ? "Could not establish connection. Receiving end does not exist." : "Message port closed");
+  } });
+  await harness.prepare("chatgpt", sourceTab);
+  assert.equal((await harness.cancel(9, {}, { preserveDestination: true })).ok, result === "missing");
+  assert.deepEqual(harness.operations.removed, []);
 });
 
 for (const from of ["source", "destination"]) test(`Escape from the ${from} closes its created destination and revokes delivery`, async () => {
@@ -825,6 +966,26 @@ test("focused delivery switches once and never reactivates after verification", 
   }
 });
 
+test("local carries activate every destination before delivery, without waiting for an optional badge", async () => {
+  for (const [destination, url] of [["chatgpt", "https://chatgpt.com/"], ["claude", "https://claude.ai/"],
+    ["gemini", "https://gemini.google.com/app"], ["grok", "https://grok.com/"], ["deepseek", "https://chat.deepseek.com/"]]) {
+    const sourceTab = { id: 7, url: "https://chatgpt.com/c/source", windowId: 1, index: 0 };
+    const h = loadBackgroundForTransferTest({ sourceTab, preparedTab: { id: 41, url }, badgeImpl: () => new Promise(() => {}),
+      sendMessageImpl: async (_id, message) => {
+        if (message.type === "PASTE_CONTEXT") assert.equal(h.operations.updated.filter(x => x.options.active).length, 1);
+        return { ok: true };
+      } });
+    const result = await h.sendTransfer(destination, 41, false, null, sourceTab, "local-transfer", true);
+    assert.equal(result.ok, true);
+    assert.equal(h.operations.updated.filter(x => x.options.active).length, 1);
+    const closed = loadBackgroundForTransferTest({ sourceTab, preparedTab: { id: 41, url } });
+    closed.closeTab(7, false);
+    assert.equal((await closed.sendTransfer(destination, 41, false, null, sourceTab, "closed-local", true)).code, "user_cancelled");
+    assert.equal(closed.operations.updated.length, 0);
+    assert.equal(closed.operations.sent.filter(x => x.message.type === "PASTE_CONTEXT").length, 0);
+  }
+});
+
 clockTest("activation failure is reported and focused delivery never pastes hidden", async () => {
   const harness = loadBackgroundForTransferTest({
     preparedTab: { id: 41, url: "https://claude.ai/new", windowId: 1 }, updateError: true
@@ -898,6 +1059,22 @@ test("Claude recovery preserves the rejected prepared page and observes the acti
   assert.equal(harness.operations.created.length, 1);
   assert.deepEqual(harness.operations.gotten, [41]);
   assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
+});
+
+test("DeepSeek recovery keeps the prepared login clue separate from the replacement", async () => {
+  for (const fresh of [undefined, false]) {
+    const harness = loadBackgroundForTransferTest({
+      preparedTab: { id: 41, url: "https://chat.deepseek.com/a/sign_in?token=PRIVATE" },
+      sendMessageImpl: async (_tabId, message) => message.type === "PASTE_CONTEXT"
+        ? { ok: false, diagnostics: { version: 1, error_code: "editor_missing",
+          ...(fresh === undefined ? {} : { destination_auth_prompt: fresh }) } } : { ok: true }
+    });
+    const response = await harness.sendTransfer("deepseek", 41);
+    assert.equal(response.diagnostics.prepared_diagnostics.destination_auth_prompt, true);
+    assert.equal(response.diagnostics.destination_auth_prompt, fresh);
+    assert.equal(harness.operations.created.length, 1);
+    assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE|sign_in/);
+  }
 });
 
 test("Gemini recovery keeps a rejected tab's route observations out of the fresh destination", async () => {

@@ -302,6 +302,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   innerWidth = 1280,
   innerHeight = 720,
   runtimeSendMessage = async () => ({ ok: true }),
+  clipboardWrite = null,
   storageSet = null
 } = {}) {
   let hooks = null;
@@ -441,7 +442,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   const sandbox = {
     TextEncoder,
     AbortController,
-    navigator: { userAgent: "Chrome" },
+    navigator: { userAgent: "Chrome", ...(clipboardWrite ? { clipboard: { writeText: clipboardWrite } } : {}) },
     console: {
       ...console,
       debug: () => {},
@@ -925,6 +926,35 @@ test("handoff finish skips suspended frames in an already hidden source tab", { 
   assert.equal(hooks.animationFrameCallbacks.length, 0);
   assert.deepEqual(hooks.getOwnedLifecycleResourceCounts(), before);
   assert.deepEqual(Array.from(trace.marks, (mark) => mark.label), ["handoff finish start", "handoff finish done"]);
+});
+
+clockTest("local handoff uses a short final sweep and adds no hold after the bars finish", async () => {
+  const hooks = loadPlatformContent([], "chatgpt.com", { visibilityState: "hidden" });
+  hooks.document.visibilityState = "visible";
+  const durations = [];
+  const stage = new FakeElement();
+  stage.style.setProperty = (key, value) => {
+    if (key === "--context-generator-stage-progress-duration") durations.push(value);
+  };
+  hooks.document.querySelector = () => stage;
+  // Simulate a visible source with suspended frames: both paint waits are bounded.
+  const trace = hooks.createTransferTrace("chatgpt", "test");
+  const start = Date.now();
+  await hooks.completeLocalHandoff(trace, Promise.resolve({ tabId: 42 }));
+  assert.deepEqual(durations.filter(value => value !== "0ms"), ["100ms", "160ms"]);
+  assert.ok(Date.now() - start <= 550, "Two bounded paint cues and 260 ms of motion must not acquire another hold.");
+  assert.equal(trace.marks.at(-1).label, "local handoff done");
+});
+
+test("a hidden local handoff skips motion and cancelled preparation cannot finish its bars", async () => {
+  const hooks = loadPlatformContent([], "chatgpt.com", { visibilityState: "hidden" });
+  hooks.document.querySelector = () => null;
+  const trace = hooks.createTransferTrace("chatgpt", "test");
+  await hooks.completeLocalHandoff(trace, Promise.resolve());
+  assert.equal(hooks.animationFrameCallbacks.length, 0);
+  const cancelled = hooks.createTransferTrace("chatgpt", "test");
+  await assert.rejects(hooks.completeLocalHandoff(cancelled, Promise.resolve().then(() => { cancelled.cancelled = true; })), /cancelled/i);
+  assert.ok(!cancelled.marks.some(mark => mark.label === "local handoff done"));
 });
 
 test("new-chat routes never bypass empty detection, while saved JSON chats may be unrendered", () => {
@@ -2325,6 +2355,30 @@ test("direct and AI ranges use exact captured character boundaries on every plat
   }
 });
 
+test("separate large-file names survive direct, AI and recovery carries in Next step without changing other routes", async () => {
+  const greeting = 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
+  for (const mode of ["direct", "remote", "recovery"]) {
+    const hooks = loadPlatformContent([], "chat.deepseek.com", { runtimeSendMessage: async message => {
+      if (message.type !== "SUMMARIZE_WITH_BACKEND") return { ok: true };
+      assert.doesNotMatch(JSON.stringify(message), /original-file.txt|13099028/);
+      if (mode === "recovery") throw new Error("offline");
+      return { ok: true, summary: `Verified chat summary\n\nNext step:\n\n${greeting}` };
+    } });
+    const trace = hooks.createTransferTrace("chatgpt", "test");
+    trace.omittedFiles = [{ name: 'original-file.txt', bytes: 13099028 }, { name: 'quoted\n"name.txt', bytes: 5000000 }];
+    const text = mode === "direct" ? "User: continue this chat." : "x".repeat(10000);
+    const summary = await hooks.summarizeWithBackend(text, trace);
+    assert.match(summary, /Context loaded\. Let's pick up right where you left off\./);
+    assert.match(summary, /Then naturally ask the user to upload/);
+    assert.match(summary, /original-file.txt.*13.10 MB.*4.1 MB/);
+    assert.ok(summary.includes(JSON.stringify(trace.omittedFiles[1].name)));
+    assert.doesNotMatch(summary, /Reply only:/);
+    assert.ok(summary.lastIndexOf("original-file.txt") > summary.search(/Next step:|NEXT STEP/));
+    trace.destinationId = "claude";
+    assert.ok(!(await hooks.summarizeWithBackend(text, trace)).includes("original-file.txt"));
+  }
+});
+
 test("oversized summary JSON surfaces its size error without silently making a local carry", async () => {
   const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
     assert.equal(message.type, "SUMMARIZE_WITH_BACKEND");
@@ -2818,6 +2872,37 @@ clockTest("missing destination editor reports its wait, attempts and observed ab
   });
 });
 
+test("destination login clues observe visible controls without scanning conversation words", async () => {
+  for (const [label, kind, expected] of [
+    ["Log in", "button", true], ["Sign up", "button", true],
+    ["Sign in with Google", "button", true], ["Sign up", "hidden", false],
+    ["Log in", "message", false], ["Log in", "extension", false],
+    ["Explain how to log in", "button", false], ["Send", "button", false]
+  ]) {
+    const control = new FakeElement({ tag: "button", text: label,
+      ...(kind === "hidden" ? { rect: { width: 0, height: 0 } } : {}) });
+    if (kind === "message") new FakeElement({ attrs: { class: "ds-markdown" } }).appendChild(control);
+    if (kind === "extension") control.dataset.contextGeneratorOwned = "true";
+    const hooks = loadPlatformContent([control], "chat.deepseek.com", { pathname: "/blocked" });
+    await assert.rejects(hooks.pasteIntoPlatform("PRIVATE carry", "deepseek"), error => {
+      assert.equal(error.diagnostics.destination_auth_prompt, expected, `${kind}: ${label}`);
+      assert.doesNotMatch(JSON.stringify(error.diagnostics), /PRIVATE|Google|Sign up/);
+      return true;
+    });
+  }
+  for (const [host, id, pathname] of [["chat.deepseek.com", "deepseek", "/a/sign_in"],
+    ["claude.ai", "claude", "/login"], ["chatgpt.com", "chatgpt", "/auth/login"],
+    ["grok.com", "grok", "/sign-up"], ["gemini.google.com", "gemini", "/signup"]]) {
+    const hooks = loadPlatformContent([], host, { pathname });
+    hooks.window.location.href = `https://${host}${pathname}?token=PRIVATE`;
+    await assert.rejects(hooks.pasteIntoPlatform("PRIVATE carry", id), error => {
+      assert.equal(error.diagnostics.destination_auth_prompt, true);
+      assert.equal(error.diagnostics.error_code, "destination_not_new_chat");
+      return true;
+    });
+  }
+});
+
 test("Claude new-chat rejection records the route and platform checks without private URLs", async () => {
   for (const [hostname, pathname, page, platformMatches, routeAllowed] of [
     ["claude.ai", "/chat/PRIVATE", "claude.ai/chat/:id", true, false],
@@ -3002,6 +3087,95 @@ test("source cancellation releases its lock and prevents late summary or local-c
   assert.equal(telemetry.at(-1).status, "failed");
   assert.ok(telemetry.every(event => event.lastStage !== "summary_completed"));
   assert.ok(hooks.beginTransferAttempt("gemini", "next attempt"));
+  hooks.resetRunningFlag();
+});
+
+test("paste handoff bounds delivery to sixty seconds without extending an earlier deadline", () => {
+  const hooks = loadPlatformContent();
+  for (const remaining of [360000, 1500]) {
+    const trace = hooks.beginTransferAttempt("chatgpt", "test");
+    trace.deadlineAt = Date.now() + remaining;
+    const before = Date.now();
+    hooks.startPasteHandoff(trace, "Ready context");
+    assert.ok(trace.deadlineAt <= Date.now() + Math.min(60000, remaining));
+    assert.ok(trace.deadlineAt >= before + Math.min(60000, remaining));
+    hooks.resetRunningFlag();
+  }
+});
+
+test("handoff copy starts clipboard access on click, waits for revocation and ignores double clicks", async () => {
+  const copied = [], messages = [];
+  let acknowledge;
+  const hooks = loadPlatformContent([], "claude.ai", {
+    clipboardWrite: text => { copied.push(text); return Promise.resolve(); },
+    runtimeSendMessage: message => {
+      messages.push(message);
+      return message.type === "CANCEL_TRANSFER" ? new Promise(resolve => { acknowledge = resolve; }) : Promise.resolve({ ok: true });
+    }
+  });
+  hooks.document.createElement = () => new FakeElement();
+  const button = new FakeElement({ tag: "button" });
+  hooks.registerElementId("context-generator-handoff-copy", button);
+  const trace = hooks.beginTransferAttempt("grok", "test");
+  const carry = "  Complete prepared carry.\nKeep whitespace.  ";
+  hooks.startPasteHandoff(trace, carry);
+  const click = button.onclick;
+  const pending = click();
+  assert.deepEqual(copied, [carry], "Clipboard must start before yielding the click's user activation.");
+  await click();
+  assert.equal(trace.completed, false);
+  assert.equal(button.disabled, true);
+  assert.equal(messages.filter(message => message.type === "CANCEL_TRANSFER").length, 1);
+  assert.equal(messages.find(message => message.type === "CANCEL_TRANSFER").preserveDestination, true);
+  acknowledge({ ok: true });
+  await pending;
+  assert.equal(trace.completed, true);
+  assert.equal(button.style.display, "none");
+  assert.equal(button.onclick, null, "Hidden action must release its prepared carry closure.");
+  assert.ok(hooks.beginTransferAttempt("grok", "after copy"));
+  hooks.resetRunningFlag();
+});
+
+test("pending manual copy cannot show stale feedback after source navigation", async () => {
+  let acknowledge;
+  const hooks = loadPlatformContent([], "claude.ai", {
+    clipboardWrite: () => Promise.resolve(),
+    runtimeSendMessage: message => message.type === "CANCEL_TRANSFER" ? new Promise(resolve => { acknowledge = resolve; }) : Promise.resolve({ ok: true })
+  });
+  const button = new FakeElement({ tag: "button" });
+  hooks.registerElementId("context-generator-handoff-copy", button);
+  const trace = hooks.beginTransferAttempt("grok", "test");
+  hooks.startPasteHandoff(trace, "Carry from the original chat");
+  const pending = button.onclick();
+  hooks.navigate("/chat/different");
+  acknowledge({ ok: true });
+  await pending;
+  assert.equal(trace.completed, true);
+  assert.equal(hooks.document.documentElement.children.length, 0, "An old manual action cannot show feedback over a different chat.");
+  assert.ok(hooks.beginTransferAttempt("grok", "new chat"));
+  hooks.resetRunningFlag();
+});
+
+test("a late handoff-copy callback cannot dismiss or unlock a newer transfer", async () => {
+  let finishCopy, acknowledge;
+  const hooks = loadPlatformContent([], "claude.ai", {
+    clipboardWrite: () => new Promise(resolve => { finishCopy = resolve; }),
+    runtimeSendMessage: message => message.type === "CANCEL_TRANSFER" && message.preserveDestination
+      ? new Promise(resolve => { acknowledge = resolve; }) : Promise.resolve({ ok: true })
+  });
+  const button = new FakeElement({ tag: "button" });
+  hooks.registerElementId("context-generator-handoff-copy", button);
+  const old = hooks.beginTransferAttempt("grok", "test");
+  hooks.startPasteHandoff(old, "Old prepared carry");
+  const pending = button.onclick();
+  hooks.dispatchDocumentEvent("keydown", { key: "Escape", isTrusted: true, preventDefault() {}, stopImmediatePropagation() {} });
+  const next = hooks.beginTransferAttempt("chatgpt", "new attempt");
+  assert.ok(next);
+  finishCopy(); acknowledge({ ok: true });
+  await pending;
+  assert.equal(next.completed, false);
+  assert.equal(hooks.beginTransferAttempt("grok", "duplicate"), null, "The old callback cannot release the new attempt's lock.");
+  assert.equal(hooks.document.documentElement.children.length, 0, "No stale success cue or recovery dialog.");
   hooks.resetRunningFlag();
 });
 

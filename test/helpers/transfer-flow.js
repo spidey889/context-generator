@@ -37,6 +37,7 @@ function loadTransferFlow(overrides) {
     document: { getElementById: () => null },
     getConversationTurns: () => [],
     isSourceReplyInProgress: () => false,
+    isHandoffOverlayVisible: () => false,
     setTimeout: () => 1, setInterval: () => 1, clearTimeout() {}, clearInterval() {},
     notifyBackground: async () => ({ ok: true }), showDomCaptureEstimate() {},
     addOwnedEventListener: (target, type, listener) => target?.addEventListener?.(type, listener),

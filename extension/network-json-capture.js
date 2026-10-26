@@ -32,7 +32,7 @@
     const onAbort = () => finish(false);
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 28 : platform === "grok" ? 21 : 18)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 31 : platform === "grok" ? 21 : 18)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
@@ -40,7 +40,7 @@
     window.addEventListener("message", receive); ping();
     if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
   });
-  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false, signal, onEstimate) => {
+  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false, signal, onEstimate, omitLargeFiles = false) => {
     const hookStarted = Date.now();
     // Grok branch selection lives in the query string; pin it with the clicked chat.
     const expectedUrl = platform === "grok" ? new URL(expectedPath, location.origin) : null;
@@ -94,6 +94,9 @@
           if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason,
             reply.captureDetail || "network_error", reply.captureRequestStage || "history", reply.status));
           const capture = reply.capture;
+          if (capture?.omittedFiles !== undefined && (!omitLargeFiles || platform !== "deepseek" || !Array.isArray(capture.omittedFiles)
+            || capture.omittedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim()
+              || !Number.isSafeInteger(file.bytes) || file.bytes <= 4100000))) return reject(captureError("Invalid separate-file notice.", "incomplete"));
           if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 1000000 || new TextEncoder().encode(capture.text).length > 4000000) return reject(captureError("Fast capture returned an invalid or incomplete conversation.", "incomplete"));
           const name = { gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" }[platform];
           // MAIN owns the native adapter. Verify both views agree before accepting
@@ -106,7 +109,7 @@
         const timer = setTimeout(() => { cleanup(); reject(captureError("Fast capture timed out. Refresh this chat or turn off the lightning button.", "timeout", "timeout", "history")); }, 27000);
         signal?.addEventListener("abort", onAbort, { once: true });
         window.addEventListener("message", receive);
-        window.postMessage({ channel, platform, type: "request", id, ...before, ...(measureOnly ? { measureOnly: true } : {}) }, location.origin);
+        window.postMessage({ channel, platform, type: "request", id, ...before, ...(measureOnly ? { measureOnly: true } : {}), ...(omitLargeFiles ? { omitLargeFiles: true } : {}) }, location.origin);
         if (signal?.aborted) onAbort();
       });
     } finally {
@@ -122,10 +125,10 @@
   const readCapture = window.__capCaptureNetworkJson;
   window.__capMeasureNetworkJson = (expectedPath, signal, onEstimate) => readCapture(expectedPath,
     globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }), true, signal, onEstimate);
-  window.__capCaptureNetworkJson = async expectedPath => {
+  window.__capCaptureNetworkJson = async (expectedPath, omitLargeFiles = false) => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 });
     try {
-      const capture = await readCapture(expectedPath, metrics);
+      const capture = await readCapture(expectedPath, metrics, false, undefined, undefined, omitLargeFiles);
       metrics.set({ selected_turns: capture.messageTurnCount });
       if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });
       return { ...capture, jsonCapture: metrics.finish() };

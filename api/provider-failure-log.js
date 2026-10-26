@@ -11,6 +11,7 @@ function createProviderFailureLog({ attemptId, telemetry, fetchImpl = (...args) 
   const configured = url && key && secret && Buffer.byteLength(secret, "utf8") >= 32;
   const requestId = randomUUID(), pending = [];
   let configurationReported = false;
+  let capacityReported = false;
   const report = reason => warn("cap_context_provider_failure_log", { reason, request_id: requestId });
   async function deliver(event) {
     const controller = new AbortController();
@@ -33,8 +34,8 @@ function createProviderFailureLog({ attemptId, telemetry, fetchImpl = (...args) 
           // Status is sufficient. Never parse/log a database body, and never
           // let a stalled error-body cancellation delay summary delivery.
           try { response.body?.cancel?.()?.catch?.(() => {}); } catch {}
-          if (response.ok) return;
-          if (response.status !== 429 && response.status < 500) break;
+          if (response.status === 204) return;
+          if (!response.ok && response.status !== 429 && response.status < 500) break;
         } catch { if (controller.signal.aborted) break; }
         finally { clearTimeout(attemptTimer); }
       }
@@ -59,7 +60,10 @@ function createProviderFailureLog({ attemptId, telemetry, fetchImpl = (...args) 
         if (!configurationReported) { report("not_configured"); configurationReported = true; }
         return;
       }
-      if (pending.length >= 16) return;
+      if (pending.length >= 16) {
+        if (!capacityReported) { report("capacity_reached"); capacityReported = true; }
+        return;
+      }
       const event = validate({ ...observation, id: randomUUID(), request_id: requestId,
         environment: ["production", "preview", "development"].includes(process.env.VERCEL_ENV) ? process.env.VERCEL_ENV : "development",
         ...(attemptId ? { attempt_id: attemptId } : {}), occurred_at: new Date().toISOString() });

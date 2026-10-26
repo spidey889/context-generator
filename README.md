@@ -16,7 +16,7 @@ Cap Context prepares your conversation for another AI and places it in the new m
 
 Open the [Chrome Web Store page](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf), select **Add to Chrome**, and you are good to go. It works in Brave too.
 
-The checked-in extension source is version 1.4.24. Web Store publication of this version is tracked separately.
+The checked-in extension source is version 1.4.28. Web Store publication of this version is tracked separately.
 
 ### Load the local extension
 
@@ -26,7 +26,7 @@ The checked-in extension source is version 1.4.24. Web Store publication of this
 4. Select **Load unpacked**.
 5. Choose `extension/`, which contains `manifest.json`.
 
-That is the most technical this README gets.
+For Firefox, run `npm run package:firefox` and use the generated `dist/firefox/` folder. Brave and Chrome continue to use `extension/`.
 
 ## Move a conversation
 
