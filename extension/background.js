@@ -1144,6 +1144,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const owned = operation || getTransferOperation(message.transferId, sender.tab, message.deadlineAt);
     owned.deadlineAt = Math.max(owned.deadlineAt || 0, message.deadlineAt);
     owned.expiresAt = owned.deadlineAt;
+    // Keep the accepted allowance durable even if scrolling sends no further
+    // snapshot before browser sleep/restart. Reuse the storage queue without
+    // manufacturing a new telemetry event or delaying capture acknowledgement.
+    enqueueTelemetryWork(async () => {
+      await restoreActiveTransferTelemetry();
+      if (activeTransferSourceTabs.get(message.transferId) !== sender.tab.id
+          || activeTransferTelemetry.get(message.transferId)?.status !== "started") return;
+      await persistActiveTransferTelemetry(message.transferId);
+      const prepared = preparedSummaryTelemetry.get(message.transferId);
+      if (prepared) prepared.expiresAt = Math.max(prepared.expiresAt, owned.expiresAt);
+    }).catch(() => {});
     sendResponse({ ok: true }); return false;
   }
 

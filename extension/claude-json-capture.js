@@ -27,6 +27,8 @@
     // Report structural metadata only, never message text, file names, or tool payloads.
     const unsupported = (reason, detail = "incomplete_history") => captureError(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
+    const skippedFiles = new Map();
+    let pastedAttachmentIndex = 0;
     const assertComplete = (value, label) => {
       if (value == null) return;
       if (typeof value !== "object" || Array.isArray(value)) throw unsupported(`${label} completeness metadata is invalid.`);
@@ -79,6 +81,7 @@
       if (typeof parent !== "string" || !parent) throw unsupported("The active branch has an invalid parent/root marker.", "invalid_branch");
       id = parent;
     }
+    let hasText = false;
     const turns = branch.reverse().flatMap(message => {
       if (!["human", "assistant"].includes(message.sender)) return [];
       const fileMetadata = Array.isArray(message.attachments) && message.attachments.length ? message.attachments
@@ -128,10 +131,22 @@
       const pastedBodiesById = new Map();
       for (const attachment of attachments) {
         if (attachment?.file_type !== "txt" || attachment.file_name !== "") continue;
+        const index = ++pastedAttachmentIndex;
         if (measureOnly && (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && !attachment.extracted_content.length))) continue;
-        if (!measureOnly) assertComplete(attachment, "Pasted-text attachment");
-        if (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && attachment.extracted_content.length === 0)) throw unsupported("A pasted-text attachment is missing its complete extracted_content string.", "attachment_failed");
-        if (!measureOnly && attachment.file_size != null && (!Number.isSafeInteger(attachment.file_size) || attachment.file_size < 0 || new TextEncoder().encode(attachment.extracted_content).length !== attachment.file_size)) throw unsupported("A pasted-text attachment's extracted_content does not match its file_size; completeness cannot be verified.", "attachment_failed");
+        try {
+          if (!measureOnly) assertComplete(attachment, "Pasted-text attachment");
+          if (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && attachment.extracted_content.length === 0)) throw unsupported("Unreadable pasted text.", "attachment_failed");
+          if (!measureOnly && attachment.file_size != null && (!Number.isSafeInteger(attachment.file_size) || attachment.file_size < 0 || new TextEncoder().encode(attachment.extracted_content).length !== attachment.file_size)) throw unsupported("Incomplete pasted text.", "attachment_failed");
+        } catch {
+          // Pasted cards are optional file text, just like named uploads. Do not
+          // discard healthy own-turn text or other complete cards with this one.
+          excludedContentTypes.add("uploads");
+          if (!measureOnly) {
+            const name = `Unnamed pasted text attachment ${index}`;
+            skippedFiles.set(attachment.id || name, { name });
+          }
+          continue;
+        }
         const pastedText = attachment.extracted_content;
         // A repeated ID alone cannot prove a duplicate. Keep differing bodies;
         // only exact repeats of the same ID and original text share one card.
@@ -180,6 +195,7 @@
       }
       // File labels belong to the owning user turn, not diagnostics or file bodies.
       // Quote names so embedded newlines cannot masquerade as transcript roles.
+      if (parts.some(text => text.trim())) hasText = true;
       if (message.sender === "human") {
         for (const file of [...attachments, ...(Array.isArray(message.files) ? message.files : [])]) {
           if (typeof file?.file_name === "string" && file.file_name.trim()) parts.push(`Attachment: ${JSON.stringify(file.file_name)}`);
@@ -188,13 +204,14 @@
       if (!parts.length) return [];
       return [{ role: message.sender === "human" ? "user" : "assistant", text: parts.join("\n\n") }];
     });
-    if (!turns.length) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.", "incomplete");
+    if (!hasText) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.", "incomplete");
     const text = `Claude conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     metrics?.set({ selected_turns: turns.length });
     if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) {
       throw captureError("Conversation exceeds the supported 1,000,000 character / 4 MB limit.", "size_limit", "size_limit");
     }
-    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
+    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort(),
+      ...(skippedFiles.size ? { skippedFiles: [...skippedFiles.values()] } : {}) };
   }
 
   function waitForHook(timeoutMs, install = false, signal) {

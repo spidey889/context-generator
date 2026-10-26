@@ -43,6 +43,10 @@ test("attachment decoding clues survive both relays while private or arbitrary v
   const attempt = { mode: "fresh", outcome: "failed", failure_check: "invalid_utf8", failure_stage: "attachment_body",
     failure_decode_stage: "chunk", failure_file_extension: "csv", failure_response_charset: "missing", failure_body_hint: "unrecognized" };
   const report = changes => ({ version: 1, capture_detail: "invalid_utf8", json_attempts: [{ ...attempt, ...changes }] });
+  // A file-local failure can coexist with a successful chat capture.
+  const recovered = payload({ diagnostics: { version: 1, json_attempts: [{ ...attempt, outcome: "succeeded" }] } });
+  assert.ok(validateTelemetryPayload(recovered));
+  assert.ok(edge.validateTelemetryPayload(recovered));
   for (const key of ["failure_file_extension", "failure_response_charset", "failure_body_hint", "failure_decode_stage"]) {
     for (const value of [...diagnostics.jsonAttemptSchema[key].values, "PRIVATE_FILE.csv", "https://PRIVATE", null]) {
       const data = payload({ diagnostics: report({ [key]: value }) });

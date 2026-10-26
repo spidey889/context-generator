@@ -2,7 +2,7 @@
   const channel = "cap-context-chatgpt-json-v2";
   const debug = (event, fields = {}) => {
     try {
-      const data = { build: 25, ...fields };
+      const data = { build: 26, ...fields };
       console.info?.(`[CapCapture] ${JSON.stringify({ world: "bridge", event, ...data })}`);
       window.postMessage({ channel, type: "debug", world: "bridge", event, fields: data }, location.origin);
     } catch { /* Timing is local and cannot change capture. */ }
@@ -29,6 +29,8 @@
   function serialize(data, chat, pastedTexts = {}, sourceTreeCounts, metrics, measureOnly = false) {
     const blocked = (reason, detail = "incomplete_history") => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
+    const skippedFiles = new Map();
+    let pastedAttachmentIndex = 0;
     let captureWarning;
     if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
     const assertComplete = (scope, label) => {
@@ -135,11 +137,13 @@
       if (typeof message.content.text !== "string") throw blocked("A Python result is missing its complete text string.", "text_invalid");
       return message.content.text.trim() ? message.content.text : null;
     };
+    let hasText = false;
     const turns = branch.reverse().flatMap((message, index) => {
       const role = message.author?.role;
       if (role === "tool") {
         const output = message.metadata?.is_visually_hidden_from_conversation ? null : pythonResult(message, branch[index - 1]);
         if (output === null) { excludedContentTypes.add("tools"); return []; }
+        hasText = true;
         return [{ role: "assistant", text: `Python result:\n\n${output}` }];
       }
       if (!["user", "assistant"].includes(role) || message.metadata?.is_visually_hidden_from_conversation) return [];
@@ -147,6 +151,7 @@
       if (message.recipient && message.recipient !== "all") {
         const parts = role === "assistant" ? canvasParts(message, branch[index + 1]) : [];
         if (!parts.length) excludedContentTypes.add("tools");
+        else hasText = true;
         return parts.length ? [{ role: "assistant", text: parts.join("\n\n") }] : [];
       }
       const attachmentLabels = role === "user" && Array.isArray(message.metadata?.attachments)
@@ -210,12 +215,21 @@
         const pastedIds = new Set();
         for (const file of Array.isArray(message.metadata?.attachments) ? message.metadata.attachments : []) {
           if (!isPlainTextPaste(file)) continue;
-          if (!measureOnly) assertComplete(file, "Pasted text attachment");
+          const index = ++pastedAttachmentIndex;
+          const skipFile = () => {
+            const name = typeof file.name === "string" && file.name.trim() ? file.name : `Unnamed pasted text attachment ${index}`;
+            if (!measureOnly && !/\.pdf$/i.test(name.trim())) skippedFiles.set(file.id || name, { name });
+          };
+          if (!measureOnly) {
+            try { assertComplete(file, "Pasted text attachment"); }
+            catch { excludedContentTypes.add("uploads"); skipFile(); continue; }
+          }
           const pasted = Object.hasOwn(pastedTexts, file.id) ? pastedTexts[file.id] : null;
           if (measureOnly && typeof pasted !== "string") continue;
           if (typeof pasted !== "string" || !Number.isSafeInteger(file.size) || new TextEncoder().encode(pasted).length !== file.size) {
-            if (measureOnly) continue;
-            throw blocked("A pasted text attachment is missing or incomplete.", "attachment_failed");
+            excludedContentTypes.add("uploads");
+            skipFile();
+            continue;
           }
           if (!pasted.trim() || pastedIds.has(file.id)) continue;
           pastedIds.add(file.id);
@@ -251,10 +265,11 @@
         }
       }
       // Only explicit upload names; never serialize signed pointers or nested metadata.
+      if (parts.some(text => text.trim())) hasText = true;
       parts.push(...attachmentLabels);
       return parts.length ? [{ role, text: parts.join("\n\n") }] : [];
     });
-    if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.", "missing_text");
+    if (!hasText) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.", "missing_text");
     // Reasoning, canvas and Python result blocks belong to one assistant reply.
     // Keep every payload block intact; only the reported message count groups them.
     const messageTurnCount = turns.reduce((count, turn, index) => count +
@@ -263,7 +278,7 @@
     metrics?.set({ selected_turns: messageTurnCount });
     if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) throw captureError("This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat.", "size_limit");
     return { text, messages: turns, messageTurnCount, excludedContentTypes: [...excludedContentTypes].sort(),
-      ...(captureWarning ? { captureWarning } : {}) };
+      ...(captureWarning ? { captureWarning } : {}), ...(skippedFiles.size ? { skippedFiles: [...skippedFiles.values()] } : {}) };
   }
 
   function waitForHook(timeoutMs, install = false, signal) {
@@ -289,7 +304,7 @@
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
           && reply.type === "pong" && reply.id === id) {
           debug("hook_reply", { observed_version: Number.isSafeInteger(reply.version) ? reply.version : 0 });
-          if (reply.version === 25) finish(true);
+          if (reply.version === 26) finish(true);
         }
       };
       const ping = () => {
@@ -338,7 +353,7 @@
         }
       }
       if (signal?.aborted) throw cancelledError();
-      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 25 });
+      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 26 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
