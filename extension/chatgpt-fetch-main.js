@@ -1,5 +1,5 @@
 (() => {
-  const version = 21;
+  const version = 22;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -89,7 +89,7 @@
     const discardResponse = response => response.body?.cancel().catch(() => {});
     // Bound the entire owned read, not each request: session refreshes and
     // repeated descriptors share the allowance with history and original files.
-    let bytesRead = 0;
+    let bytesRead = 0, readLimitExceeded = false;
     const readJson = async (response, responseLimit = 6000000) => {
       let reader, bodyReadFailed = false;
       const stage = reply.captureRequestStage || "history";
@@ -97,7 +97,7 @@
       const observation = metrics.response(stage, remaining, response.headers.get("content-length"), false);
       try {
         if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
-        if (Number(response.headers.get("content-length")) > remaining) { metrics.fail("raw_header_limit", stage, "content_length", Number(response.headers.get("content-length")), remaining, response.status); throw new Error("partial"); }
+        if (Number(response.headers.get("content-length")) > remaining) { readLimitExceeded = true; metrics.fail("raw_header_limit", stage, "content_length", Number(response.headers.get("content-length")), remaining, response.status); throw new Error("partial"); }
         reader = response.body?.getReader();
         const decoder = new TextDecoder("utf-8", { fatal: true });
         const parts = [];
@@ -115,7 +115,7 @@
           bytesRead += value.byteLength;
           responseBytes += value.byteLength;
           observation.chunk(value.byteLength);
-          if (responseBytes > remaining) { metrics.fail("raw_response_stream_limit", stage, "reader_bytes", responseBytes, remaining, response.status); throw new Error("partial"); }
+          if (responseBytes > remaining) { readLimitExceeded = true; metrics.fail("raw_response_stream_limit", stage, "reader_bytes", responseBytes, remaining, response.status); throw new Error("partial"); }
           let part;
           try { part = decoder.decode(value, { stream: true }); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
           if (part) parts.push(part);
@@ -161,9 +161,11 @@
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
           if (done) break;
           observation.chunk(value.byteLength);
-          if (size + value.byteLength > expectedSize) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", size + value.byteLength, expectedSize); throw new Error("paste"); }
+          // Rejected chunks still consume the shared read budget. Skipping a
+          // bad file must not reset that allowance for the following files.
           bytesRead += value.byteLength;
-          if (bytesRead > maxCaptureBytes) { metrics.fail("raw_total_stream_limit", "attachment_body", "reader_bytes", bytesRead, maxCaptureBytes); throw new Error("paste"); }
+          if (bytesRead > maxCaptureBytes) { readLimitExceeded = true; metrics.fail("raw_total_stream_limit", "attachment_body", "reader_bytes", bytesRead, maxCaptureBytes); throw new Error("paste"); }
+          if (size + value.byteLength > expectedSize) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", size + value.byteLength, expectedSize); throw new Error("paste"); }
           bytes.set(value, size); size += value.byteLength;
         }
         if (size !== expectedSize) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", size, expectedSize); throw new Error("paste"); }
@@ -297,7 +299,7 @@
             }
             pastedBytes = nextPastedBytes;
             uploads.set(file.id, file);
-          } catch (error) { if (request.measureOnly !== true) throw error; }
+          } catch (error) { if (request.measureOnly !== true && error.message === "size") throw error; }
         }
       }
       // Validate the complete qualifying manifest before remote file work.
@@ -323,14 +325,15 @@
             || download.searchParams.get("id") !== file.id) throw new Error("paste");
           // Descriptor/session reads also consume the budget. Recheck before
           // starting a signed download whose declared body cannot fit.
-          if (file.size > maxCaptureBytes - bytesRead) { metrics.fail("raw_remaining_files_limit", "attachment_body", "declared_files", file.size, maxCaptureBytes - bytesRead); throw new Error("paste"); }
+          if (file.size > maxCaptureBytes - bytesRead) { readLimitExceeded = true; metrics.fail("raw_remaining_files_limit", "attachment_body", "declared_files", file.size, maxCaptureBytes - bytesRead); throw new Error("paste"); }
           reply.captureRequestStage = "attachment_body";
           const textResponse = await fetchJson(download.href, { redirect: "error" });
           reply.status = textResponse.status;
           pastedTexts[file.id] = await readPaste(textResponse, file.size);
         } catch (error) {
-          if (request.measureOnly === true && !controller.signal.aborted && currentChat() === chat) continue;
-          // Preserve readJson's transport marker; file validation stays closed.
+          // File-local failure excludes the entire body, never a decoded prefix.
+          // Capture-wide identity, cancellation and read limits remain terminal.
+          if (!readLimitExceeded && !controller.signal.aborted && !navigated && currentChat() === chat && error.message !== "auth") continue;
           throw new Error(error?.message === "network" ? "network" : "paste");
         }
       }

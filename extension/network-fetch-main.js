@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 30 : platform === "grok" ? 21 : 18, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 31 : platform === "grok" ? 22 : 19, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the final transcript has its own limits.
@@ -241,13 +241,13 @@
           size += value.byteLength;
           bytesRead += value.byteLength;
           observation.chunk(value.byteLength);
-          if (type === "file" && size > expectedSize) {
-            failRead("attachment_length_mismatch", null, "reader_bytes", size, expectedSize);
-            throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
-          }
           if (bytesRead > maxCaptureBytes) {
             failRead("raw_total_stream_limit", null, "reader_bytes", bytesRead, maxCaptureBytes);
             throw new api.CaptureError("size");
+          }
+          if (type === "file" && size > expectedSize) {
+            failRead("attachment_length_mismatch", null, "reader_bytes", size, expectedSize);
+            throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
           }
           phase = "decode";
           const part = metrics.timed("parse_ms", () => { try { return decoder.decode(value, { stream: true }); } catch (error) { failRead("invalid_utf8", error); throw error; } });
@@ -395,7 +395,11 @@
                 { captureRequestStage: "attachment_descriptor" }); }
               uploadBytes = nextUploadBytes;
               uploads.set(file.id, { file, url });
-            } catch (error) { if (!measureOnly) throw error; }
+            } catch (error) {
+              if (!measureOnly && error.captureFailureReason === "size_limit") throw error;
+              // A bad descriptor excludes this file, never the verified history.
+              check();
+            }
           }
         }
         // Independent original-file reads overlap; serialization still follows
@@ -416,14 +420,19 @@
                   measureDeepseek();
                   if (reply.characterCount > 1000000) { controller.abort("size_limit"); return; }
                 }
-              } catch (error) { if (!measureOnly) throw error; check(); }
+              } catch (error) {
+                if (!measureOnly && error.captureFailureReason === "size_limit") throw error;
+                // read() has cancelled/released this body's reader. Continue
+                // healthy siblings and queued files; do not accept partial bytes.
+                check();
+              }
             }
           } catch (error) {
             if (!failure) { failure = error; if (!measureOnly) controller.abort("attachment_failed"); }
           }
         };
-        // Wait for aborted siblings to settle before releasing active capture,
-        // so fallback/retry cannot overlap stale downloads or accept partial text.
+        // Global cancellation/size failures still settle every owned read before
+        // releasing capture. File-local failures leave healthy siblings running.
         await Promise.all(Array.from({ length: Math.min(4, pending.length) }, download));
         if (failure && !measureOnly) throw failure;
         if (measureOnly) {

@@ -52,10 +52,11 @@ const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
 const DEEPSEEK_SESSION_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_DEEPSEEK_SESSION_SMOKE === "1";
 const RATE_LIMIT_RETRY_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_RATE_LIMIT_RETRY_SMOKE === "1";
 const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
+const DEEPSEEK_BAD_FILE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "invalid-utf8";
 const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "oversize";
 const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "transcript-oversize";
 const DEEPSEEK_DOM_SIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "dom-size-check";
-const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
+const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 const DOM_ESTIMATE_SMOKE = process.env.CAP_CONTEXT_DOM_ESTIMATE_SMOKE === "1";
 if (DOM_ESTIMATE_SMOKE) assert.equal(JSON_SOURCE, "deepseek", "DOM estimate smoke uses native DeepSeek count recovery.");
@@ -86,7 +87,7 @@ const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEX
 const SIZE_CAPTURE_SMOKE = Boolean(CLAUDE_OVERSIZE_SMOKE || DEEPSEEK_OVERSIZE_SMOKE || DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE
   || CHATGPT_DECLARED_PASTE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE);
 const JSON_FALLBACK_SMOKE = Boolean(DOM_ESTIMATE_SMOKE || (CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE) && !SIZE_CAPTURE_SMOKE);
-const EXPECTED_JSON_FALLBACK_REASON = GROK_FILE_ONLY_SMOKE ? "unsupported" : "incomplete";
+const EXPECTED_JSON_FALLBACK_REASON = "incomplete";
 const EXPECTED_JSON_FALLBACK_NOTICE = "Fast capture failed. Using normal capture instead.";
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
 // Explicit opt-in uses the installed worker's real production endpoint. Mirror
@@ -632,6 +633,7 @@ function expectedChatGptConversation() {
     `User: ${i === 0 ? CHATGPT_USER_PASTE : `User history ${i}`}`,
     `Assistant: ${i === 59 ? ASSISTANT_SENTINEL : `Assistant history ${i}`}`
   ]).flat();
+  if (CHATGPT_PASTE_OVERSIZE_SMOKE) turns.shift();
   turns.push(`Assistant: Python result:\n\n${CHATGPT_PYTHON_RESULT}`, "Assistant: OWN_RECAP_SENTINEL", "Assistant: OWN_THOUGHT_SENTINEL", `Assistant: Canvas: Smoke document\n\n${CHATGPT_CANVAS_TEXT}`, "Assistant: Canvas edit:\n\nOWN_CANVAS_EDIT_SENTINEL", "User: OWN_VOICE_USER_SENTINEL", "Assistant: OWN_VOICE_ASSISTANT_SENTINEL", `Assistant: ${CHATGPT_EXACT_CODE}`);
   return `ChatGPT conversation:\n\n${turns.join("\n\n")}`;
 }
@@ -672,6 +674,9 @@ function chatGptTreeFixture() {
 
 function networkSmokeFixture(platform) {
   const fixture = networkFixtures(platform);
+  if (GROK_FILE_ONLY_SMOKE && platform === "grok") {
+    fixture.expected = fixture.expected.replace(`User: ${fixture.responses[0].message}\n\n`, "");
+  }
   if (platform === "deepseek" && process.env.CAP_CONTEXT_REPLY_SNAPSHOT_SMOKE === "1") {
     Object.assign(fixture.data.data.biz_data.chat_messages.at(-1), {
       status: "WIP", has_pending_fragment: true, auto_continue: true, incomplete_message: "Still generating"
@@ -703,12 +708,17 @@ function networkSmokeFixture(platform) {
     const text = `\uFEFF  original upload ${i}: café 🕷️\r\n`;
     const file = { ...fixture.file, id: `file-concurrent-${i}`, file_name: `original-${i}.py`, file_size: Buffer.byteLength(text), signed_path: `/file?file_id=concurrent-${i}&sig=SIGNED_SENTINEL` };
     fixture.files[file.id] = text;
+    if (DEEPSEEK_BAD_FILE_SMOKE && i === 1) {
+      fixture.files[file.id] = Buffer.from([0xff]);
+      file.file_size = 1;
+    }
     if (DEEPSEEK_DOM_SIZE_SMOKE && i === 1) {
       fixture.files[file.id] = "x".repeat(1000001);
       file.file_size = 1000001;
     }
     fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push(file);
-    extraBodies.push(`Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: ${JSON.stringify(file.file_name)}`);
+    extraBodies.push(`Attachment: ${JSON.stringify(file.file_name)}` + (DEEPSEEK_BAD_FILE_SMOKE && i === 1 ? ""
+      : `\n\nFile contents (${file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: ${JSON.stringify(file.file_name)}`));
   }
   fixture.expected = fixture.expected.replace('\n\nAttachment: "ignored.png"', `\n\n${extraBodies.join("\n\n")}\n\nAttachment: "ignored.png"`);
   return fixture;
@@ -853,7 +863,7 @@ async function startFixtureServer() {
           streamOversizedFixtureResponse(response, JSON.stringify(data), state.oversizeHistory, 40);
           return;
         }
-        if (DOM_ESTIMATE_SMOKE) data.data.biz_data.is_partial = true;
+        if (DOM_ESTIMATE_SMOKE || DEEPSEEK_DOM_SIZE_SMOKE && state.jsonRequests <= 2) data.data.biz_data.is_partial = true;
         if (NETWORK_FAILURE) { data.data.biz_data.cache_control = "MERGE"; data.data.biz_data.chat_messages = []; }
         response.end(JSON.stringify(data));
       }
@@ -3043,7 +3053,7 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       await waitFor(() => sourceSession.evaluate(`Boolean(document.getElementById("context-generator-dom-capture-estimate")?.textContent)`), "the safe fast-capture fallback notice");
     }
-    if (SIZE_CAPTURE_SMOKE || (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && CHATGPT_FAILURE_SMOKE !== "streaming")) {
+    if (SIZE_CAPTURE_SMOKE || (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && !["streaming", "paste-oversize"].includes(CHATGPT_FAILURE_SMOKE))) {
       await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the JSON capture error");
       const failedCapture = await sourceSession.evaluate(`(() => {
         const list = document.getElementById("cap-smoke-chat-history");
@@ -3086,19 +3096,6 @@ async function run() {
         const terminal = state.telemetryRequests.find(payload => payload.status === "failed");
         assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "supported_files_limit");
       }
-      if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
-        // This body contradicts its small declared size. It must hit the
-        // attachment-length guard, not masquerade as a conversation-size limit.
-        const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the rejected paste length telemetry");
-        assert.equal(terminal.failure_reason, "capture_failed");
-        assert.equal(terminal.last_stage, "capture_started");
-        assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "attachment_length_mismatch");
-        await waitFor(() => state.oversizePaste.cancelled, "oversized paste reader cancellation");
-        assert.ok(state.oversizePaste.bytes < 20000000, "The full oversized paste tail must not be downloaded.");
-        assert.equal(state.pasteDescriptorRequests, CHATGPT_PASTE_AUTH_SMOKE ? 2 : 1);
-        assert.equal(state.pasteContentRequests, 1, "A rejected paste must not be downloaded again.");
-        process.stdout.write(`✓ Brave cancelled oversized paste after ${state.oversizePaste.bytes} fixture bytes.\n`);
-      }
       if (CHATGPT_HISTORY_OVERSIZE_SMOKE) {
         await waitFor(() => state.oversizeHistory.cancelled, "oversized history reader cancellation");
         assert.ok(state.oversizeHistory.bytes < 40000000, "The full oversized history tail must not be downloaded.");
@@ -3134,7 +3131,8 @@ async function run() {
       assert.equal(await sourceSession.evaluate("window.__geminiMenuClicks"), 0, "JSON capture and DOM fallback must never open Gemini response menus.");
       process.stdout.write("✓ Gemini capture leaves native response menus untouched.\n");
     }
-    assert.match(capturedConversation, new RegExp(SOURCE_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    if (!CHATGPT_PASTE_OVERSIZE_SMOKE && !GROK_FILE_ONLY_SMOKE)
+      assert.ok(capturedConversation.includes(SOURCE_SENTINEL));
     assert.match(capturedConversation, new RegExp(ASSISTANT_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     if (JSON_FALLBACK_SMOKE) {
       assert.doesNotMatch(capturedConversation, /JSON_ONLY_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL|SIGNED_SENTINEL/);
@@ -3143,10 +3141,10 @@ async function run() {
     } else if (JSON_CAPTURE_SMOKE) {
       assert.equal(summaryInput.conversation, undefined, "JSON capture sends one structured history, without a duplicate transcript.");
       assert.ok(summaryInput.messages.length >= 2);
-      assert.equal(summaryInput.messages[0].role, "user");
+      assert.equal(summaryInput.messages[0].role, GROK_FILE_ONLY_SMOKE || CHATGPT_PASTE_OVERSIZE_SMOKE ? "assistant" : "user");
       assert.equal(summaryInput.messages.at(-1).role, "assistant");
       assert.match(capturedConversation, new RegExp(`^${({claude:"Claude",chatgpt:"ChatGPT",gemini:"Gemini",grok:"Grok",deepseek:"DeepSeek"})[JSON_SOURCE]} conversation:`));
-      assert.match(capturedConversation, /JSON_ONLY_SENTINEL/);
+      if (!GROK_FILE_ONLY_SMOKE && !CHATGPT_PASTE_OVERSIZE_SMOKE) assert.match(capturedConversation, /JSON_ONLY_SENTINEL/);
       if (JSON_SOURCE === "claude") {
         assert.deepEqual(Object.fromEntries(new URL(state.claudeRequestUrls.at(-1)).searchParams), { tree: "True", rendering_mode: "messages", render_all_tools: "true", include_inline_comparison: "true", consistency: "strong" });
         assert.ok(capturedConversation.includes(CLAUDE_PASTED_TEXT), "The complete pasted attachment must reach the backend.");
@@ -3162,7 +3160,11 @@ async function run() {
           assert.equal(capturedConversation.length, LARGE_CHAT_SMOKE_CHARS);
           process.stdout.write(`✓ Exact ${LARGE_CHAT_SMOKE_CHARS.toLocaleString("en-US")}-character Unicode transcript reached the backend in one request.\n`);
         }
-        assert.ok(capturedConversation.includes(CHATGPT_PASTED_TEXT), "Full pasted text must remain in its owning user turn.");
+        if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
+          assert.ok(!capturedConversation.includes(CHATGPT_PASTED_TEXT), "No prefix of the rejected attachment may enter capture.");
+          await waitFor(() => state.oversizePaste.cancelled, "oversized paste reader cancellation");
+          assert.ok(state.oversizePaste.bytes < 20000000, "Cancel the oversized tail while keeping healthy history.");
+        } else assert.ok(capturedConversation.includes(CHATGPT_PASTED_TEXT), "Full pasted text must remain in its owning user turn.");
         assert.match(capturedConversation, /Assistant history 0/);
         assert.match(capturedConversation, /User history 59/);
         assert.match(capturedConversation, /OWN_RECAP_SENTINEL/);
