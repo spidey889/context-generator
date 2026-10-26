@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-26
 
+- **Retire the old backend audit.** Remove `BACKEND_AUDIT.md` and its fake-report risk note from `LOGIC.md` at the owner's request. This is documentation cleanup; reporting and counter behavior are unchanged.
+
 - **Diagnose DeepSeek attachment decoding without collecting private file data.** Preserve `invalid_utf8` at the outer capture boundary and add fixed extension, declared-charset, BOM/format-hint and chunk/final-flush labels only for attachment decoding failures. Reuse existing file-size/index/read/status metadata and retain both failed JSON reads through later fallback. Never log names, IDs, raw headers, prefixes or file/chat contents. Keep the prior retry/fallback behavior, strict decoding and all limits; advance DeepSeek hook readiness to v31. Extend existing JSONB validators with an additive migration, without tables or columns. Verify malformed/truncated/split byte streams, privacy rejection across both relays, unchanged retry/DOM recovery and real local SQL persistence. Full merge CI caught an accidental page-global dependency in the shared retry check; keep that check based on error metadata so isolated ChatGPT/Claude readers remain compatible. Source change on `logging`; backend rollout and extension distribution remain separate.
 
 - **Bump source version to 1.4.28.** Update the authoritative manifest and current-version documentation by owner request. Web Store publication remains a separate release step.
