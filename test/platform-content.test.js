@@ -2371,6 +2371,9 @@ test("separate large-file names survive direct, AI and recovery carries in Next 
     assert.match(summary, /Context loaded\. Let's pick up right where you left off\./);
     assert.match(summary, /Then naturally ask the user to upload/);
     assert.match(summary, /original-file.txt.*13.10 MB.*4.1 MB/);
+    assert.match(summary, /file sizes and reasons below are internal context only; do not mention them to the user/);
+    assert.match(summary, /without technical explanations, troubleshooting, or requests for raw bytes, hex, or alternative formats/);
+    assert.match(summary, /Use your own wording to fit the conversation/);
     assert.ok(summary.includes(JSON.stringify(trace.omittedFiles[1].name)));
     assert.doesNotMatch(summary, /Reply only:/);
     assert.ok(summary.lastIndexOf("original-file.txt") > summary.search(/Next step:|NEXT STEP/));
@@ -2401,6 +2404,9 @@ test("unreadable-file upload requests survive direct, AI and recovery carries; P
     const summary = await hooks.summarizeWithBackend(mode === "direct" ? "User: continue this chat." : "x".repeat(10000), trace);
     assert.match(summary, /Then naturally ask the user to upload/);
     assert.match(summary, /"broken-source.py" \(could not be read as complete text; its contents were skipped\)/);
+    assert.match(summary, /upload the files below again, and wait/);
+    assert.match(summary, /file sizes and reasons below are internal context only; do not mention them to the user/);
+    assert.match(summary, /without technical explanations, troubleshooting, or requests for raw bytes, hex, or alternative formats/);
     assert.ok(summary.includes(JSON.stringify(trace.skippedFiles[1].name)));
     assert.ok(summary.lastIndexOf("broken-source.py") > summary.search(/Next step:|NEXT STEP/));
     assert.doesNotMatch(summary, /Guide.PDF|Reply only:/);

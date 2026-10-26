@@ -123,7 +123,12 @@ destination, listing each name with `could not be read as complete text; its
 contents were skipped`. Keep the existing large-file note restricted to
 DeepSeek -> ChatGPT and combine both kinds into one request when needed. Quote
 names as data. The request is an instruction to the receiving AI, not proof it
-will comply. Source readiness is DeepSeek v32 and content script v182.
+will comply. File reasons and sizes remain visible to the receiving AI as internal
+context only. Its response must simply request the files again, using its own
+wording to fit the conversation, without explaining those reasons, discussing
+technical details, troubleshooting or asking for raw bytes/hex/alternative formats.
+This rule covers both unreadable and oversized files. Source readiness is DeepSeek
+v32 and content script v183.
 
 `CAP_CONTEXT_UNREADABLE_FILE_NOTE_SMOKE=1 node scripts/run-big-file-note-smoke.js`
 verifies the final note after a fixture summarizer drops it; combine with
