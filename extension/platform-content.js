@@ -7959,6 +7959,10 @@
     // Attachment readers can classify a temporary HTTP failure as incomplete;
     // only its explicit retryable status overrides that broad category.
     if (Number.isInteger(status) && status >= 400) return [408, 429, 500, 502, 503, 504, 529].includes(status);
+    // Attachment decoding previously arrived as network_error. Keep its
+    // existing single retry and DOM fallback; this change only improves logs.
+    if (detail === "invalid_utf8"
+      && error.diagnostics.capture_request_stage === "attachment_body") return error.captureFailureReason !== "incomplete";
     return error.captureFailureReason !== "incomplete" && (error.captureFailureReason === "timeout"
       || ["network_error", "busy", "hook_unavailable", "auth_missing", "routing_unavailable"].includes(detail));
   }

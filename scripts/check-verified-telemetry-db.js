@@ -430,12 +430,16 @@ async function main() {
         const pattern = /rules constant jsonb := '([^']+)'::jsonb/;
         equal(updated.replace(pattern, "RULES"), original.replace(pattern, "RULES"));
         equal(JSON.parse(updated.match(pattern)[1]), { ...JSON.parse(original.match(pattern)[1]), destination_auth_prompt: { type: "boolean" } });
-        equal(JSON.parse(updated.match(pattern)[1]), require("../extension/transfer-diagnostics.js").schema);
+        const historicalSchema = structuredClone(require("../extension/transfer-diagnostics.js").schema);
+        historicalSchema.capture_detail.values = historicalSchema.capture_detail.values.filter(value => value !== "invalid_utf8");
+        equal(JSON.parse(updated.match(pattern)[1]), historicalSchema);
         checks += await require("./check-diagnostics-samples.js").checkDiagnosticsSamples(db,
           [true, false, "https://PRIVATE/login", 1, null].map(value => ({ label: `auth clue ${JSON.stringify(value)}`,
             value: sample(value), expected: typeof value === "boolean" })));
       } else if (name.endsWith("_raise_million_character_limits.sql")) {
         checks += await require("./check-million-character-limits-db.js").checkMillionCharacterLimits(db, sql);
+      } else if (name.endsWith("_attachment_decode_diagnostics.sql")) {
+        checks += await require("./check-json-capture-diagnostics-db.js").checkAttachmentDecodeDiagnostics(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

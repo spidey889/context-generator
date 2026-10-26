@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 33 : platform === "grok" ? 22 : 19, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the final transcript has its own limits.
@@ -176,13 +176,17 @@
     };
     if (platform === "deepseek") window.addEventListener("storage", sessionChanged);
     let bytesRead = 0;
-    const read = async (url, options = {}, type = "json", expectedSize, fileIndex) => {
+    const read = async (url, options = {}, type = "json", expectedSize, fileIndex, fileExtension) => {
       check();
       let response, reader, size = 0, phase = "fetch";
       const began = Date.now();
       const stage = type === "file" ? "attachment_body" : "history";
       const remaining = maxCaptureBytes - bytesRead;
       const observation = metrics.response(stage, remaining);
+      // Keep at most eight bytes transiently for a fixed format hint. Never
+      // serialize the prefix or use it to accept, skip or reinterpret a file.
+      const prefix = [];
+      let decodeDetails;
       // Capture only what the browser actually exposed. A rejected fetch may
       // hide CORS/redirect/DNS causes; never infer them or copy exception prose.
       const failRead = (reason, error, source, value, limit) => {
@@ -199,8 +203,40 @@
             : mime === "application/octet-stream" ? "octet_stream" : mime.startsWith("text/") ? "text" : "other",
           failure_http_status: response?.status,
           failure_file_index: fileIndex, failure_file_bytes: expectedSize,
-          failure_read_bytes: size, failure_request_ms: Date.now() - began
+          failure_read_bytes: size, failure_request_ms: Date.now() - began,
+          ...(reason === "invalid_utf8" ? decodeDetails : {})
         } : undefined);
+      };
+      const failDecode = (error, decodeStage) => {
+        if (platform === "deepseek" && type === "file") {
+          const starts = bytes => bytes.every((byte, i) => prefix[i] === byte);
+          const signatures = [
+            ["utf32le_bom", [255, 254, 0, 0]], ["utf32be_bom", [0, 0, 254, 255]],
+            ["utf16le_bom", [255, 254]], ["utf16be_bom", [254, 255]], ["utf8_bom", [239, 187, 191]],
+            ["zip_signature", [80, 75, 3, 4]], ["zip_signature", [80, 75, 5, 6]], ["zip_signature", [80, 75, 7, 8]],
+            ["gzip_signature", [31, 139]], ["pdf_signature", [37, 80, 68, 70]],
+            ["png_signature", [137, 80, 78, 71, 13, 10, 26, 10]], ["jpeg_signature", [255, 216, 255]],
+            ["gif_signature", [71, 73, 70, 56, 55, 97]], ["gif_signature", [71, 73, 70, 56, 57, 97]],
+            ["ole_signature", [208, 207, 17, 224, 161, 177, 26, 225]]
+          ];
+          const charset = response?.headers?.get("content-type")?.match(/;\s*charset\s*=\s*(?:"([^"]*)"|([^;\s]*))/i);
+          const label = (charset?.[1] ?? charset?.[2])?.toLowerCase().replace(/[-_]/g, "");
+          const charsetLabels = { utf8: "utf8", utf16: "utf16", utf16le: "utf16le", utf16be: "utf16be",
+            utf32: "utf32", utf32le: "utf32le", utf32be: "utf32be", iso88591: "latin1", latin1: "latin1",
+            windows1252: "windows1252", usascii: "ascii", ascii: "ascii" };
+          const extensions = globalThis.CapTransferDiagnostics.jsonAttemptSchema.failure_file_extension.values;
+          let bodyHint = signatures.find(([, bytes]) => starts(bytes))?.[0] || "unrecognized";
+          // FF FE is shared by two BOMs; a short first chunk cannot distinguish them.
+          if (bodyHint === "utf16le_bom" && prefix.length < 4) bodyHint = "utf16le_or_utf32le_bom";
+          decodeDetails = { failure_file_extension: extensions.includes(fileExtension) ? fileExtension : "other",
+            failure_response_charset: charset ? Object.hasOwn(charsetLabels, label) ? charsetLabels[label] : "other" : "missing",
+            failure_body_hint: bodyHint,
+            failure_decode_stage: decodeStage };
+          // Preserve a closed diagnostic when the unreadable file is skipped;
+          // the error remains available if capture cannot continue.
+          error.captureDetail = "invalid_utf8";
+        }
+        failRead("invalid_utf8", error);
       };
       try {
         // Native text preview follows its file service's redirects. Only these
@@ -250,12 +286,15 @@
             throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
           }
           phase = "decode";
-          const part = metrics.timed("parse_ms", () => { try { return decoder.decode(value, { stream: true }); } catch (error) { failRead("invalid_utf8", error); throw error; } });
+          if (platform === "deepseek" && type === "file") {
+            for (let i = 0; i < value.length && prefix.length < 8; i++) prefix.push(value[i]);
+          }
+          const part = metrics.timed("parse_ms", () => { try { return decoder.decode(value, { stream: true }); } catch (error) { failDecode(error, "chunk"); throw error; } });
           if (part) parts.push(part);
         }
         check();
         phase = "decode";
-        try { parts.push(decoder.decode()); } catch (error) { failRead("invalid_utf8", error); throw error; }
+        try { parts.push(decoder.decode()); } catch (error) { failDecode(error, "final_flush"); throw error; }
         observation.end();
         const text = parts.join("");
         phase = "parse";
@@ -413,7 +452,8 @@
               const fileIndex = next++;
               const { file, url } = pending[fileIndex];
               try {
-                const content = await read(url.href, { credentials: "omit" }, "file", file.file_size, fileIndex + 1);
+                const extension = typeof file.file_name === "string" ? file.file_name.match(/\.([a-z0-9]+)$/i)?.[1].toLowerCase() : undefined;
+                const content = await read(url.href, { credentials: "omit" }, "file", file.file_size, fileIndex + 1, extension);
                 if (content.size !== file.file_size) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", content.size, file.file_size); throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed"); }
                 files[file.id] = content.text;
                 if (measureOnly) {
