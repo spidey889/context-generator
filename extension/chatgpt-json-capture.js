@@ -1,5 +1,13 @@
 (() => {
   const channel = "cap-context-chatgpt-json-v2";
+  const debug = (event, fields = {}) => {
+    try {
+      const data = { build: 25, ...fields };
+      console.info?.(`[CapCapture] ${JSON.stringify({ world: "bridge", event, ...data })}`);
+      window.postMessage({ channel, type: "debug", world: "bridge", event, fields: data }, location.origin);
+    } catch { /* Timing is local and cannot change capture. */ }
+  };
+  debug("loaded");
   // Keep the MAIN download gate and serializer aligned for parameterized MIME labels.
   const isPlainTextPaste = file => file?.is_big_paste === true && typeof file.mime_type === "string"
     && file.mime_type.split(";", 1)[0].trim().toLowerCase() === "text/plain";
@@ -259,6 +267,8 @@
   }
 
   function waitForHook(timeoutMs, install = false, signal) {
+    const started = Date.now();
+    debug("hook_wait", { wait_ms: timeoutMs, pending: install });
     return new Promise(resolve => {
       if (signal?.aborted) return resolve(false);
       const id = crypto.randomUUID();
@@ -269,6 +279,7 @@
         settled = true;
         clearTimeout(timer);
         clearTimeout(pollTimer);
+        debug("hook_done", { ok: ready, elapsed_ms: Date.now() - started, aborted: Boolean(signal?.aborted) });
         window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort);
         resolve(ready);
       };
@@ -276,7 +287,10 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 24) finish(true);
+          && reply.type === "pong" && reply.id === id) {
+          debug("hook_reply", { observed_version: Number.isSafeInteger(reply.version) ? reply.version : 0 });
+          if (reply.version === 25) finish(true);
+        }
       };
       const ping = () => {
         if (settled) return;
@@ -288,6 +302,7 @@
       window.addEventListener("message", receive);
       ping();
       if (install) {
+        debug("hook_install");
         // A busy/cold worker's reply can lag behind a working MAIN hook. Trust
         // the correlated pong, not the installation callback, as readiness proof.
         Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_CHATGPT_JSON_HOOK" }))
@@ -323,13 +338,13 @@
         }
       }
       if (signal?.aborted) throw cancelledError();
-      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 24 });
+      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 25 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         // Await the native cancellation reply before releasing the shared read
         // queue; rejecting immediately could race a still-active old download.
-        const onAbort = () => window.postMessage({ channel, type: measureOnly ? "cancel_measurement" : "cancel_capture", id }, location.origin);
+        const onAbort = () => { debug("cancel", { measure: measureOnly }); window.postMessage({ channel, type: measureOnly ? "cancel_measurement" : "cancel_capture", id }, location.origin); };
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); };
         const receive = event => {
           const reply = event.data;
@@ -342,6 +357,7 @@
             }
             return;
           }
+          debug("bridge_reply", { elapsed_ms: Date.now() - hookStarted, aborted: Boolean(signal?.aborted) });
           cleanup();
           if (signal?.aborted) return reject(cancelledError("history"));
           metrics.adopt(reply.jsonCapture);
@@ -361,7 +377,12 @@
               const stage = ["session", "history", "attachment_descriptor", "attachment_body"].includes(reply.captureRequestStage) ? reply.captureRequestStage : "history";
               throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason, detail, stage, reply.status);
             }
-            try { resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts, metrics, measureOnly))); }
+            try {
+              debug("serialize_start");
+              const capture = metrics.timed("serialize_ms", () => serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts, metrics, measureOnly));
+              debug("serialize_done", { chars: capture.text.length, turns: capture.messageTurnCount });
+              resolve(capture);
+            }
             catch (error) {
               if (!measureOnly) throw error;
               resolve(roughCaptureSize(reply.data));
@@ -371,6 +392,7 @@
         const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
         signal?.addEventListener("abort", onAbort, { once: true });
         window.addEventListener("message", receive);
+        debug("bridge_request", { measure: measureOnly });
         window.postMessage({ channel, type: "request", id, chat, ...(measureOnly ? { measureOnly: true } : {}) }, location.origin);
         if (signal?.aborted) onAbort();
       });

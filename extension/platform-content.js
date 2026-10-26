@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-immediate-retry-v184";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-local-timing-v185";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -505,6 +505,7 @@
   let destinationSheetPathname = null;
   let pickerJsonCapture = null;
   let pendingJsonCapture = Promise.resolve();
+  let chatGptDebugSequence = 0;
   let destinationSheetHideTimer = null;
   let destinationBackdropHideTimer = null;
   let destinationBackdropCutoutFrame = null;
@@ -2562,6 +2563,15 @@
     };
     trace.lastAt = now;
     trace.marks.push(mark);
+    // Forward only fixed checkpoints. Trace labels/details can contain private
+    // errors or tab metadata and must never enter the copyable timing report.
+    if (currentPlatform.id === "chatgpt") {
+      const event = { "capture start": "capture_start", "capture done": "capture_done",
+        "summary start": "carry_start", "summary done": "carry_done", "tab open start": "destination_start",
+        "tab open response": "destination_reply", "tab open done": "destination_ready",
+        "paste request start": "paste_start", "paste done": "paste_done", "transfer complete": "transfer_done" }[label];
+      if (event) traceChatGptCapture(event);
+    }
     const operations = { "capture start": "capture_dom", "capture done": "capture_complete",
       "summary start": "summary_request", "summary done": "summary_complete", "tab open start": "destination_prepare",
       "tab open done": "destination_prepare", "paste request start": "paste_start", "paste done": "paste_complete",
@@ -7415,6 +7425,7 @@
   }
 
   function toggleDestinationSheet({ openOnly = false } = {}) {
+    traceChatGptCapture("picker_open");
     hideErrorOverlay(undefined, { immediate: true });
     hideOnboardingNudge();
     hideClaudeLimitNudge();
@@ -7796,6 +7807,15 @@
     };
   }
 
+  function traceChatGptCapture(event, fields = {}) {
+    if (currentPlatform.id !== "chatgpt") return;
+    try {
+      const data = { build: 185, ...fields };
+      console.info?.(`[CapCapture] ${JSON.stringify({ world: "source", event, ...data })}`);
+      window.postMessage({ channel: "cap-context-chatgpt-json-v2", type: "debug", world: "source", event, fields: data }, window.location.origin);
+    } catch { /* Local debugging never owns transfer progress. */ }
+  }
+
   function getPickerConversationState() {
     // Compare rendered history, not the draft or picker UI. A new reply, edit,
     // branch switch or hydration means the early snapshot needs a fresh read.
@@ -7806,6 +7826,7 @@
     const entry = pickerJsonCapture;
     pickerJsonCapture = null;
     if (!entry) return;
+    traceChatGptCapture("picker_close", { selected: entry.selected });
     entry.discarded = true;
     entry.guard.dispose();
     // ChatGPT must stop an abandoned native read, not just discard its text:
@@ -7868,7 +7889,10 @@
     // Native bridges allow one read at a time. Cancellation releases this queue
     // only after the owning MAIN read acknowledges cleanup, avoiding busy races.
     const transferTrace = isRunning ? activeTransferTrace : null;
+    const queuedAt = Date.now(), queue = currentPlatform.id === "chatgpt" ? ++chatGptDebugSequence : 0;
+    traceChatGptCapture("queued", { queue, measure: measureOnly });
     const pending = pendingJsonCapture.then(() => {
+      traceChatGptCapture("dequeued", { queue, wait_ms: Date.now() - queuedAt, aborted: Boolean(signal?.aborted) });
       if (!instanceActive || signal?.aborted || !shouldRead()) throw createDiagnosticError("The conversation changed during capture.", "conversation_changed");
       checkTransferDeadline(transferTrace);
       const captureJson = measureOnly
@@ -7877,9 +7901,17 @@
         : currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
           : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
       if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
-      return captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal
+      const read = captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal
         : currentPlatform.id === "chatgpt" ? signal || undefined : omitLargeFiles || undefined,
         measureOnly ? transferTrace?.domSizeCheck?.onEstimate : undefined);
+      if (currentPlatform.id !== "chatgpt") return read;
+      return Promise.resolve(read).then(capture => {
+        traceChatGptCapture("queue_done", { queue, ok: true, elapsed_ms: Date.now() - queuedAt });
+        return capture;
+      }, error => {
+        traceChatGptCapture("queue_done", { queue, ok: false, elapsed_ms: Date.now() - queuedAt, aborted: Boolean(signal?.aborted) });
+        throw error;
+      });
     });
     // Keep only completion in the queue; unused transcripts/errors are not retained.
     pendingJsonCapture = pending.then(() => {}, () => {});
@@ -7991,7 +8023,10 @@
           if (isPickerJsonCaptureCurrent(entry)) {
             entry.trace = trace;
             entry.selected = true;
+            const waitingAt = Date.now();
+            traceChatGptCapture("prefetch_wait", { pending: true });
             const result = await entry.promise;
+            traceChatGptCapture("prefetch_wait", { pending: false, elapsed_ms: Date.now() - waitingAt });
             if (isPickerJsonCaptureCurrent(entry)) {
               record(result.error || result.capture, "prefetch");
               if (result.error) throw result.error;
@@ -8016,6 +8051,7 @@
       }
       updateTransferDiagnostics(trace, { last_operation: "capture_json" }, "capture_json");
       markTransferTrace(trace, "retrying JSON capture");
+      traceChatGptCapture("retry");
       // ChatGPT retries immediately through the existing serialized reader.
       // Other platforms retain their cooldown; all retries keep the same guards.
       if (!fileNoticeRetry && currentPlatform.id !== "chatgpt") {
@@ -8035,6 +8071,7 @@
   async function startDestinationTransfer(destinationId) {
     const trace = beginTransferAttempt(destinationId, "destination tile");
     if (!trace) return;
+    traceChatGptCapture("selection", { pending: Boolean(pickerJsonCapture), visibility: document.visibilityState });
     // Bind queued prefetch before the handoff yields; cancellation must still
     // prevent its read after the running lock resets or another attempt starts.
     if (pickerJsonCapture) pickerJsonCapture.trace = trace;
@@ -8897,6 +8934,7 @@
   }
 
   function showOverlay(destinationId = null) {
+    traceChatGptCapture("handoff");
     hideErrorOverlay(undefined, { immediate: true });
     ensureFloatingOverlay();
     document.getElementById("context-generator-capture-notice")?.remove();

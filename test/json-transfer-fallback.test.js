@@ -251,6 +251,52 @@ test("picker JSON capture is reused ready or pending on all five platforms, with
   }
 });
 
+test("ChatGPT picker timing separates a queued read from selection and native capture", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  const messages = [], releaseQueue = deferred(), started = deferred(), response = deferred();
+  context.window.postMessage = message => messages.push(message);
+  context.pendingJsonCapture = releaseQueue.promise;
+  context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+  context.startPickerJsonCapture();
+  const transfer = context.start("claude");
+  await new Promise(setImmediate);
+  assert.equal(calls.json, 0);
+  assert.ok(messages.some(row => row.event === "queued"));
+  assert.ok(messages.some(row => row.event === "selection"));
+  assert.ok(messages.some(row => row.event === "prefetch_wait" && row.fields.pending));
+  assert.equal(messages.some(row => row.event === "dequeued"), false);
+  releaseQueue.resolve(); await started.promise;
+  assert.equal(messages.filter(row => row.event === "dequeued").length, 1);
+  response.resolve({ text: "PRIVATE_CAPTURE_CONTENT", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 1);
+  assert.equal(calls.flows[0].text, "PRIVATE_CAPTURE_CONTENT");
+  assert.ok(messages.some(row => row.event === "queue_done" && row.fields.ok));
+  assert.ok(messages.some(row => row.event === "prefetch_wait" && !row.fields.pending));
+  assert.doesNotMatch(JSON.stringify(messages), /PRIVATE_CAPTURE_CONTENT/);
+});
+
+test("ChatGPT destination timing forwards fixed steps without trace details or private error labels", () => {
+  const start = source.indexOf("  function markTransferTrace(");
+  const end = source.indexOf("  function finishTransferTrace(", start);
+  assert.ok(start >= 0 && end > start);
+  const events = [];
+  const context = vm.createContext({ currentPlatform: { id: "chatgpt" }, getNow: () => 100,
+    traceChatGptCapture: (event, fields) => events.push({ event, fields }), updateTransferDiagnostics() {} });
+  new vm.Script(source.slice(start, end)).runInContext(context);
+  const trace = { startedAt: 1, marks: [] };
+  for (const label of ["tab open start", "tab open response", "summary start", "summary done", "tab open done",
+    "paste request start", "paste done", "transfer complete", "failed: PRIVATE_UPSTREAM_ERROR"]) {
+    context.markTransferTrace(trace, label, { tabId: 999, text: "PRIVATE_CHAT", url: "PRIVATE_URL" });
+  }
+  assert.deepEqual(events.map(row => row.event), ["destination_start", "destination_reply", "carry_start", "carry_done",
+    "destination_ready", "paste_start", "paste_done", "transfer_done"]);
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE|999/);
+  context.currentPlatform.id = "claude";
+  context.markTransferTrace(trace, "tab open start");
+  assert.equal(events.length, 8, "only ChatGPT sources emit these local checkpoints");
+});
+
 test("picker handoff preserves ready and pending JSON with either motion preference", async () => {
   const hideStart = source.indexOf("  function hideDestinationSheet(");
   const hideEnd = source.indexOf("  function trackDestinationBackdropCutout(", hideStart);

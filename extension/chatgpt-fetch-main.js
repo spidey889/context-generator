@@ -1,5 +1,5 @@
 (() => {
-  const version = 24;
+  const version = 25;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -20,6 +20,31 @@
   let active = null, activeMeasurementId = null, activeCaptureId = null;
   let authRevision = 0;
   const authKeys = ["authorization", "chatgpt-account-id", "oai-did", "oai-language", "originator"];
+
+  // Temporary, page-local timing report. Never admit URLs, IDs, headers, error
+  // prose or captured content, including from isolated-world debug messages.
+  const debugReport = { version: 1, main_build: version, started_at_ms: Date.now(), dropped: 0, events: [] };
+  window.__capChatGptCaptureDebug = debugReport;
+  const debugEvents = new Set(["loaded", "picker_open", "picker_close", "selection", "handoff", "queued", "dequeued", "queue_done", "prefetch_wait", "retry", "hook_wait", "hook_reply", "hook_done", "hook_install", "bridge_request", "bridge_reply", "serialize_start", "serialize_done", "cancel", "capture_start", "fetch_start", "headers", "body_start", "first_byte", "body_done", "parse_done", "waiting", "capture_done", "resource_timing", "destination_start", "destination_reply", "destination_ready", "carry_start", "carry_done", "paste_start", "paste_done", "transfer_done"]);
+  const debugNumbers = ["build", "queue", "native", "observed_version", "wait_ms", "elapsed_ms", "status", "bytes", "chars", "turns", "requests", "headers_ms", "total_ms", "queue_ms", "dns_ms", "connect_ms", "server_ms", "body_ms"];
+  const debugBooleans = ["aborted", "selected", "measure", "owns_fetch", "online", "pending", "ok"];
+  function debug(event, fields = {}, world = "main", quiet = false) {
+    try {
+      if (!debugEvents.has(event) || !["main", "source", "bridge"].includes(world)) return;
+      const row = { ms: Math.max(0, Date.now() - debugReport.started_at_ms), world, event };
+      for (const key of debugNumbers) if (Number.isFinite(fields[key]) && fields[key] >= 0) row[key] = Math.min(2147483647, Math.round(fields[key]));
+      for (const key of debugBooleans) if (typeof fields[key] === "boolean") row[key] = fields[key];
+      if (["hook", "queue", "session", "history", "attachment_descriptor", "attachment_body", "serialize"].includes(fields.stage)) row.stage = fields.stage;
+      if (["headers", "body", "processing"].includes(fields.phase)) row.phase = fields.phase;
+      if (["succeeded", "failed", "cancelled", "busy", "timeout", "network", "http", "partial", "format", "auth", "changed", "paste", "size", "invalid_json", "unknown"].includes(fields.result)) row.result = fields.result;
+      if (["visible", "hidden", "prerender"].includes(fields.visibility)) row.visibility = fields.visibility;
+      debugReport.events.push(row);
+      if (debugReport.events.length > 160) { debugReport.events.shift(); debugReport.dropped++; }
+      if (!quiet) console.info?.(`[CapCapture] ${JSON.stringify(row)}`);
+    } catch { /* Optional timing cannot interfere with capture. */ }
+  }
+  let debugSequence = 0;
+  debug("loaded", { build: version });
 
   // Auth is session/account scoped, not chat scoped: cached sidebar navigation
   // may make no new conversation request. Never read native response bodies.
@@ -44,7 +69,8 @@
 
   const receive = async event => {
     const request = event.data;
-    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || !["request", "ping", "cancel_measurement", "cancel_capture"].includes(request.type)) return;
+    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || !["request", "ping", "cancel_measurement", "cancel_capture", "debug"].includes(request.type)) return;
+    if (request.type === "debug") { debug(request.event, request.fields, request.world, true); return; }
     if (typeof request.id !== "string" || request.id.length > 80) return;
     if (request.type === "cancel_measurement") {
       if (activeMeasurementId === request.id) active?.abort("measurement_cancelled");
@@ -53,6 +79,7 @@
     if (request.type === "cancel_capture") {
       // Correlate ordinary cancellation separately: an old picker or a count
       // cancellation must never abort a newer capture or a measurement.
+      debug("cancel", { ok: activeCaptureId === request.id });
       if (activeCaptureId === request.id) active?.abort("capture_cancelled");
       return;
     }
@@ -63,13 +90,44 @@
     }
     const chat = currentChat();
     const reply = { channel, type: "response", id: request.id, chat };
-    if (active) { window.postMessage({ ...reply, error: "busy" }, location.origin); return; }
+    if (active) { debug("capture_done", { result: "busy" }); window.postMessage({ ...reply, error: "busy" }, location.origin); return; }
+    const native = ++debugSequence, debugStarted = Date.now();
+    let debugPhase = "processing", debugTimer = null;
+    debug("capture_start", { native, measure: request.measureOnly === true, visibility: globalThis.document?.visibilityState,
+      owns_fetch: window.fetch === wrappedFetch, online: globalThis.navigator?.onLine });
     const controller = new AbortController();
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxCaptureBytes,
       raw_bytes: 0, requests: 0, auth_refreshes: 0 });
     active = controller;
     activeMeasurementId = request.measureOnly === true ? request.id : null;
     activeCaptureId = request.measureOnly === true ? null : request.id;
+    let resourceObserver = null;
+    const debugRequests = [];
+    const logResourceTiming = entries => {
+      for (const entry of entries) {
+        if (!debugRequests.some(owned => owned.url === entry.name && entry.startTime >= owned.started - 1)) continue;
+        const fields = { native, total_ms: entry.duration, bytes: entry.encodedBodySize };
+        if (entry.requestStart > 0) fields.queue_ms = entry.requestStart - entry.fetchStart;
+        if (entry.responseStart > 0 && entry.requestStart > 0) fields.server_ms = entry.responseStart - entry.requestStart;
+        if (entry.responseEnd > 0 && entry.responseStart > 0) fields.body_ms = entry.responseEnd - entry.responseStart;
+        if (entry.domainLookupEnd > 0) fields.dns_ms = entry.domainLookupEnd - entry.domainLookupStart;
+        if (entry.connectEnd > 0) fields.connect_ms = entry.connectEnd - entry.connectStart;
+        debug("resource_timing", fields);
+      }
+    };
+    try {
+      if (typeof PerformanceObserver !== "undefined") {
+        resourceObserver = new PerformanceObserver(list => { try { logResourceTiming(list.getEntries()); } catch {} });
+        resourceObserver.observe({ type: "resource", buffered: false });
+      }
+    } catch { resourceObserver = null; }
+    const logWaiting = () => {
+      debug("waiting", { native, stage: reply.captureRequestStage || "history", phase: debugPhase,
+        elapsed_ms: Date.now() - debugStarted, bytes: metrics.data.raw_bytes || 0, aborted: controller.signal.aborted,
+        visibility: globalThis.document?.visibilityState });
+      if (!controller.signal.aborted) debugTimer = setTimeout(logWaiting, 1000);
+    };
+    debugTimer = setTimeout(logWaiting, 1000);
     let navigated = false;
     const changed = event => {
       const destination = event?.destination ? new URL(event.destination.url) : location;
@@ -86,9 +144,18 @@
       delete metrics.data.http_status;
       metrics.add("requests");
       const began = Date.now();
+      try {
+        if (debugRequests.length < 64) debugRequests.push({ url: new URL(url, location.href).href,
+          started: globalThis.performance?.now?.() ?? 0 });
+      } catch {}
+      debugPhase = "headers";
+      debug("fetch_start", { native, stage: reply.captureRequestStage || "history", requests: metrics.data.requests });
       try { const response = await Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
-      }]); metrics.set({ http_status: response.status }); return response;
+      }]); metrics.set({ http_status: response.status });
+        debugPhase = "body";
+        debug("headers", { native, stage: reply.captureRequestStage || "history", status: response.status, headers_ms: Date.now() - began });
+        return response;
       } finally { metrics.add("download_ms", Date.now() - began); }
     };
     // Discard owned responses before retry/fallback; cleanup must never replace
@@ -100,6 +167,7 @@
     const readJson = async (response, responseLimit = 6000000) => {
       let reader, bodyReadFailed = false;
       const stage = reply.captureRequestStage || "history";
+      debug("body_start", { native, stage });
       const remaining = Math.min(responseLimit, maxCaptureBytes - bytesRead);
       const observation = metrics.response(stage, remaining, response.headers.get("content-length"), false);
       try {
@@ -119,6 +187,7 @@
           });
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
           if (done) break;
+          if (!responseBytes) debug("first_byte", { native, stage });
           bytesRead += value.byteLength;
           responseBytes += value.byteLength;
           observation.chunk(value.byteLength);
@@ -131,7 +200,11 @@
         // text; parse only a complete, strictly decoded response.
         try { parts.push(decoder.decode()); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
         observation.end();
-        return metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
+        debugPhase = "processing";
+        debug("body_done", { native, stage, bytes: responseBytes });
+        const parsed = metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
+        debug("parse_done", { native, stage });
+        return parsed;
       } catch (error) {
         if (error?.name === "SyntaxError") metrics.fail("invalid_json", stage);
         if (error?.name === "SyntaxError") reply.captureDetail = "invalid_json";
@@ -145,6 +218,7 @@
     };
     const readPaste = async (response, expectedSize) => {
       let reader;
+      debug("body_start", { native, stage: "attachment_body" });
       const observation = metrics.response("attachment_body", maxCaptureBytes - bytesRead, response.headers.get("content-length"), false);
       try {
         if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
@@ -167,6 +241,7 @@
           const { done, value } = await reader.read();
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
           if (done) break;
+          if (!size) debug("first_byte", { native, stage: "attachment_body" });
           observation.chunk(value.byteLength);
           if (size + value.byteLength > expectedSize) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", size + value.byteLength, expectedSize); throw new Error("paste"); }
           bytesRead += value.byteLength;
@@ -174,6 +249,8 @@
           bytes.set(value, size); size += value.byteLength;
         }
         if (size !== expectedSize) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", size, expectedSize); throw new Error("paste"); }
+        debugPhase = "processing";
+        debug("body_done", { native, stage: "attachment_body", bytes: size });
         // Preserve complete UTF-8, BOM and whitespace through chunk boundaries.
         try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch (error) { metrics.fail("invalid_utf8", "attachment_body"); throw error; }
       } catch (error) {
@@ -352,12 +429,17 @@
         : ["http", "partial", "format", "auth", "changed", "paste", "size"].includes(error?.message) ? error.message : error?.name === "SyntaxError" ? "invalid_json" : "network";
       metrics.finish({ captureDetail: ({ http: "http_error", partial: "partial_response", format: "non_json_response", auth: "auth_missing", changed: "conversation_changed", paste: "attachment_failed", timeout: "timeout", cancelled: "cancelled", invalid_json: "invalid_json", network: "network_error" })[reply.error], captureRequestStage: reply.captureRequestStage });
     } finally {
+      clearTimeout(debugTimer);
+      try { if (resourceObserver) logResourceTiming(resourceObserver.takeRecords()); } catch {}
+      try { resourceObserver?.disconnect(); } catch {}
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
       if (active === controller) { active = null; activeMeasurementId = null; activeCaptureId = null; }
     }
     reply.jsonCapture = metrics.finish();
+    debug("capture_done", { native, result: reply.error || "succeeded", bytes: metrics.data.raw_bytes,
+      total_ms: Date.now() - debugStarted, aborted: controller.signal.aborted });
     window.postMessage(reply, location.origin);
   };
   window.addEventListener("message", receive);

@@ -201,7 +201,7 @@ test("ChatGPT JSON measurements keep the raw and final text limits separate", as
   assert.equal(capture.jsonCapture.failure_check, undefined);
 });
 
-function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, runtime, schedule = setTimeout, beforeMessage } = {}) {
+function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, runtime, schedule = setTimeout, beforeMessage, PerformanceObserver } = {}) {
   const listeners = new Set();
   const popListeners = new Set();
   const navListeners = new Set();
@@ -228,7 +228,7 @@ function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, 
       [...listeners].forEach(listener => listener({ source: window, origin: location.origin, data }));
     }); }
   };
-  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Headers, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, Date, setTimeout: schedule, clearTimeout });
+  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Headers, Request, TextEncoder, TextDecoder, AbortController, PerformanceObserver, crypto: webcrypto, Date, setTimeout: schedule, clearTimeout });
   const reinstall = (file = "chatgpt-fetch-main.js") => scripts.get(file).runInContext(context);
   for (const file of ["transfer-diagnostics.js", "json-capture-metrics.js", "chatgpt-fetch-main.js", "chatgpt-json-capture.js"]) reinstall(file);
   return { window, location, requests, replies, pings, reads: () => reads, reinstall,
@@ -241,6 +241,92 @@ function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, 
 async function discover(harness) {
   await harness.window.fetch(new Request(`https://chatgpt.com/backend-api/conversations/${chat}?num_turns=10`, { headers: { Authorization: "Bearer TEST_ONLY", "ChatGPT-Account-Id": "test-account" } }));
 }
+
+test("ChatGPT local timing report traces a complete read without private content or unrelated resource timings", async () => {
+  let disconnected = 0;
+  const data = fixture();
+  data.mapping.question.message.content.parts = ["PRIVATE_CHAT_SENTINEL"];
+  const h = setup(data, 200, { PerformanceObserver: class {
+    observe() {}
+    takeRecords() {
+      return [fullUrl, "https://other.test/PRIVATE_RESOURCE"].map(name => ({ name,
+        startTime: 1, duration: 900, fetchStart: 2, requestStart: 102, responseStart: 802, responseEnd: 902,
+        domainLookupStart: 2, domainLookupEnd: 12, connectStart: 12, connectEnd: 22, encodedBodySize: 400 }));
+    }
+    disconnect() { disconnected++; }
+  } });
+  await discover(h);
+  const capture = await h.window.__capCaptureChatGptJson();
+  await new Promise(setImmediate);
+  assert.ok(capture.text.includes("PRIVATE_CHAT_SENTINEL"), "logging must not change the captured chat");
+  const report = h.window.__capChatGptCaptureDebug;
+  for (const event of ["hook_wait", "hook_reply", "hook_done", "bridge_request", "capture_start",
+    "fetch_start", "headers", "body_start", "first_byte", "body_done", "parse_done", "capture_done", "bridge_reply", "serialize_done"]) {
+    assert.ok(report.events.some(row => row.event === event), `missing timing step ${event}`);
+  }
+  const resource = report.events.filter(row => row.event === "resource_timing");
+  assert.equal(resource.length, 1, "only the capture-owned resource may enter the report");
+  assert.equal(resource[0].server_ms, 700);
+  assert.equal(resource[0].queue_ms, 100);
+  assert.equal(disconnected, 1);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE|TEST_ONLY|test-account|test-chat|Selected answer|https:|authorization/i);
+});
+
+clockTest("ChatGPT timing stays available during stalled headers or body and stops on cancellation", async () => {
+  for (const phase of ["headers", "body"]) {
+    const data = fixture();
+    let stall = false, started;
+    const began = new Promise(resolve => { started = resolve; });
+    const h = setup(data, 200, { fetchImpl: request => {
+      if (!stall) return Response.json(data);
+      const signal = request.options.signal;
+      started();
+      if (phase === "headers") return new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("PRIVATE_UPSTREAM_ERROR")), { once: true });
+      });
+      return new Response(new ReadableStream({ start(stream) {
+        stream.enqueue(new TextEncoder().encode("{"));
+        signal.addEventListener("abort", () => stream.error(new Error("PRIVATE_UPSTREAM_ERROR")), { once: true });
+      } }), { headers: { "content-type": "application/json" } });
+    } });
+    await discover(h); stall = true;
+    const controller = new AbortController();
+    const read = h.window.__capCaptureChatGptJson(undefined, controller.signal);
+    const stopped = assert.rejects(read, error => error.diagnosticCode === "user_cancelled");
+    await began;
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const report = h.window.__capChatGptCaptureDebug;
+    const waiting = report.events.find(row => row.event === "waiting");
+    assert.equal(waiting.phase, phase);
+    assert.equal(waiting.stage, "history");
+    assert.ok(waiting.elapsed_ms >= 1000);
+    assert.equal(waiting.bytes, phase === "body" ? 1 : 0);
+    controller.abort(); await stopped;
+    const waitingCount = report.events.filter(row => row.event === "waiting").length;
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    assert.equal(report.events.filter(row => row.event === "waiting").length, waitingCount);
+    assert.equal(report.events.find(row => row.event === "capture_done").result, "cancelled");
+    assert.doesNotMatch(JSON.stringify(report), /PRIVATE_UPSTREAM_ERROR/);
+    assert.equal(h.navigationListeners(), 0);
+  }
+});
+
+test("ChatGPT copied timing report bounds entries and rejects private fields from page messages", async () => {
+  const h = setup();
+  const message = fields => h.window.postMessage({ channel: "cap-context-chatgpt-json-v2", type: "debug",
+    world: "source", event: "queued", fields }, h.location.origin);
+  for (let queue = 0; queue < 170; queue++) message({ queue, url: "PRIVATE_URL", text: "PRIVATE_CHAT",
+    result: "PRIVATE_ERROR", status: "PRIVATE_HEADER", stage: "PRIVATE_STAGE", bytes: Infinity });
+  h.window.postMessage({ channel: "cap-context-chatgpt-json-v2", type: "debug", world: "source", event: "PRIVATE_EVENT" }, h.location.origin);
+  await new Promise(setImmediate);
+  const report = h.window.__capChatGptCaptureDebug;
+  assert.equal(report.events.length, 160);
+  assert.ok(report.dropped >= 10);
+  assert.equal(report.events.at(-1).queue, 169);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE|Infinity/);
+  await discover(h);
+  assert.ok((await h.window.__capCaptureChatGptJson()).text.includes("Selected answer"));
+});
 
 test("ChatGPT accepts case-insensitive response media types across session, history and pasted-file reads", async () => {
   for (const [jsonType, textType] of [["Application/JSON; charset=utf-8", "Text/Plain; charset=utf-8"], ["APPLICATION/JSON", "TEXT/PLAIN"]]) {
@@ -889,7 +975,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 24);
+  assert.equal(harness.window.__capChatGptFetchState.version, 25);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
