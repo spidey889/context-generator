@@ -32,6 +32,11 @@
 - If Brave is blocked, use Zen or Chrome. Zen has the owner's signed-in sessions.
 - Use `LOGIC.md` for the relevant test commands and verification boundaries. Run the smallest appropriate checks; browser checks are useful when behavior depends on the real browser.
 
+## Vercel cleanup
+
+- For Vercel deletion requests, always use the Vercel CLI. Delete explicit deployment IDs or URLs in bulk, using parallel independent batches when possible to finish quickly.
+- Check the team, project and exact keep/delete lists first. Preserve the requested production/preview counts and the current live deployment unless its deletion is explicitly requested. Verify the remaining counts and live alias after cleanup.
+
 ## Commit and push
 
 - After a coding task, commit the intended files and always push to the branch being worked on. Do not ask for confirmation. Stage only the task's files.
