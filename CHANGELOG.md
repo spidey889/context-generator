@@ -4,7 +4,7 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-26
 
-- **Combine unreadable-file recovery with decoding diagnostics.** Preserve the privacy-bounded DeepSeek decode clues when a bad attachment is skipped and readable chat continues. Advance the DeepSeek hook to v33 so already-open pages replace either previous version; regression fixtures cover both changes together.
+- **Combine unreadable-file recovery with decoding diagnostics.** Preserve the privacy-bounded DeepSeek decode clues when a bad attachment is skipped and readable chat continues. Advance the DeepSeek hook to v33 so already-open pages replace either previous version; regression fixtures cover both changes together. Initialize the ChatGPT oversized-paste fixture flag before its million-character setup so the browser check can start.
 
 - **Shorten both file-upload requests.** Replace the long internal-reasons instruction with the context-loaded greeting, a request to upload the files again and wait, and the short filename-as-data guard. Both unreadable and oversized files now have filename-only lists in Next step; remove sizes and reasons from those lists. Capture behavior and PDF exclusion are unchanged.
 

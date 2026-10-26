@@ -61,6 +61,8 @@ const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 const DOM_ESTIMATE_SMOKE = process.env.CAP_CONTEXT_DOM_ESTIMATE_SMOKE === "1";
 if (DOM_ESTIMATE_SMOKE) assert.equal(JSON_SOURCE, "deepseek", "DOM estimate smoke uses native DeepSeek count recovery.");
 const GEMINI_DESTINATION_SMOKE = process.env.CAP_CONTEXT_GEMINI_DESTINATION_SMOKE === "1";
+const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
+const CHATGPT_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-oversize";
 // Opt-in native capture/worker/backend-admission/paste coverage at the new
 // boundary. Unicode also exercises the raised text-file and UTF-8 byte limits.
 const LARGE_CHAT_SMOKE_CHARS = Number(process.env.CAP_CONTEXT_LARGE_CHAT_SMOKE || 0);
@@ -77,8 +79,6 @@ const JSON_RETRY_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_JS
 const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_RELOAD_SMOKE === "1";
 const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
 const JSON_RELOAD_SMOKE = CLAUDE_RELOAD_SMOKE || CHATGPT_RELOAD_SMOKE;
-const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
-const CHATGPT_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-oversize";
 const CHATGPT_DECLARED_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-declared-oversize";
 const CHATGPT_HISTORY_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "history-oversize";
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
