@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-26
 
+- **Shorten both file-upload requests.** Replace the long internal-reasons instruction with the context-loaded greeting, a request to upload the files again and wait, and the short filename-as-data guard. Both unreadable and oversized files now have filename-only lists in Next step; remove sizes and reasons from those lists. Capture behavior and PDF exclusion are unchanged.
+
 - **Keep file-recovery reasons internal to the receiving AI.** A real Gemini reply repeated decoding details and requested raw bytes/hex. Keep skipped-file reasons and oversized-file sizes in the handoff for the AI's understanding, but explicitly tell it to ask only for the files again, without technical explanations, troubleshooting or alternate representations. Let it choose wording that fits the conversation; retain the greeting, Next step placement and PDF exclusion.
 
 - **Ask for unreadable text files in the final handoff.** Reuse the existing large-file Next step greeting/upload request for supported text attachments skipped as unreadable on DeepSeek, ChatGPT and Claude. Add native names, or explicit numbered unnamed-paste labels, after summarization so AI cannot drop the request; direct and recovery carries use the same path. PDFs and other intentionally unsupported uploads get no request. Preserve the 4.1 MB note's existing route and combine both reasons when applicable. Skipped-file names stay out of telemetry/receipts and summary-request metadata.
