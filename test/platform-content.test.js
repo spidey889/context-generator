@@ -2051,17 +2051,6 @@ test("latest-run receipt retains capture exclusions and the JSON fallback reason
   assert.equal(stats.rawScrapedText, trace.rawScrapedText);
 });
 
-test("paste verification rejects missing chunks between the old word samples", () => {
-  const hooks = loadPlatformContent([]);
-  const words = Array.from({ length: 100 }, (_, index) => `detail${index}`);
-  const actual = [...words.slice(0, 15), ...words.slice(35)].join(" ");
-  // All three old samples survive despite losing twenty consecutive words.
-  for (const start of [0, 45, 90]) {
-    assert.ok(actual.includes(words.slice(start, start + 10).join(" ")));
-  }
-  assert.equal(hooks.editorContainsText(new FakeElement({ text: actual }), words.join(" ")), false);
-});
-
 test("paste verification accepts whitespace, newline and decorative punctuation changes on every platform", () => {
   const expected = "CONTEXT CARRY - READY TO PASTE\n\nKeep the migration decisions and deployment checklist.\nNext step: verify staging before release.";
   for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
@@ -2077,6 +2066,10 @@ test("paste verification requires 95 percent of words in order, including repeat
   const expected = words.join(" ");
   assert.equal(hooks.editorContainsText(new FakeElement({ text: words.slice(5).join(" ") }), expected), true);
   assert.equal(hooks.editorContainsText(new FakeElement({ text: words.slice(6).join(" ") }), expected), false);
+  // The old three samples all survive, but a missing middle chunk must fail.
+  const missingMiddle = [...words.slice(0, 15), ...words.slice(35)].join(" ");
+  for (const start of [0, 45, 90]) assert.ok(missingMiddle.includes(words.slice(start, start + 10).join(" ")));
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: missingMiddle }), expected), false);
   const reordered = [...words.slice(0, 20), ...words.slice(40, 60), ...words.slice(20, 40), ...words.slice(60)];
   assert.equal(hooks.editorContainsText(new FakeElement({ text: reordered.join(" ") }), expected), false);
   const repeated = ["context", ...words.slice(1, 99), "context"];

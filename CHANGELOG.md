@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-28
 
+- **Reuse test fixtures for paste, analysis and hook installation.** Keep the missing-middle paste regression with the same 95% verification fixture, check analysis model labels with one helper load, and check all platform hook permissions and script lists with one worker fixture.
+
 - **Remove a duplicate Gemini opening test.** Check its exact new-chat address in the existing all-destination preparation and cancellation test, preserving the same route guard without a second worker fixture.
 
 - **Consolidate duplicate summary-retry coverage.** The outbox/restart test already exercises two failed reads and verifies no third request; retain its attempt-number assertions there instead of repeating the same worker retry in a separate test.
