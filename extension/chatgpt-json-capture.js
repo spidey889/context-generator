@@ -2,7 +2,7 @@
   const channel = "cap-context-chatgpt-json-v2";
   const debug = (event, fields = {}) => {
     try {
-      const data = { build: 26, ...fields };
+      const data = { build: 27, ...fields };
       console.info?.(`[CapCapture] ${JSON.stringify({ world: "bridge", event, ...data })}`);
       window.postMessage({ channel, type: "debug", world: "bridge", event, fields: data }, location.origin);
     } catch { /* Timing is local and cannot change capture. */ }
@@ -302,11 +302,11 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.type === "pong" && reply.id === id
-            && reply.version !== 27) metrics?.set({ hook_status: "version_mismatch" });
+            && reply.version !== 28) metrics?.set({ hook_status: "version_mismatch" });
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
           && reply.type === "pong" && reply.id === id) {
           debug("hook_reply", { observed_version: Number.isSafeInteger(reply.version) ? reply.version : 0 });
-          if (reply.version === 27) finish(true);
+          if (reply.version === 28) finish(true);
         }
       };
       const ping = () => {
@@ -358,7 +358,7 @@
         }
       }
       if (signal?.aborted) throw cancelledError();
-      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 27 });
+      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 28 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       metrics.checkpoint("route", "history");
       return await new Promise((resolve, reject) => {

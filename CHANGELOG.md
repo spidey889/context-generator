@@ -6,6 +6,7 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-28
 
+- **Locate ChatGPT attachment timeouts.** Record the failing request's phase, elapsed time, bytes, response/abort clues and supported-file position/size in existing JSON-attempt diagnostics. Preserve the native error class through wrappers and distinguish the failed request's status from an earlier successful history read. Keep capture deadlines, limits, retries and fallback behavior unchanged while investigating the owner's cancelled large-chat transfer. No schema or backend deployment is required.
 - **Trim the production reference carefully.** Shorten repeated runtime, deadline, provider, prompt, motion and verification explanations in `LOGIC.md`. Preserve capture/paste details, invariants, ownership and coupled-contract tables; correct the stale duplicate request limit to 4,400,000 bytes, matching the code. No runtime behavior changes.
 - **Consolidate test coverage.** Remove duplicate attachment, retry and destination checks; reuse fixtures for paste verification, analysis labels and platform hook installation while retaining the distinct behavior checks.
 

@@ -841,6 +841,44 @@ function pasteFixture(texts = ["Original pasted document"], authorization = "Bea
   return { data, files, fetchImpl };
 }
 
+for (const stalled of ["descriptor", "file headers", "file body"]) clockTest(`ChatGPT timeout diagnostics identify the active ${stalled} after slow history`, { tickMs: 100 }, async () => {
+  const { data, files, fetchImpl } = pasteFixture(["First complete original", "Second original with PRIVATE_FILE_CONTENT"]);
+  if (stalled === "file headers") data.mapping.alternate.message.content.parts = ["x".repeat(7000000)];
+  const h = setup(data, 200, { fetchImpl: async request => {
+    if (!request.options?.signal) return fetchImpl(request);
+    const url = new URL(request.url, "https://chatgpt.com");
+    if (url.pathname === `/backend-api/conversation/${chat}`) await new Promise(resolve => setTimeout(resolve, 11000));
+    const second = url.pathname.endsWith(files[1].id) || url.searchParams.get("id") === files[1].id;
+    const target = second && (stalled === "descriptor" ? url.pathname.startsWith("/backend-api/files/download/") : url.pathname === "/backend-api/estuary/content");
+    if (!target) return fetchImpl(request);
+    const signal = request.options.signal;
+    if (stalled !== "file body") return new Promise((_, reject) => {
+      signal.addEventListener("abort", () => reject(new TypeError("PRIVATE_FETCH_ERROR https://private.invalid")), { once: true });
+    });
+    return new Response(new ReadableStream({ start(stream) {
+      stream.enqueue(new TextEncoder().encode("Second"));
+      signal.addEventListener("abort", () => stream.error(new TypeError("PRIVATE_BODY_ERROR")), { once: true });
+    } }), { headers: { "content-type": "text/plain" } });
+  } });
+  await discover(h);
+  await assert.rejects(h.window.__capCaptureChatGptJson(), error => {
+    const observed = error.jsonCapture;
+    assert.equal(observed.failure_check, "timeout");
+    assert.equal(observed.failure_stage, stalled === "descriptor" ? "attachment_descriptor" : "attachment_body");
+    assert.equal(observed.failure_phase, stalled === "file body" ? "body" : "fetch");
+    assert.equal(observed.failure_file_index, 2);
+    assert.equal(observed.failure_file_bytes, files[1].size);
+    assert.equal(observed.failure_read_bytes, stalled === "file body" ? 6 : 0);
+    assert.equal(observed.failure_http_status, stalled === "file body" ? 200 : undefined, "Earlier history/descriptor HTTP 200 is not a failed request's status.");
+    assert.equal(observed.failure_abort, "capture_timeout");
+    assert.ok(observed.failure_request_ms >= 3000 && observed.failure_request_ms < 5000);
+    assert.equal(observed.files_downloaded_bytes, files[0].size + (stalled === "file body" ? 6 : 0));
+    assert.ok(observed.total_ms >= 15000 && observed.total_ms < 17000, "Diagnostics must not change the capture deadline.");
+    assert.doesNotMatch(JSON.stringify(observed), /PRIVATE|SIGNED_URL|TEST_ONLY|file_test|https:/);
+    return true;
+  });
+});
+
 test("ChatGPT skips an invalid UTF-8 paste, retains later healthy pastes, and rejects labels without text", async () => {
   const { data, files, fetchImpl } = pasteFixture(["Bad original", "  Healthy original\r\n"]);
   files[0].size = data.mapping.question.message.metadata.attachments[0].size = 1;
@@ -1035,7 +1073,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 27);
+  assert.equal(harness.window.__capChatGptFetchState.version, 28);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
