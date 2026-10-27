@@ -292,7 +292,8 @@ async function createSmokeExtension(tempRoot, origin) {
     retryMarks: activeTransferTrace.marks.filter(mark => mark.label === "retrying JSON capture").length,
     detail: activeTransferTrace.diagnostics.capture_detail, fallback: activeTransferTrace.diagnostics.json_fallback_code
   });
-  window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
+  window.__capSmokeShowRecovery = (text = "Synthetic recovery context. Preserve the dialog palette.", draft = false, destinationCopy = false) => showFallbackModal(text, "Claude", !draft, false, draft, { destinationCopy });
+  window.__capSmokeShowError = message => showErrorOverlay(message);
   window.__capSmokeHandoffStage = (stage, phase = "active") => { if (!isHandoffOverlayVisible()) showOverlay("claude"); setHandoffProgress(stage, phase, "Claude", 20000); };
   window.__capSmokeStartDomTransfer = () => { startDestinationTransfer("claude"); return true; };
   window.__capSmokeDomState = () => activeTransferTrace && ({ deadlineAt: activeTransferTrace.deadlineAt,
@@ -300,7 +301,7 @@ async function createSmokeExtension(tempRoot, origin) {
     cancelled: activeTransferTrace.cancelled, completed: activeTransferTrace.completed });
   window.__capSmokeHandoffStylesReady = () => handoffUserCssRequest;
   window.__capSmokeRebuildHandoff = () => { cleanupContextGeneratorNodes(); ensureFloatingOverlay(); };
-  window.__capSmokeShowDraftRecovery = () => showFallbackModal(createLocalContextCarry("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.").summary, "ChatGPT", false, false, true);
+  window.__capSmokeShowDraftRecovery = (destinationCopy = false) => showFallbackModal(createLocalContextCarry("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.").summary, "ChatGPT", false, false, true, { destinationCopy });
   window.__capSmokePaste = (text, deadlineAt) => pasteIntoPlatform(text, currentPlatform.id, "smoke-paste-recovery", deadlineAt);
   window.__capSmokePasteState = () => ({ pending: Boolean(pendingPasteRecheck), userHandled: pendingPasteRecheck?.guard?.userHandled,
     active: instanceActive, visibility: document.visibilityState, turns: getDetectedConversationMessageCount(), ready: Boolean(findReadyPlatformInput()) });
@@ -1641,17 +1642,21 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   assert.equal(await destination.evaluate("document.getElementById('context-generator-destination-status')"), null, "The draft box replaces the paste failure banner.");
   await telemetryFixture.verifyDraftOutcome(terminal);
   process.stdout.write("✓ The native login/signup clue reached the saved diagnosis without page text or URLs.\n");
-  // The DOM run covers this same default dialog's copy/palette behavior. Here
-  // both boxes' exact payloads are checked above, and the draft variant below.
-  await verifyRecoveryPalette(destination, destination.getExtensionContextId());
+  // Source copying keeps the modal and existing feedback; only destination
+  // recovery fades into the copied notice.
+  await verifyRecoveryPalette(sourceSession, sourceSession.getExtensionContextId());
+  await verifyDestinationCopyNotice(destination, destination.getExtensionContextId());
   // The ordinary remote summary has no hidden local-carry wrapper. Exercise
   // that payload too, inside this existing browser run, so copying a compact
   // preview cannot silently omit instructions when Clipboard API access fails.
-  await destination.evaluate("window.__capSmokeShowDraftRecovery()", destination.getExtensionContextId());
+  await destination.evaluate("window.__capSmokeShowDraftRecovery(true)", destination.getExtensionContextId());
   await verifyCompactDraftPayload(destination, destination.getExtensionContextId());
-  await verifyRecoveryPalette(destination, destination.getExtensionContextId(), { nativeCopy: true });
+  await verifyDestinationCopyNotice(destination, destination.getExtensionContextId(), { nativeCopy: true });
+  await destination.evaluate("window.__capSmokeShowRecovery('Generic destination carry.', false, true)", destination.getExtensionContextId());
+  await verifyDestinationCopyNotice(destination, destination.getExtensionContextId());
   assert.equal(await destination.evaluate("document.querySelector('form textarea').value"), "My existing draft");
   assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
+  await verifyCopyNoticeTeardown(destination, destination.getExtensionContextId());
   process.stdout.write("✓ Draft detected on first check: one destination, intact draft, both copy boxes hold the exact carry, no Send.\n");
 }
 
@@ -1678,7 +1683,197 @@ async function verifyCompactDraftPayload(session, contextId) {
   assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-text').value", contextId), details.text);
 }
 
+async function verifyDestinationCopyNotice(session, contextId, { nativeCopy = false } = {}) {
+  await session.call("Emulation.setFocusEmulationEnabled", { enabled: true });
+  const result = await session.evaluate(`(async () => {
+    let modal = document.getElementById("context-generator-fallback-modal");
+    const payload = modal.contextGeneratorCopyText;
+    const draft = modal.dataset.variant === "draft";
+    let copy = document.getElementById("context-generator-fallback-copy");
+    const label = copy.textContent;
+    const initialBackground = copy.style.background;
+    const clipboard = navigator.clipboard;
+    const originalWrite = Object.getOwnPropertyDescriptor(clipboard, "writeText");
+    const originalExec = Object.getOwnPropertyDescriptor(document, "execCommand");
+    const nativeTimeout = window.setTimeout, nativeClearTimeout = window.clearTimeout;
+    const timers = new Map();
+    const wait = ms => new Promise(resolve => nativeTimeout(resolve, ms));
+    const check = (value, message) => { if (!value) throw new Error(message); };
+    const reopen = (text = payload) => {
+      window.__capSmokeShowRecovery(text, draft, true);
+      modal = document.getElementById("context-generator-fallback-modal");
+      copy = document.getElementById("context-generator-fallback-copy");
+    };
+    const setWrite = value => Object.defineProperty(clipboard, "writeText", { configurable: true, value });
+    const exec = value => Object.defineProperty(document, "execCommand", { configurable: true, value });
+    let copied = null, nativeCopies = 0;
+    const normalWrite = async text => { copied = text; };
+    const rules = document.createElement("style");
+    window.setTimeout = (callback, ms, ...args) => {
+      const id = nativeTimeout(callback, ms, ...args);
+      if (ms === 16000 || ms === 8000) timers.set(id, { callback, ms, cleared: false });
+      return id;
+    };
+    window.clearTimeout = id => {
+      if (timers.has(id)) timers.get(id).cleared = true;
+      return nativeClearTimeout(id);
+    };
+    const toast = () => document.getElementById("context-generator-error-overlay");
+    const copyAndFade = async () => {
+      document.getElementById("context-generator-fallback-copy").click();
+      await wait(0);
+      const box = document.getElementById("context-generator-fallback-modal");
+      check(box?.isConnected && box.style.opacity === "0", "Successful destination copy must fade before removal.");
+      const button = document.getElementById("context-generator-fallback-copy");
+      check(button.textContent === "Copied!" && button.style.background !== initialBackground, "Copied/green feedback must precede the fade.");
+      await wait(260);
+      check(!document.getElementById("context-generator-fallback-modal"), "Only the destination copy box must close.");
+      check(toast()?.getAttribute("role") === "status", "Successful copying must show a status, not an error.");
+    };
+    try {
+      check(modal.contextGeneratorDestinationCopy === true, "Exercise a real destination recovery box.");
+      exec(() => { nativeCopies++; return false; });
+      // Pending writes and rejected writes must never rewrite a newer carry.
+      for (const rejectOld of [false, true]) {
+        let settle;
+        setWrite(() => new Promise((resolve, reject) => { settle = () => rejectOld ? reject(new Error("stale")) : resolve(); }));
+        copy.click();
+        check(modal.style.opacity !== "0", "Keep the dialog until copying actually succeeds.");
+        reopen(payload + " Newer carry.");
+        settle();
+        await wait(260);
+        check(modal.isConnected && modal.contextGeneratorCopyText.endsWith(" Newer carry.") && copy.textContent === label,
+          "Stale copy completion must leave the newer carry/feedback intact.");
+      }
+      check(nativeCopies === 0, "A stale rejection must not run native copying against a newer carry.");
+      setWrite(normalWrite);
+      reopen();
+      copy.click();
+      await wait(0);
+      check(copy.textContent === "Copied!" && modal.style.opacity === "0", "Show success during the fade.");
+      reopen(payload + " Replacement during fade.");
+      await wait(260);
+      check(modal.isConnected && modal.style.opacity === "1" && copy.textContent === label && copy.style.background === initialBackground,
+        "Reusing the fading dialog must reset success feedback and cancel old closure.");
+      reopen();
+      await copyAndFade();
+      check(copied === payload, "Copy the entire carry, including any hidden preview wrapper.");
+      const notice = toast(), again = document.getElementById("context-generator-error-copy-again");
+      check(notice.style.top === "80px" && notice.style.bottom === "auto" && notice.style.right === "20px", "Copied notice belongs at the agreed top-right inset.");
+      check(notice.style.backdropFilter.includes("blur(30px)"), "Keep the approved translucent material.");
+      const before = getComputedStyle(notice).backgroundImage;
+      rules.textContent = '#context-generator-error-overlay{background:red!important;font-family:serif!important} #context-generator-error-overlay button{background:red!important;color:red!important}';
+      document.head.appendChild(rules);
+      check(getComputedStyle(notice).backgroundImage === before && getComputedStyle(again).color !== "rgb(255, 0, 0)", "Host theme CSS must not replace the approved notice palette.");
+      rules.remove();
+      const firstTimer = notice.contextGeneratorHideTimer;
+      check(timers.get(firstTimer)?.ms === 16000, "Copied notice expires after sixteen seconds.");
+      again.click();
+      await wait(0);
+      check(copied === payload && again.textContent === "Copied again!", "Copy again retains the complete carry.");
+      const repeatTimer = notice.contextGeneratorHideTimer;
+      check(timers.get(firstTimer).cleared && repeatTimer !== firstTimer && timers.get(repeatTimer)?.ms === 16000,
+        "Successful repeat copying restarts the sixteen-second timer.");
+      // Execute the actual scheduled callback, rather than waiting sixteen
+      // seconds in each browser run; retain exact scheduled-duration checks.
+      nativeClearTimeout(repeatTimer);
+      timers.get(repeatTimer).callback();
+      check(notice.getAttribute("aria-hidden") === "true" && again.onclick === null, "Expiry releases the carry callback.");
+      reopen();
+      setWrite(async () => { throw new Error("clipboard denied"); });
+      copy.click();
+      await wait(0);
+      const manual = document.getElementById("context-generator-fallback-text");
+      check(modal.isConnected && copy.textContent === "Select text and copy manually" && manual.value === payload
+        && manual.selectionStart === 0 && manual.selectionEnd === payload.length, "Failed copying retains full selected text for manual recovery.");
+      if (${nativeCopy}) {
+        exec(command => { nativeCopies++; return command === "copy"; });
+      } else setWrite(normalWrite);
+      await copyAndFade();
+      setWrite(async () => { throw new Error("repeat denied"); });
+      document.getElementById("context-generator-error-copy-again").click();
+      await wait(0);
+      const recovered = document.getElementById("context-generator-fallback-modal");
+      check(recovered?.contextGeneratorCopyText === payload && recovered.contextGeneratorDestinationCopy,
+        "Repeat-copy failure reopens destination recovery with the exact carry.");
+      setWrite(normalWrite);
+      await copyAndFade();
+      let rejectRepeat;
+      setWrite(() => new Promise((resolve, reject) => { rejectRepeat = reject; }));
+      document.getElementById("context-generator-error-copy-again").click();
+      reopen(payload + " New destination recovery.");
+      rejectRepeat(new Error("old repeat failed"));
+      await wait(0);
+      check(document.getElementById("context-generator-fallback-modal").contextGeneratorCopyText.endsWith(" New destination recovery."),
+        "A stale repeat failure cannot replace newer destination recovery.");
+      setWrite(normalWrite);
+      reopen();
+      await copyAndFade();
+      document.getElementById("context-generator-error-dismiss").click();
+      check(toast().getAttribute("aria-hidden") === "true" && document.getElementById("context-generator-error-copy-again").onclick === null,
+        "Dismiss releases the callback immediately.");
+      window.__capSmokeShowError("Synthetic ordinary error.");
+      check(toast().getAttribute("role") === "alert" && toast().style.top === "auto" && toast().style.bottom === "80px"
+        && toast().style.backdropFilter === "none" && timers.get(toast().contextGeneratorHideTimer)?.ms === 8000,
+        "An ordinary error restores its original placement, palette and duration.");
+      check(document.getElementById("context-generator-error-copy-again").style.display === "none", "Error notices cannot retain copy actions.");
+      document.getElementById("context-generator-error-dismiss").click();
+      return { passed: true, nativeCopy: ${nativeCopy} };
+    } finally {
+      if (originalWrite) Object.defineProperty(clipboard, "writeText", originalWrite); else delete clipboard.writeText;
+      if (originalExec) Object.defineProperty(document, "execCommand", originalExec); else delete document.execCommand;
+      window.setTimeout = nativeTimeout;
+      window.clearTimeout = nativeClearTimeout;
+      rules.remove();
+      reopen();
+    }
+  })()`, contextId);
+  assert.equal(result.passed, true);
+  process.stdout.write(`✓ Destination copy: green fade, exact ${nativeCopy ? "native-fallback" : "Clipboard API"} payload, Copy again, 16-second expiry, dismissal, stale completions and original error styling.\n`);
+}
+
+async function verifyCopyNoticeTeardown(session, contextId) {
+  await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  const result = await session.evaluate(`(async () => {
+    const clipboard = navigator.clipboard;
+    const original = Object.getOwnPropertyDescriptor(clipboard, "writeText");
+    let writes = 0, rejectCopy;
+    const wait = () => new Promise(resolve => window.setTimeout(resolve, 0));
+    try {
+      Object.defineProperty(clipboard, "writeText", { configurable: true, value: async () => { writes++; } });
+      window.__capSmokeShowRecovery("Carry before teardown.", true, true);
+      document.getElementById("context-generator-fallback-copy").click();
+      await wait();
+      const reducedMotion = !document.getElementById("context-generator-fallback-modal");
+      const notice = document.getElementById("context-generator-error-overlay");
+      const copy = document.getElementById("context-generator-error-copy-again");
+      const staleClick = copy.onclick;
+      Object.defineProperty(clipboard, "writeText", { configurable: true, value: () => {
+        writes++; return new Promise((resolve, reject) => { rejectCopy = reject; });
+      } });
+      copy.click();
+      window.__contextGeneratorPlatformTeardown({ preserveSharedUi: true });
+      const released = copy.onclick === null && notice.contextGeneratorCopyNoticeOwner === null;
+      const replacement = document.createElement("div");
+      replacement.id = "context-generator-fallback-modal";
+      replacement.textContent = "Replacement instance UI";
+      document.body.appendChild(replacement);
+      rejectCopy(new Error("old-world clipboard rejection"));
+      await wait();
+      await staleClick();
+      const preserved = replacement.isConnected && replacement.textContent === "Replacement instance UI" && writes === 2;
+      replacement.remove();
+      return { reducedMotion, released, preserved };
+    } finally {
+      if (original) Object.defineProperty(clipboard, "writeText", original); else delete clipboard.writeText;
+    }
+  })()`, contextId);
+  assert.deepEqual(result, { reducedMotion: true, released: true, preserved: true });
+  process.stdout.write("✓ Reduced motion skips the fade; teardown releases pending Copy again without changing replacement-instance UI.\n");
+}
+
 async function verifyRecoveryPalette(session, contextId, { nativeCopy = false } = {}) {
+  await session.call("Emulation.setFocusEmulationEnabled", { enabled: true });
   const result = await session.evaluate(`(async () => {
     const modal = document.getElementById("context-generator-fallback-modal");
     const title = document.getElementById("context-generator-fallback-title");
