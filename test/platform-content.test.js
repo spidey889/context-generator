@@ -310,6 +310,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   const resizeObservers = [];
   const mutationObservers = [];
   const animationFrameCallbacks = [];
+  const cancelledAnimationFrames = new Set();
   const runtimeMessageListeners = [];
   const documentListeners = new Map();
   const windowListeners = new Map();
@@ -412,7 +413,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
       animationFrameCallbacks.push(callback);
       return animationFrameCallbacks.length;
     },
-    cancelAnimationFrame: () => {},
+    cancelAnimationFrame: id => cancelledAnimationFrames.add(id),
     setTimeout,
     clearTimeout,
     setInterval,
@@ -494,6 +495,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
       windowListeners.get("popstate")?.forEach(listener => listener({}));
     };
     hooks.animationFrameCallbacks = animationFrameCallbacks;
+    hooks.cancelledAnimationFrames = cancelledAnimationFrames;
     hooks.runtimeMessageListeners = runtimeMessageListeners;
     hooks.setVisibility = (state) => {
       document.visibilityState = state;
@@ -783,6 +785,31 @@ clockTest("pending picker dismissal preserves reopened picker and newer page foc
   }
 });
 
+clockTest("a cancelled handoff press cannot hide a newly reopened picker", async (t) => {
+  const { hooks, bubble, sheet, tile, focusCalls } = makePickerFocusFixture();
+  const trace = hooks.beginTransferAttempt("claude", "destination tile");
+  const transition = hooks.transitionDestinationSheetToHandoff(trace);
+  const cancelled = assert.rejects(transition, error => error.code === "user_cancelled");
+  t.mock.timers.tick(75);
+  hooks.dispatchDocumentEvent("keydown", { key: "Escape", isTrusted: true,
+    preventDefault() {}, stopImmediatePropagation() {} });
+  assert.equal(trace.cancelled, true);
+  // Model the next picker opening before the old 150 ms press finishes.
+  sheet.setAttribute("aria-hidden", "false");
+  sheet.style.display = "block";
+  sheet.style.opacity = "1";
+  bubble.setAttribute("aria-expanded", "true");
+  hooks.document.activeElement = tile;
+  t.mock.timers.tick(75);
+  await cancelled;
+  assert.equal(sheet.getAttribute("aria-hidden"), "false");
+  assert.equal(sheet.style.display, "block");
+  assert.equal(sheet.style.opacity, "1");
+  assert.equal(bubble.getAttribute("aria-expanded"), "true");
+  assert.equal(hooks.document.activeElement, tile);
+  assert.deepEqual(focusCalls, [], "an old attempt must not restore composer focus");
+});
+
 test("reinjection tears down every resource owned by the previous content-script instance", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox" },
@@ -955,6 +982,153 @@ test("a hidden local handoff skips motion and cancelled preparation cannot finis
   const cancelled = hooks.createTransferTrace("chatgpt", "test");
   await assert.rejects(hooks.completeLocalHandoff(cancelled, Promise.resolve().then(() => { cancelled.cancelled = true; })), /cancelled/i);
   assert.ok(!cancelled.marks.some(mark => mark.label === "local handoff done"));
+});
+
+function createHandoffMotionFixture(stageId = "capture") {
+  const hooks = loadPlatformContent([]);
+  const properties = new Map();
+  const stage = new FakeElement();
+  stage.dataset.state = "active";
+  stage.dataset.contextGeneratorLineProgress = stageId === "capture" ? "0.0400" : "0.0500";
+  stage.style.setProperty = (key, value) => properties.set(key, value);
+  const overlay = new FakeElement();
+  overlay.style.display = "flex";
+  overlay.classList = { remove() {} };
+  const progress = new FakeElement();
+  progress.querySelector = () => stage;
+  hooks.registerElementId("context-generator-overlay", overlay);
+  hooks.registerElementId("context-generator-handoff-progress", progress);
+  hooks.document.querySelector = () => stage;
+  let now = 1000, nextFrame = 0;
+  hooks.window.performance.now = () => now;
+  const paint = elapsed => {
+    now += elapsed;
+    while (nextFrame < hooks.animationFrameCallbacks.length) {
+      const id = ++nextFrame;
+      const callback = hooks.animationFrameCallbacks[id - 1];
+      if (!hooks.cancelledAnimationFrames.has(id)) { callback(); return true; }
+    }
+    return false;
+  };
+  return { hooks, stage, properties, paint };
+}
+
+test("native handoff activity advances gently without completing and cancel cleanup retires its frame", () => {
+  const { hooks, stage, paint } = createHandoffMotionFixture();
+  hooks.startHandoffActivityProgress("capture");
+  let previous = Number(stage.dataset.contextGeneratorLineProgress);
+  for (const elapsed of [1000, 14000, 30000, 60000]) {
+    assert.equal(paint(elapsed), true);
+    const current = Number(stage.dataset.contextGeneratorLineProgress);
+    assert.ok(current > previous && current < 0.94, "Pending capture must move forward without claiming completion.");
+    previous = current;
+  }
+  // The same cleanup used by source cancellation must retire the live frame.
+  hooks.resetRunningFlag({ immediate: true });
+  assert.equal(paint(60000), false);
+  assert.equal(Number(stage.dataset.contextGeneratorLineProgress), previous);
+});
+
+test("native handoff activity respects reduced motion", () => {
+  const { hooks, stage, paint } = createHandoffMotionFixture();
+  hooks.window.matchMedia = () => ({ matches: true });
+  hooks.startHandoffActivityProgress("capture");
+  assert.equal(paint(60000), false);
+  assert.equal(stage.dataset.contextGeneratorLineProgress, "0.0400");
+});
+
+test("native handoff activity keeps its position when DOM recovery resumes measured progress", () => {
+  const { hooks, stage, properties, paint } = createHandoffMotionFixture();
+  hooks.startHandoffActivityProgress("capture");
+  paint(30000);
+  const nativePosition = Number(stage.dataset.contextGeneratorLineProgress);
+  hooks.stopHandoffActivityProgress();
+  hooks.reportHandoffCaptureProgress({ scrollTop: 0, scrollRemaining: 1000 });
+  assert.equal(paint(16), true);
+  assert.equal(Number(stage.dataset.contextGeneratorLineProgress), nativePosition);
+  assert.equal(properties.get("--context-generator-stage-progress-duration"), "1.35s");
+  hooks.reportHandoffCaptureProgress({ scrollTop: 950, scrollRemaining: 50 });
+  paint(16);
+  assert.ok(Number(stage.dataset.contextGeneratorLineProgress) > nativePosition);
+  assert.ok(Number(stage.dataset.contextGeneratorLineProgress) < 0.94);
+});
+
+test("summary handoff activity keeps moving beyond its estimate and preserves progress when restarted", () => {
+  for (const inputChars of [10000, 120000]) {
+    const { hooks, stage, paint } = createHandoffMotionFixture("summary");
+    hooks.startHandoffActivityProgress("summary", inputChars);
+    let previous = Number(stage.dataset.contextGeneratorLineProgress);
+    for (const elapsed of [1000, 70000, 70000]) {
+      assert.equal(paint(elapsed), true);
+      const current = Number(stage.dataset.contextGeneratorLineProgress);
+      assert.ok(current > previous && current < 1, "Pending summary must keep advancing after the display estimate.");
+      previous = current;
+    }
+    hooks.startHandoffActivityProgress("summary", inputChars);
+    assert.equal(paint(16), true);
+    assert.ok(Number(stage.dataset.contextGeneratorLineProgress) >= previous, "Restarting activity cannot move the line backwards.");
+    hooks.stopHandoffActivityProgress();
+    assert.equal(paint(1000), false);
+  }
+});
+
+function createHandoffCompletionFixture(activeStage = "summary") {
+  const hooks = loadPlatformContent([]);
+  const stageIds = ["capture", "summary", "paste"];
+  const stages = stageIds.map((id, index) => {
+    const stage = new FakeElement();
+    stage.dataset.state = index < stageIds.indexOf(activeStage) ? "complete" : id === activeStage ? "active" : "upcoming";
+    stage.dataset.contextGeneratorLineProgress = stage.dataset.state === "complete" ? "1.0000" : "0.3500";
+    stage.properties = new Map();
+    stage.writes = [];
+    stage.style.setProperty = (key, value) => { stage.properties.set(key, value); stage.writes.push([key, value]); };
+    // The target may differ from the rendered width during a live transition.
+    const connector = new FakeElement({ rect: { width: 100 } });
+    const fill = new FakeElement({ rect: { width: stage.dataset.state === "complete" ? 100 : 35 } });
+    stage.querySelector = selector => selector.endsWith("-connector") ? connector : selector.endsWith("-connector-fill") ? fill : null;
+    return stage;
+  });
+  const findStage = selector => stages[stageIds.findIndex(id => selector.includes(`'${id}'`))] || null;
+  const progress = new FakeElement();
+  progress.querySelector = findStage;
+  progress.querySelectorAll = () => stages;
+  const status = new FakeElement();
+  status.querySelector = () => new FakeElement();
+  const overlay = new FakeElement();
+  overlay.classList = { remove() {} };
+  overlay.style.display = "flex";
+  for (const [id, element] of [["context-generator-overlay", overlay], ["context-generator-handoff-progress", progress],
+    ["context-generator-text", status], ["context-generator-text-label", new FakeElement()]]) hooks.registerElementId(id, element);
+  hooks.document.querySelector = findStage;
+  return { hooks, stage: stages[stageIds.indexOf(activeStage)] };
+}
+
+test("handoff completion glides from the rendered position and the next stage preserves that glide", () => {
+  for (const activeStage of ["capture", "summary"]) {
+    const { hooks, stage } = createHandoffCompletionFixture(activeStage);
+    hooks.setHandoffProgress(activeStage, "done");
+    assert.equal(stage.dataset.state, "complete");
+    assert.equal(stage.properties.get("--context-generator-stage-progress-duration"), "220ms");
+    assert.equal(stage.properties.get("--context-generator-stage-progress-easing"), "ease-out");
+    const ratioWrites = stage.writes.filter(([key]) => key === "--context-generator-stage-progress-ratio").map(([, value]) => value);
+    assert.deepEqual(ratioWrites, ["0.3500", "1.0000"], "Completion must start at the visible width before targeting the end.");
+    const writesBeforeAdvance = stage.writes.length;
+    hooks.setHandoffProgress(activeStage === "capture" ? "summary" : "paste", "active");
+    assert.equal(stage.writes.length, writesBeforeAdvance, "The next stage cannot snap or restart a line already completing.");
+    hooks.stopHandoffActivityProgress();
+  }
+});
+
+test("handoff completion is immediate when hidden or reduced motion is requested", () => {
+  for (const mode of ["hidden", "reduced"]) {
+    const { hooks, stage } = createHandoffCompletionFixture();
+    if (mode === "hidden") hooks.document.visibilityState = "hidden";
+    else hooks.window.matchMedia = () => ({ matches: true });
+    hooks.setHandoffProgress("summary", "done");
+    assert.equal(stage.properties.get("--context-generator-stage-progress-duration"), "0ms", mode);
+    assert.equal(stage.dataset.contextGeneratorLineProgress, "1.0000", mode);
+    assert.equal(hooks.animationFrameCallbacks.length, 0, mode);
+  }
 });
 
 test("new-chat routes never bypass empty detection, while saved JSON chats may be unrendered", () => {

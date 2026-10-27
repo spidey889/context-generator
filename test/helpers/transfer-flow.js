@@ -39,6 +39,9 @@ function loadTransferFlow(overrides) {
     getConversationTurns: () => [],
     isSourceReplyInProgress: () => false,
     isHandoffOverlayVisible: () => false,
+    // Motion belongs to the full-page/browser fixtures. These extracted flows
+    // retain real capture/retry ownership while stubbing their UI boundaries.
+    startHandoffActivityProgress() {}, stopHandoffActivityProgress() {},
     setTimeout: () => 1, setInterval: () => 1, clearTimeout() {}, clearInterval() {},
     notifyBackground: async () => ({ ok: true }), showDomCaptureEstimate() {},
     addOwnedEventListener: (target, type, listener) => target?.addEventListener?.(type, listener),

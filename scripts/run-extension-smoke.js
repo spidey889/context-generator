@@ -58,6 +58,8 @@ const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process
 const DEEPSEEK_DOM_SIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "dom-size-check";
 const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
+const JSON_HANDOFF_SMOKE = JSON_SOURCE === "chatgpt" && ["1", "cancel"].includes(process.env.CAP_CONTEXT_JSON_HANDOFF_SMOKE);
+const JSON_HANDOFF_CANCEL_SMOKE = JSON_HANDOFF_SMOKE && process.env.CAP_CONTEXT_JSON_HANDOFF_SMOKE === "cancel";
 const DOM_ESTIMATE_SMOKE = process.env.CAP_CONTEXT_DOM_ESTIMATE_SMOKE === "1";
 if (DOM_ESTIMATE_SMOKE) assert.equal(JSON_SOURCE, "deepseek", "DOM estimate smoke uses native DeepSeek count recovery.");
 const GEMINI_DESTINATION_SMOKE = process.env.CAP_CONTEXT_GEMINI_DESTINATION_SMOKE === "1";
@@ -984,6 +986,14 @@ async function startFixtureServer() {
       }
       response.writeHead(full && CHATGPT_FAILURE_SMOKE === "ranged" ? 206 : 200, { "Content-Type": "application/json" });
       const history = JSON.stringify(full ? chatGptTreeFixture() : { messages: [], page_info: { has_previous_page: true } });
+      // Keep the first native read pending across destination selection, as a
+      // large real chat does. The discovery request remains unaffected.
+      if (full && JSON_HANDOFF_SMOKE && !state.captureHeld) {
+        state.captureHeld = true;
+        response.once("close", () => { state.captureAborted = !response.writableFinished; });
+        state.releaseCapture = () => { response.end(history); state.releaseCapture = null; };
+        return;
+      }
       if (full && CHATGPT_HISTORY_OVERSIZE_SMOKE) streamOversizedFixtureResponse(response, history, state.oversizeHistory, 40);
       else response.end(history);
       return;
@@ -2126,11 +2136,12 @@ async function verifyHandoffPalette(session) {
   })`, contextId);
   assert.equal(firstCaption, "Capturing chat", "Instant JSON capture must paint its own caption before the summary caption");
   await waitFor(async () => await session.evaluate('document.getElementById("context-generator-text-label").textContent') === "Summarizing", "the capture cue completing before summary presentation");
-  assert.ok(await session.evaluate(`(() => {
+  // The real stage can advance while its nonblocking finish glide is visible.
+  await waitFor(() => session.evaluate(`(() => {
     const capture = document.querySelector('[data-context-generator-stage="capture"]');
     return capture.querySelector('.context-generator-handoff-stage-connector-fill').getBoundingClientRect().width
-      / capture.querySelector('.context-generator-handoff-stage-connector').getBoundingClientRect().width >= 0.99;
-  })()`), "The capture line must be complete when Summarizing appears");
+      / capture.querySelector('.context-generator-handoff-stage-connector').getBoundingClientRect().width >= 0.999;
+  })()`), "capture line finishing its glide after Summarizing starts", 1000);
   await session.evaluate('window.__capSmokeRebuildHandoff(); window.__capSmokeHandoffStage("capture"); window.__capSmokeHandoffStage("capture", "done"); window.__capSmokeHandoffStage("summary"); window.__capSmokeHandoffStage("paste", "done")', contextId);
   await session.evaluate("new Promise(resolve => setTimeout(resolve, 500))");
   assert.equal(await session.evaluate('document.getElementById("context-generator-text-label").textContent'), "Pasted into Claude",
@@ -2151,6 +2162,35 @@ async function verifyHandoffPalette(session) {
   await session.evaluate("new Promise(resolve => setTimeout(resolve, 400))");
   assert.deepEqual(firstFrameMarkers, await session.evaluate(markerStyles),
     "Capture must lose its highlight and summary must gain it in the same frame as the heading");
+  const lineMotion = await session.evaluate(`new Promise(resolve => {
+    const read = () => {
+      const stage = document.querySelector('[data-context-generator-stage="summary"]');
+      return stage.querySelector('.context-generator-handoff-stage-connector-fill').getBoundingClientRect().width
+        / stage.querySelector('.context-generator-handoff-stage-connector').getBoundingClientRect().width;
+    };
+    window.__capSmokeHandoffStage("summary");
+    const start = read();
+    setTimeout(() => {
+      const running = read();
+      window.__capSmokeHandoffStage("summary", "done");
+      window.__capSmokeHandoffStage("paste");
+      const immediate = read();
+      const fill = document.querySelector('[data-context-generator-stage="summary"] .context-generator-handoff-stage-connector-fill');
+      const finish = fill.getAnimations().find(animation => animation.transitionProperty === "transform");
+      // Seek the browser's real transition instead of relying on a 60ms timer
+      // being delivered before completion on a busy CI display.
+      if (finish) { finish.pause(); finish.currentTime = 60; }
+      const middle = read();
+      finish?.finish();
+      resolve({ start, running, immediate, middle, end: read(), finishing: Boolean(finish) });
+    }, 600);
+  })`, contextId);
+  assert.ok(lineMotion.running > lineMotion.start && lineMotion.running < 0.9,
+    `Pending summary moves smoothly: ${JSON.stringify(lineMotion)}`);
+  assert.ok(lineMotion.finishing && lineMotion.immediate < 0.99 && lineMotion.middle > lineMotion.immediate && lineMotion.middle < 0.999,
+    `Abrupt completion glides through an intermediate width across the paste update: ${JSON.stringify(lineMotion)}`);
+  assert.ok(lineMotion.end >= 0.999, "The completion glide reaches the end.");
+  process.stdout.write("✓ Handoff line keeps moving while pending and glides to completion across stage changes.\n");
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await session.evaluate(`window.__capHandoffPaletteSnapshot = () => {
     const root = document.getElementById("context-generator-overlay");
@@ -3120,7 +3160,7 @@ async function run() {
       const beforePickerTelemetry = state.telemetryRequests.length;
       // Exercise capture reuse through the immediate handoff too; the other
       // JSON platforms and ordinary DOM smoke retain the animated transition.
-      if (JSON_SOURCE === "chatgpt") await sourceSession.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+      if (JSON_SOURCE === "chatgpt" && !JSON_HANDOFF_SMOKE) await sourceSession.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
       if (JSON_RETRY_SMOKE) {
         // The disposable source tab goes offline for prefetch, then returns
         // online with its picker still open: the user's actual failure sequence.
@@ -3136,7 +3176,8 @@ async function run() {
       const dependencies = await sourceSession.evaluate("({metrics:typeof globalThis.CapJsonCaptureMetrics,windowMetrics:typeof window.CapJsonCaptureMetrics,contract:typeof globalThis.CapTransferDiagnostics,same:globalThis===window,network:typeof window.__capCaptureNetworkJson})", extensionContextId);
       assert.equal(dependencies.metrics, "object", `The isolated JSON bridge must have its metrics dependency: ${JSON.stringify(dependencies)}`);
       // Opening yields to paint before prefetch starts; the first probe may be false.
-      await waitFor(() => sourceSession.evaluate("window.__capSmokePickerJsonReady()", extensionContextId), "picker JSON capture after its opening paint");
+      if (JSON_HANDOFF_SMOKE) await waitFor(() => Boolean(state.releaseCapture), "pending native history request");
+      else await waitFor(() => sourceSession.evaluate("window.__capSmokePickerJsonReady()", extensionContextId), "picker JSON capture after its opening paint");
       if (JSON_RETRY_SMOKE) {
         assert.equal(await sourceSession.evaluate("window.__capSmokePickerJsonFailure()", extensionContextId), "network_error");
         assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer, "Offline prefetch must fail before reaching the fixture server.");
@@ -3145,7 +3186,8 @@ async function run() {
       } else if (RATE_LIMIT_RETRY_SMOKE) {
         assert.equal(await sourceSession.evaluate("window.__capSmokePickerJsonFailure()", extensionContextId), "http_error");
         assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1, "The picker must not retry a rate limit before destination selection.");
-      } else assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer,
+      } else if (JSON_HANDOFF_SMOKE) assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer, "Picker started the held native request.");
+      else assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer,
         `Opening the orb must start native JSON capture before selection (detail=${await sourceSession.evaluate("window.__capSmokePickerJsonFailure()", extensionContextId)}, code=${await sourceSession.evaluate("window.__capSmokePickerJsonErrorCode()", extensionContextId)}, missing=${await sourceSession.evaluate("window.__capSmokeMissingIdentifier()", extensionContextId)}).`);
       if (TOOLBAR_SMOKE) {
         const reads = state.jsonRequests;
@@ -3225,6 +3267,44 @@ async function run() {
     assert.equal(clickResult.hoverPreserved, true, `Dark Reader must not recolor the picker's hover palette: ${JSON.stringify(clickResult.backgrounds)}`);
     assert.equal(clickResult.selectedPreserved, true, "Dark Reader must not recolor the selected destination tile.");
     assert.equal(clickResult.pickerStyleIgnored, true, "Dark Reader must leave the picker stylesheet alone.");
+
+    if (JSON_HANDOFF_SMOKE) {
+      try {
+        await waitFor(() => sourceSession.evaluate(`(() => {
+          const overlay = document.getElementById("context-generator-overlay");
+          return overlay?.getAttribute("aria-hidden") === "false"
+            && document.getElementById("context-generator-destination-sheet")?.getAttribute("aria-hidden") === "true"
+            && document.getElementById("context-generator-text-label")?.textContent === "Capturing chat";
+        })()`), "handoff shown while JSON remains pending", 2500);
+        const readCaptureLine = () => sourceSession.evaluate(`(() => {
+          const stage = document.querySelector("[data-context-generator-stage='capture']");
+          return stage.querySelector('.context-generator-handoff-stage-connector-fill').getBoundingClientRect().width
+            / stage.querySelector('.context-generator-handoff-stage-connector').getBoundingClientRect().width;
+        })()`);
+        const firstProgress = await readCaptureLine();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const laterProgress = await readCaptureLine();
+        assert.ok(laterProgress > firstProgress && laterProgress < 0.94,
+          `Pending capture moves gently without claiming completion (${firstProgress} -> ${laterProgress}).`);
+        assert.equal(state.summaryRequests.length, 0, "Pending capture must not start summarization.");
+        assert.ok(state.releaseCapture, "The handoff must open before native history is released.");
+        if (HANDOFF_SCREENSHOT_PATH) {
+          const shot = await sourceSession.call("Page.captureScreenshot", { format: "png" });
+          await fs.promises.writeFile(HANDOFF_SCREENSHOT_PATH, Buffer.from(shot.data, "base64"));
+        }
+        process.stdout.write("✓ Pending JSON capture uses the handoff, closes the picker and moves its capture line before summarization.\n");
+        if (JSON_HANDOFF_CANCEL_SMOKE) {
+          await sourceSession.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+          await sourceSession.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+          await waitFor(() => state.captureAborted, "native read aborted by source Escape");
+          await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-overlay").getAttribute("aria-hidden") === "true"'), "cancelled handoff hidden");
+          assert.equal(state.summaryRequests.length, 0);
+          assert.equal(await sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text"))'), false);
+          process.stdout.write("✓ Trusted Escape during native capture stops the read and handoff without summarizing or pasting.\n");
+          return;
+        }
+      } finally { state.releaseCapture?.(); }
+    }
 
     if (DEEPSEEK_DOM_SIZE_SMOKE) {
       await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the background DOM size rejection");
@@ -3688,6 +3768,7 @@ async function run() {
       await waitForProcessExit(braveProcess, 2000);
     }
     state.releasePickerLoad();
+    state.releaseCapture?.();
     await new Promise((resolve) => server.close(resolve));
     await telemetryFixture.close();
     const safeTempRoot = path.resolve(tempRoot);
