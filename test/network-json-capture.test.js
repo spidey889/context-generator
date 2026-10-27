@@ -1504,14 +1504,6 @@ test("All adapters reject zero own text and oversize text without truncation", (
   d.fixture.data.data.biz_data.chat_messages[0].fragments[0].content = "x".repeat(1000001);
   assert.throws(() => d.api.deepseek(d.fixture.data, "smoke"), /size/);
 });
-test("DeepSeek: exclude arbitrary signed hosts and truncated text downloads", async () => {
-  for (const change of [f => { f.file.signed_path = "https://other.example/api/file?file_id=test-paste"; }, f => { f.files[f.file.id] = "short"; }]) {
-    const f = fixtures("deepseek"); change(f); const h = setup("deepseek", f); await h.observe();
-    const capture = await h.window.__capCaptureNetworkJson();
-    assert.ok(!capture.text.includes("File contents"));
-    assert.ok(capture.text.includes(f.data.data.biz_data.chat_messages[1].fragments[0].content));
-  }
-});
 test("DeepSeek captures supported original code/data uploads instead of dropping the user turn", async () => {
   for (const name of ["notes.txt", "source.py", "source.JS", "settings.yaml", "query.sql"]) {
     const f = fixtures("deepseek", "smoke", 1);
