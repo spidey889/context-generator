@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
 const { isDeepStrictEqual } = require("node:util");
 
-const PUBLIC_PAGES = new Set(["index.html", "privacy.html"]);
+const PUBLIC_PAGES = new Set(["privacy.html"]);
 const DOCUMENTS = new Set(["README.md", "LOGIC.md", "CHANGELOG.md", "PRIVACY.md", "LICENSE", "CNAME"]);
 const SHA = /^[0-9a-f]{40}$/;
 

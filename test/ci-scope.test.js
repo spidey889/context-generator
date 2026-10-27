@@ -21,9 +21,9 @@ test("CI light scope admits public media and docs while mixed/runtime/config cha
   }
 });
 
-test("homepage copy/CSS qualify, while scripts, handlers, links and markup remain full", () => {
+test("retained public-page copy/CSS qualify, while scripts, handlers, links and markup remain full", () => {
   const original = '<style>.hero{color:red}</style><p id="hero" style="color:red">Old copy</p><script>const note="<!-- old -->";</script>';
-  const scope = source => classifyChanges([changed("index.html")], (_, side) => side === "base" ? original : source);
+  const scope = source => classifyChanges([changed("privacy.html")], (_, side) => side === "base" ? original : source);
   assert.equal(scope(original.replace("Old copy", "New copy")), "light");
   assert.equal(scope(original.replace(/color:red/g, "color:blue")), "light");
   assert.equal(scope(`<!-- ordinary documentation -->${original}`), "light");
@@ -31,8 +31,9 @@ test("homepage copy/CSS qualify, while scripts, handlers, links and markup remai
     original.replace("<p ", '<p onclick="alert(1)" '), `${original}<img src="missing.png">`,
     original.replace("<script>", '<script src="external.js">')]) assert.equal(scope(source), "full");
   const handler = '<button onclick="show(\' style=red\')">Text</button>';
-  assert.equal(classifyChanges([changed("index.html")], (_, side) => side === "base" ? handler : handler.replace("red", "blue")), "full");
-  assert.equal(classifyChanges([{ ...changed("index.html"), oldMode: "000000" }]), "full");
+  assert.equal(classifyChanges([changed("privacy.html")], (_, side) => side === "base" ? handler : handler.replace("red", "blue")), "full");
+  assert.equal(classifyChanges([{ ...changed("privacy.html"), oldMode: "000000" }]), "full");
+  assert.equal(classifyChanges([changed("index.html")], () => original), "full");
 });
 
 test("only valid, increasing manifest versions qualify for lightweight checks", () => {

@@ -4,7 +4,7 @@ Switch AIs without explaining everything all over again.
 
 You already had the conversation. Cap Context helps you carry the useful parts to Claude, ChatGPT, Gemini, Grok, or DeepSeek and continue from there.
 
-[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf) · [Visit the website](https://context-generator-five.vercel.app/).
+[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf) · [Visit the website](https://spreadz.in/).
 
 ## What does it do?
 

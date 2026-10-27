@@ -1,4 +1,7 @@
 work/reference/
+# Finished exports are published in context-generator-website; keep regeneration local.
+/brag.mp4
+/brag.jpg
 work/frames/
 work/host-reference/
 work/audio/
