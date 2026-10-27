@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v195";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-glass-v196";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -9575,6 +9575,7 @@
       ].join(";");
 
       const accent = document.createElement("div");
+      accent.id = "context-generator-error-accent";
       accent.style.cssText = [
         "position:absolute",
         "inset:-1px",
@@ -9705,6 +9706,41 @@
             if (errorDiv.contextGeneratorCopyNoticeOwner === owner) copyAgain.disabled = false;
           }
         };
+      }
+    }
+    // Theme only copy confirmations; restore the original palette if an error
+    // later reuses this node. Keep glass colors inline-important for Dark Reader.
+    if (copiedContext || errorDiv.dataset.contextGeneratorCopyGlass === "true") {
+      const glass = Boolean(copiedContext);
+      errorDiv.dataset.contextGeneratorCopyGlass = String(glass);
+      errorDiv.style.setProperty("background", glass
+        ? "linear-gradient(145deg,rgba(64,67,64,0.80),rgba(35,39,38,0.74))"
+        : "linear-gradient(145deg,#111111 0%,#171721 58%,#101015 100%)", "important");
+      errorDiv.style.setProperty("border-color", glass ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.12)", "important");
+      errorDiv.style.setProperty("box-shadow", glass
+        ? "0 16px 48px rgba(0,0,0,0.24),inset 0 1px 0 rgba(255,255,255,0.09)"
+        : "0 18px 44px rgba(0,0,0,0.38),inset 0 1px 0 rgba(255,255,255,0.06)", "important");
+      errorDiv.style.backdropFilter = glass ? "blur(24px) saturate(115%)" : "none";
+      errorDiv.style.webkitBackdropFilter = errorDiv.style.backdropFilter;
+      errorDiv.style.padding = glass ? "16px" : "14px";
+      const accent = document.getElementById("context-generator-error-accent");
+      if (accent) accent.style.display = glass ? "none" : "block";
+      if (title) title.style.fontWeight = glass ? "700" : "760";
+      if (textSpan) textSpan.style.setProperty("color", glass ? "rgba(244,247,244,0.84)" : "rgba(255,255,255,0.72)", "important");
+      if (mark) {
+        mark.style.setProperty("background", glass ? "rgba(164,218,188,0.12)" : "rgba(255,255,255,0.08)", "important");
+        mark.style.setProperty("border-color", glass ? "rgba(190,233,208,0.22)" : "rgba(255,255,255,0.14)", "important");
+        mark.style.setProperty("color", glass ? "#d8f2e4" : "#ffffff", "important");
+      }
+      const dismiss = document.getElementById("context-generator-error-dismiss");
+      if (dismiss) {
+        dismiss.style.setProperty("background", glass ? "rgba(255,255,255,0.045)" : "rgba(255,255,255,0.07)", "important");
+        dismiss.style.setProperty("border-color", glass ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.12)", "important");
+      }
+      if (copyAgain) {
+        copyAgain.style.setProperty("background", "rgba(255,255,255,0.12)", "important");
+        copyAgain.style.setProperty("border-color", "rgba(255,255,255,0.20)", "important");
+        copyAgain.style.setProperty("color", "rgba(255,255,255,0.96)", "important");
       }
     }
     errorDiv.style.transition = reducedMotion ? "none" : "opacity 260ms ease,transform 260ms ease";
