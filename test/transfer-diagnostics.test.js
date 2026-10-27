@@ -59,6 +59,26 @@ test("attachment decoding clues survive both relays while private or arbitrary v
     assert.equal(validateTelemetryPayload(payload({ diagnostics: report({ [key]: "PRIVATE" }) })), null);
 });
 
+test("summary response failures use one closed schema at every ingress and retain at most two distinct attempts", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  const base = { attempt: 1, phase: "stream_read", reason: "body_read_failed", error_type: "TypeError" };
+  const report = entries => ({ version: 1, summary_response_failures: entries });
+  for (const [key, rule] of Object.entries(diagnostics.summaryResponseFailureSchema)) {
+    for (const value of [...(rule.values || (rule.type === "boolean" ? [true, false] : [rule.min || 0, rule.max])), "PRIVATE", null]) {
+      const input = report([{ ...base, [key]: value }]);
+      const valid = typeof value === rule.type && (rule.values ? rule.values.includes(value)
+        : rule.type !== "number" || Number.isInteger(value) && value >= (rule.min || 0) && value <= rule.max);
+      assert.equal(Boolean(validateTelemetryPayload(payload({ diagnostics: input }))), valid, key);
+      assert.equal(Boolean(edge.validateTelemetryPayload(payload({ diagnostics: input }))), valid, key);
+    }
+  }
+  for (const entries of [[base, base], [base, { ...base, attempt: 2 }, { ...base, attempt: 3 }], [{ attempt: 1 }], [null]])
+    assert.equal(diagnostics.validate(report(entries)), null);
+  for (const key of ["text", "summary", "filename", "url", "headers", "request_id", "stack", "message", "body"])
+    assert.equal(diagnostics.validate(report([{ ...base, [key]: "PRIVATE" }])), null);
+  assert.deepEqual(diagnostics.mergeSummaryResponseFailures([base, { ...base, attempt: 2 }], [base]), [base, { ...base, attempt: 2 }]);
+});
+
 test("unexpected exceptions retain their observed operation and type without inventing a cause", () => {
   const record = { version: 1, last_operation: "paste_verify", editor_seen: true, paste_populated: false };
   diagnostics.failure(record, new Error("PRIVATE account URL and chat text"), "destination", 500);
@@ -69,6 +89,52 @@ test("unexpected exceptions retain their observed operation and type without inv
   assert.equal(record.editor_seen, true);
   assert.equal(record.paste_events[0].code, "paste_failed");
   assert.doesNotMatch(JSON.stringify(record), /PRIVATE|account|URL|chat/);
+});
+
+test("JSON reporting keeps a reader's cause and stage over a generic unknown wrapper at every ingress", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  for (const [check, expected, code] of [["invalid_utf8", "invalid_utf8", "capture_json_failed"],
+    ["raw_total_stream_limit", "size_limit", "conversation_too_large"], ["duplicate_id", "invalid_branch", "capture_json_failed"]]) {
+    const error = Object.assign(new Error("PRIVATE chat https://PRIVATE/PRIVATE file PRIVATE.csv"), {
+      diagnosticCode: "unknown_error", code: "unknown_error",
+      diagnostics: { version: 1, error_code: "unknown_error", capture_detail: "network_error", capture_request_stage: "history", failure_site: "capture_history" },
+      jsonCapture: { outcome: "failed", mode: "fresh", failure_check: check, failure_stage: "attachment_body", failure_error_type: "TypeError",
+        failure_http_status: 200, http_status: 503 }
+    });
+    const details = diagnostics.errorDetails(error, "capture_json");
+    assert.equal(details.error_code, code);
+    assert.equal(details.capture_detail, expected);
+    assert.equal(details.capture_request_stage, "attachment_body");
+    assert.equal(details.failure_site, "capture_attachment_body");
+    assert.equal(details.error_type, "TypeError");
+    assert.equal(details.capture_http_status, 200, "Use the failing request, never another concurrent response.");
+    const report = { version: 1, ...details, json_attempts: [error.jsonCapture] };
+    assert.ok(validateTelemetryPayload(payload({ diagnostics: report })));
+    assert.ok(edge.validateTelemetryPayload(payload({ diagnostics: report })));
+    assert.doesNotMatch(JSON.stringify(report), /PRIVATE|https|csv/);
+    assert.equal(error.diagnostics.error_code, "unknown_error", "Reporting must not mutate retry inputs.");
+  }
+});
+
+test("unclassified JSON exceptions retain observed step and class without inventing a network cause", () => {
+  const error = Object.assign(new Error("PRIVATE filename.txt https://PRIVATE chat"), {
+    diagnostics: { version: 1, error_code: "unknown_error", capture_detail: "network_error", capture_request_stage: "history" },
+    jsonCapture: { outcome: "failed", mode: "fresh", failure_check: "unknown", failure_stage: "serialize", failure_error_type: "TypeError", http_status: 200 }
+  });
+  const details = diagnostics.errorDetails(error, "capture_json");
+  assert.equal(details.error_code, "capture_json_failed");
+  assert.equal(details.failure_site, "capture_serialize");
+  assert.equal(details.error_type, "TypeError");
+  assert.equal(details.capture_detail, undefined);
+  assert.equal(details.capture_http_status, undefined);
+  assert.doesNotMatch(JSON.stringify(details), /PRIVATE|filename|https|chat/);
+  const record = { version: 1, last_operation: "capture_json", capture_detail: "network_error" };
+  diagnostics.failure(record, error, "source", 100);
+  assert.equal(record.capture_detail, undefined);
+  assert.equal(record.error_code, "capture_json_failed");
+  assert.equal(record.failure_site, "capture_serialize");
+  error.jsonCapture.private = "PRIVATE";
+  assert.equal(diagnostics.errorDetails(error, "capture_json").failure_site, "capture_history", "Reject an unvalidated reader record entirely.");
 });
 
 test("Claude page observations redact IDs, queries, fragments and unknown paths at every ingress", async () => {
@@ -174,7 +240,9 @@ test("retry storms retain bounded first and last observations and the counts", (
     if (rule.type === "string") maximal[key] = rule.values.reduce((a, b) => a.length > b.length ? a : b);
     if (rule.type === "number") maximal[key] = rule.values?.[0] || rule.max;
     if (rule.type === "boolean") maximal[key] = true;
-    if (rule.type === "array") maximal[key] = key === "json_attempts" ? [{ outcome: "failed", mode: "fresh", failure_check: "raw_header_limit" }]
+    if (rule.type === "array") maximal[key] = key === "summary_response_failures"
+      ? [1, 2].map(attempt => ({ attempt, phase: "stream_completion_validation", reason: "stream_completion_invalid", error_type: "Error" }))
+      : key === "json_attempts" ? [{ outcome: "failed", mode: "fresh", failure_check: "raw_header_limit" }]
       : Array(32).fill({ event: "destination_activate", at_ms: 2147483647, code: "destination_activation_failed" });
   }
   maximal.prepared_diagnostics = structuredClone(maximal);
@@ -198,4 +266,48 @@ test("Edge forwards diagnostics as the optional RPC argument without changing re
   assert.equal(calls[0].p_summary_verified, false);
   assert.equal((await send(payload())).status, 204);
   assert.equal(calls[1].p_diagnostics, undefined);
+});
+
+test("JSON checkpoints are closed metadata through both relays and merge one record per read", async()=>{
+  const edge=await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  const {checkpointKeys}=require("../scripts/check-json-checkpoints-db");
+  const first={outcome:"failed",mode:"prefetch",step:"route",step_stage:"history",failure_check:"routing_unavailable",route_found:false};
+  const report=record=>({version:1,json_attempts:[record]});
+  for(const key of checkpointKeys) {
+    const rule=diagnostics.jsonAttemptSchema[key];
+    for(const value of [...(rule.values||(rule.type==="boolean"?[true,false]:[0,2147483647])),"PRIVATE",null]) {
+      const valid=typeof value===rule.type && (rule.values?rule.values.includes(value):true);
+      const input=payload({diagnostics:report({...first,[key]:value})});
+      assert.equal(Boolean(validateTelemetryPayload(input)),valid,key);
+      assert.equal(Boolean(edge.validateTelemetryPayload(input)),valid,key);
+    }
+  }
+  for(const key of ["title","filename","url","id","chat_id","raw_error","stack"])
+    assert.equal(validateTelemetryPayload(payload({diagnostics:report({...first,[key]:"PRIVATE"})})),null);
+  const progress={mode:"retry",outcome:"started",step:"read",progress_seq:5};
+  const failed={...progress,outcome:"failed",failure_check:"timeout",progress_seq:6};
+  assert.deepEqual(diagnostics.mergeJsonAttempts([first,progress],[{...progress,step:"hook",progress_seq:1}]),[first,progress]);
+  assert.deepEqual(diagnostics.mergeJsonAttempts([first,progress],[failed]),[first,failed]);
+  assert.deepEqual(diagnostics.mergeJsonAttempts([first,failed],[{...progress,progress_seq:99}]),[first,failed]);
+});
+
+test("skipped files retain their cause while later validation owns the terminal failure",()=>{
+  const vm=require("node:vm");const context=vm.createContext({CapTransferDiagnostics:diagnostics,Date,TextEncoder});
+  new vm.Script(fs.readFileSync(path.join(__dirname,"../extension/json-capture-metrics.js"),"utf8")).runInContext(context);
+  const m=context.CapJsonCaptureMetrics.create();m.checkpoint("read","attachment_body");m.fail("invalid_utf8","attachment_body",undefined,undefined,undefined,200,{failure_decode_stage:"chunk"});
+  m.recoverFile();m.checkpoint("complete","serialize",{history_checked:true});
+  assert.equal(m.finish().step,"complete");assert.equal(m.finish().history_checked,true);assert.equal(m.finish().skipped_file_check,"invalid_utf8");
+  m.transcript("x".repeat(1000001));const d=m.finish({captureDetail:"size_limit",captureRequestStage:"serialize"});
+  assert.equal(d.failure_check,"transcript_char_limit");assert.equal(d.failure_value,1000001);assert.equal(d.failure_stage,"serialize");
+  assert.equal(d.failure_decode_stage,undefined);assert.equal(d.skipped_file_check,"invalid_utf8");assert.equal(d.files_skipped,1);
+});
+
+test("recovered MAIN progress preserves a later bridge timeout when its final reply is lost",()=>{
+  const vm=require("node:vm");const context=vm.createContext({CapTransferDiagnostics:diagnostics,Date,TextEncoder});
+  new vm.Script(fs.readFileSync(path.join(__dirname,"../extension/json-capture-metrics.js"),"utf8")).runInContext(context);
+  let progress;const native=context.CapJsonCaptureMetrics.create({},d=>{progress=d;});
+  native.checkpoint("read","attachment_body");native.fail("invalid_utf8","attachment_body");native.recoverFile();native.checkpoint("serialize","serialize");
+  assert.equal(progress.outcome,"started");const bridge=context.CapJsonCaptureMetrics.create();bridge.adopt(progress);
+  const d=bridge.finish({captureDetail:"timeout",captureRequestStage:"history"});
+  assert.equal(d.failure_check,"timeout");assert.equal(d.failure_stage,"history");assert.equal(d.skipped_file_check,"invalid_utf8");assert.equal(d.files_skipped,1);
 });

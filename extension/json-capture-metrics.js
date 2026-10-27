@@ -1,27 +1,49 @@
-// Numeric observations only. This helper never receives response content or
+// Bounded observations only. This helper never receives response content or
 // identifiers; MAIN records transport costs and the isolated bridge adds timing.
 (function (root) {
   const contract = root.CapTransferDiagnostics;
   const clock = () => Date.now();
-  function create(initial = {}) {
+  function create(initial = {}, onProgress) {
     const started = clock();
-    const data = { outcome: "succeeded", mode: "fresh" };
+    const data = { outcome: "succeeded", mode: "fresh", history_request_sent: false, history_response_read: false, history_parsed: false, history_checked: false };
+    let currentStage, recoveredFileFailure = false;
+    const stage = value => {
+      if (!contract.jsonAttemptSchema.failure_stage.values.includes(value)) return;
+      currentStage = value;
+      if (["hook", "serialize"].includes(value)) checkpoint(value, value);
+    };
     const set = changes => {
       for (const [key, value] of Object.entries(changes || {})) {
         const rule = contract.jsonAttemptSchema[key];
         if (rule?.type === "number" && Number.isFinite(value) && value >= (rule.min || 0)) {
           if (value > rule.max) data.numeric_saturated = "lower_bound";
           data[key] = Math.min(rule.max, Math.round(value));
-        } else if (rule?.values?.includes(value)) data[key] = value;
+        } else if (rule?.values?.includes(value) || rule?.type === "boolean" && typeof value === "boolean") data[key] = value;
       }
     };
     const add = (key, value = 1) => set({ [key]: (data[key] || 0) + value });
+    function checkpoint(step, requestStage = currentStage, facts) {
+      if (data.failure_check && !recoveredFileFailure) return; // Freeze terminal failures, not skipped files.
+      set({ step, step_stage: requestStage, total_ms: clock() - started, ...facts });
+      if (contract.jsonAttemptSchema.failure_stage.values.includes(requestStage)) currentStage = requestStage;
+      try { onProgress?.(contract.validateJsonAttempt({ ...data, outcome: "started" })); } catch {}
+    }
     const fail = (check, stage, source, value, limit, status, details) => {
       // Concurrent files may fail together. Retain the first actual guard,
       // rather than replacing it with a sibling's abort after cancellation.
-      if (data.failure_check) return;
+      if (data.failure_check && !recoveredFileFailure) return;
+      // A skipped file keeps its first closed cause separately. A later fatal
+      // guard must own failure_* so its stage, size and type remain consistent.
+      if (recoveredFileFailure) for (const key of Object.keys(data)) if (key.startsWith("failure_")) delete data[key];
+      recoveredFileFailure = false;
       set({ ...details, failure_check: check, failure_stage: stage, failure_value_source: source,
         failure_value: value, failure_limit: limit, http_status: status });
+    };
+    const recoverFile = (error, requestStage = "attachment_body") => {
+      if (!data.failure_check) fail(error?.captureDetail || "attachment_failed", requestStage);
+      set({ skipped_file_check: data.skipped_file_check || data.failure_check, outcome: "partial" });
+      add("files_skipped");
+      recoveredFileFailure = true;
     };
     const response = (stage, limit, header, countRequest = true) => {
       const began = clock();
@@ -49,6 +71,7 @@
     };
     const timed = (key, fn) => {
       const began = clock();
+      if (key === "serialize_ms") stage("serialize");
       try { return fn(); } finally { add(key, clock() - began); }
     };
     const transcript = text => {
@@ -63,23 +86,31 @@
       add("files_ignored");
       add(image ? "files_ignored_image" : type === "pdf" || type === "application/pdf" ? "files_ignored_pdf" : "files_ignored_other");
     };
+    const exception = error => {
+      // A bridge may replace the native exception with a safe generic Error.
+      // Retain only the first allowlisted class, never its message or stack.
+      if (!data.failure_error_type && contract.jsonAttemptSchema.failure_error_type.values.includes(error?.name))
+        set({ failure_error_type: error.name });
+    };
     const finish = error => {
       set({ total_ms: clock() - started });
       if (error) {
+        if (data.step === "hook") set({ hook_ms: clock() - started });
         const detail = error.diagnostics?.capture_detail || error.captureDetail;
         const site = error.diagnostics?.failure_site;
-        const stage = error.diagnostics?.capture_request_stage || error.captureRequestStage
-          || (contract.jsonAttemptSchema.failure_stage.values.includes(site?.slice(8)) ? site.slice(8) : "serialize");
-        fail(detail || "unknown", stage);
+        const failedStage = error.diagnostics?.capture_request_stage || error.captureRequestStage
+          || (contract.jsonAttemptSchema.failure_stage.values.includes(site?.slice(8)) ? site.slice(8) : currentStage);
+        fail(detail || "unknown", failedStage);
         // Do not derive categories from exception prose or fetch/parser snippets.
-        if (!data.failure_check) fail("unknown", "serialize");
+        if (!data.failure_check) fail("unknown", failedStage);
+        exception(error);
         set({ outcome: detail === "conversation_changed" || detail === "cancelled" ? "cancelled" : "failed" });
       }
       return contract.validateJsonAttempt(data);
     };
     set(initial);
-    return { data, set, add, fail, response, timed, transcript, ignored, finish,
-      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) set(safe); } };
+    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception, checkpoint, recoverFile,
+      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) { set(safe); recoveredFileFailure = ["partial", "started"].includes(safe.outcome) && Boolean(safe.skipped_file_check); checkpoint(safe.step, safe.step_stage); } } };
   }
   root.CapJsonCaptureMetrics = { create };
 })(globalThis);

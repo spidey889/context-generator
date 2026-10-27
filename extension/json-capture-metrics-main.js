@@ -51,7 +51,11 @@
   // JSON measurements survive DOM recovery. A closed, flat record keeps this
   // useful on failures without allowing native responses or private file data.
   const jsonAttemptEnums = {
-    outcome: ["succeeded", "partial", "failed", "cancelled"],
+    outcome: ["succeeded", "partial", "failed", "cancelled", "started"],
+    step: ["queue", "hook", "route", "request", "response", "read", "parse", "check", "serialize", "complete"],
+    step_stage: enums.capture_request_stage,
+    route_reason: ["path_unrecognized", "no_matching_endpoint", "available"],
+    hook_status: ["no_reply", "version_mismatch", "runtime_missing", "install_rejected", "install_failed", "ready"],
     mode: ["prefetch", "fresh", "retry"],
     failure_check: ["raw_header_limit", "raw_total_stream_limit", "raw_response_stream_limit", "raw_remaining_files_limit", "supported_files_limit", "transcript_char_limit", "transcript_byte_limit",
       "auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "invalid_utf8", "non_json_response",
@@ -75,19 +79,40 @@
     failure_decode_stage: ["chunk", "final_flush"],
     numeric_saturated: ["lower_bound"]
   };
+  jsonAttemptEnums.skipped_file_check = jsonAttemptEnums.failure_check;
   const jsonAttemptNumbers = ["adapter_version", "failure_value", "failure_limit", "http_status", "raw_bytes", "raw_limit_bytes",
     "raw_response_bytes", "raw_response_limit_bytes", "raw_header_bytes", "raw_header_limit_bytes", "history_bytes", "session_bytes",
     "descriptor_bytes", "file_body_bytes", "requests", "pages", "history_items", "selected_turns", "files_supported", "files_ignored",
     "files_ignored_pdf", "files_ignored_image", "files_ignored_other", "files_declared_bytes", "files_downloaded_bytes", "files_limit_bytes",
     "transcript_chars", "transcript_bytes", "transcript_char_limit", "transcript_byte_limit", "hook_ms", "auth_ms", "download_ms",
-    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms"];
+    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms", "route_candidates", "route_resources", "progress_seq", "files_skipped"];
   const jsonAttemptSchema = {
+    ...Object.fromEntries(["saved_chat", "hook_ready", "route_found", "history_request_sent", "history_response_read", "history_parsed", "history_checked"]
+      .map(key => [key, { type: "boolean" }])),
     ...Object.fromEntries(Object.entries(jsonAttemptEnums).map(([key, values]) => [key, { type: "string", values }])),
     ...Object.fromEntries(jsonAttemptNumbers.map(key => [key, { type: "number", max: 2147483647 }])),
     http_status: { type: "number", min: 100, max: 599 },
     failure_http_status: { type: "number", min: 100, max: 599 },
     failure_file_index: { type: "number", min: 1, max: 2147483647 },
     failure_file_bytes: { type: "number", max: 4100000 }
+  };
+  // Response failures can survive a successful retry. Keep both HTTP attempts
+  // without accepting a response excerpt, raw exception, header, ID or URL.
+  const summaryResponseFailureSchema = {
+    attempt: { type: "number", min: 1, max: 2 },
+    phase: { type: "string", values: ["response_headers", "response_body", "stream_read", "stream_utf8_decode", "stream_json_parse",
+      "stream_event_validation", "stream_completion_validation", "near_end_callback", "summary_validation", "summary_confirmation", "unknown"] },
+    reason: { type: "string", values: ["aborted", "http_rejected", "service_rejected", "body_read_failed", "utf8_decode_failed", "json_parse_failed",
+      "stream_event_invalid", "stream_completion_invalid", "summary_invalid", "callback_failed", "unexpected_exception"] },
+    error_type: { type: "string", values: enums.error_type },
+    format: { type: "string", values: ["json", "ndjson", "unknown"] },
+    http_status: { type: "number", min: 100, max: 599 },
+    service_code: { type: "string", values: ["conversation_too_large", "request_too_large", "rate_limited", "service_busy", "client_not_allowed", "summary_failed", "other"] },
+    service_status: { type: "number", min: 100, max: 599 },
+    ...Object.fromEntries(["bytes_received", "chunks_received", "events_received", "elapsed_ms", "headers_ms", "last_chunk_ms", "deadline_remaining_ms"]
+      .map(key => [key, { type: "number", max: 2147483647 }])),
+    ...Object.fromEntries(["aborted", "caller_aborted", "deadline_elapsed", "transfer_deadline_elapsed", "eof", "final_result", "online"]
+      .map(key => [key, { type: "boolean" }]))
   };
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
@@ -107,7 +132,8 @@
     ...Object.fromEntries(numbers.map(key => [key, { type: "number", max: 2147483647 }])),
     capture_http_status: { type: "number", min: 100, max: 599 },
     summary_provider_status: { type: "number", min: 100, max: 599 },
-    events: { type: "array" }, delivery_events: { type: "array" }, paste_events: { type: "array" }, json_attempts: { type: "array" }, prepared_diagnostics: { type: "object" }
+    events: { type: "array" }, delivery_events: { type: "array" }, paste_events: { type: "array" }, json_attempts: { type: "array" },
+    summary_response_failures: { type: "array" }, prepared_diagnostics: { type: "object" }
   };
   function validField(key, value, rules = schema) {
     const rule = rules[key];
@@ -123,8 +149,35 @@
   }
   function jsonAttempt(target, input) {
     const safe = validateJsonAttempt(input);
-    if (!target || !safe || (target.json_attempts?.length || 0) >= 2) return;
-    (target.json_attempts || (target.json_attempts = [])).push(safe);
+    if (!target || !safe) return;
+    target.json_attempts = mergeJsonAttempts(target.json_attempts, [safe]);
+  }
+  function mergeJsonAttempts(first = [], second = []) {
+    // Mode identifies the existing read slot under the transfer attempt ID. A
+    // completed observation wins over progress, including stale outbox retries.
+    const records = new Map();
+    for (const input of [...first, ...second]) {
+      const safe = validateJsonAttempt(input);
+      if (!safe) continue;
+      const previous = records.get(safe.mode);
+      if (!previous || previous.outcome === "started" && (safe.outcome !== "started"
+        || (safe.progress_seq || 0) > (previous.progress_seq || 0))) records.set(safe.mode, safe);
+    }
+    return [...records.values()].sort((a, b) => (a.mode === "retry") - (b.mode === "retry")).slice(0, 2);
+  }
+  function validateSummaryResponseFailure(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || !["attempt", "phase", "reason", "error_type"].every(key => Object.hasOwn(input, key))) return null;
+    if (Object.entries(input).some(([key, value]) => !validField(key, value, summaryResponseFailureSchema))) return null;
+    return { ...input };
+  }
+  function mergeSummaryResponseFailures(first = [], second = []) {
+    const records = new Map();
+    for (const input of [...first, ...second]) {
+      const safe = validateSummaryResponseFailure(input);
+      if (safe && !records.has(safe.attempt)) records.set(safe.attempt, safe);
+    }
+    return [...records.values()].sort((a, b) => a.attempt - b.attempt);
   }
   function validate(input, depth = 0) {
     if (!input || typeof input !== "object" || Array.isArray(input) || input.version !== 1) return null;
@@ -138,6 +191,10 @@
         if (!Array.isArray(value) || value.length > 2) return null;
         result[key] = value.map(validateJsonAttempt);
         if (result[key].some(entry => !entry)) return null;
+      } else if (key === "summary_response_failures") {
+        if (!Array.isArray(value) || value.length > 2) return null;
+        result[key] = value.map(validateSummaryResponseFailure);
+        if (result[key].some(entry => !entry) || new Set(result[key].map(entry => entry.attempt)).size !== value.length) return null;
       } else if (["events", "delivery_events", "paste_events"].includes(key)) {
         if (!Array.isArray(value) || value.length > 32) return null;
         if (value.some(event => !event || typeof event !== "object" || Array.isArray(event)
@@ -207,6 +264,32 @@
     }
     update(details, { error_type: safe?.error_type || (enums.error_type.includes(error?.name) ? error.name : "other"),
       failure_site: safe?.failure_site || operation });
+    if (operation === "capture_json") {
+      // Read the closed native observation, not exception prose. A generic
+      // bridge error must not hide a known guard or its actual request stage.
+      const attempt = validateJsonAttempt(error?.jsonCapture);
+      const check = attempt?.failure_check;
+      const stage = attempt?.failure_stage || safe?.capture_request_stage;
+      const sizeChecks = ["raw_header_limit", "raw_total_stream_limit", "raw_response_stream_limit", "raw_remaining_files_limit",
+        "supported_files_limit", "transcript_char_limit", "transcript_byte_limit"];
+      const observedDetail = sizeChecks.includes(check) ? check === "supported_files_limit" ? "attachment_size_limit" : "size_limit"
+        : check === "attachment_length_mismatch" ? "attachment_failed"
+        : check === "duplicate_id" ? "invalid_branch"
+        : enums.capture_detail.includes(check) ? check : undefined;
+      const broadDetail = error?.captureFailureReason === "timeout" ? "timeout"
+        : error?.captureFailureReason === "size_limit" ? "size_limit" : undefined;
+      const knownCode = safe?.error_code && safe.error_code !== "unknown_error" ? safe.error_code : errorCode(error, "capture_json_failed");
+      const specificCode = sizeChecks.includes(check) ? "conversation_too_large"
+        : check === "conversation_changed" ? "conversation_changed" : undefined;
+      // An unexpected exception has a known step/class, not a proven network
+      // cause. Do not promote a generic bridge label over that observation.
+      if (check === "unknown") delete details.capture_detail;
+      update(details, { capture_detail: observedDetail || (check === "unknown" ? undefined : safe?.capture_detail) || broadDetail,
+        capture_request_stage: stage, failure_site: stage ? `capture_${stage}` : details.failure_site,
+        capture_http_status: attempt?.failure_http_status ?? safe?.capture_http_status,
+        error_type: enums.error_type.includes(attempt?.failure_error_type) ? attempt.failure_error_type : details.error_type,
+        error_code: ["capture_json_failed", "unknown_error"].includes(knownCode) ? specificCode || "capture_json_failed" : knownCode });
+    }
     return details;
   }
   function operationErrorCode(operation) {
@@ -241,39 +324,64 @@
     } catch { return "unavailable"; }
   }
   function failure(target, error, origin, atMs) {
-    const code = errorCode(error, operationErrorCode(target?.last_operation));
-    update(target, { ...errorDetails(error, target?.last_operation), error_code: code, error_origin: origin });
+    const details = errorDetails(error, target?.last_operation);
+    const code = (target?.last_operation === "capture_json" && details.error_code) || errorCode(error, operationErrorCode(target?.last_operation));
+    if (target?.last_operation === "capture_json" && !details.capture_detail) delete target.capture_detail;
+    update(target, { ...details, error_code: code, error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
-  const api = { schema, jsonAttemptSchema, validateJsonAttempt, jsonAttempt, codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage, authPromptFromUrl };
+  const api = { schema, jsonAttemptSchema, summaryResponseFailureSchema, validateJsonAttempt, validateSummaryResponseFailure, mergeSummaryResponseFailures, mergeJsonAttempts, jsonAttempt,
+    codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage, authPromptFromUrl };
   root.CapTransferDiagnostics = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);
 
-// Numeric observations only. This helper never receives response content or
+// Bounded observations only. This helper never receives response content or
 // identifiers; MAIN records transport costs and the isolated bridge adds timing.
 (function (root) {
   const contract = root.CapTransferDiagnostics;
   const clock = () => Date.now();
-  function create(initial = {}) {
+  function create(initial = {}, onProgress) {
     const started = clock();
-    const data = { outcome: "succeeded", mode: "fresh" };
+    const data = { outcome: "succeeded", mode: "fresh", history_request_sent: false, history_response_read: false, history_parsed: false, history_checked: false };
+    let currentStage, recoveredFileFailure = false;
+    const stage = value => {
+      if (!contract.jsonAttemptSchema.failure_stage.values.includes(value)) return;
+      currentStage = value;
+      if (["hook", "serialize"].includes(value)) checkpoint(value, value);
+    };
     const set = changes => {
       for (const [key, value] of Object.entries(changes || {})) {
         const rule = contract.jsonAttemptSchema[key];
         if (rule?.type === "number" && Number.isFinite(value) && value >= (rule.min || 0)) {
           if (value > rule.max) data.numeric_saturated = "lower_bound";
           data[key] = Math.min(rule.max, Math.round(value));
-        } else if (rule?.values?.includes(value)) data[key] = value;
+        } else if (rule?.values?.includes(value) || rule?.type === "boolean" && typeof value === "boolean") data[key] = value;
       }
     };
     const add = (key, value = 1) => set({ [key]: (data[key] || 0) + value });
+    function checkpoint(step, requestStage = currentStage, facts) {
+      if (data.failure_check && !recoveredFileFailure) return; // Freeze terminal failures, not skipped files.
+      set({ step, step_stage: requestStage, total_ms: clock() - started, ...facts });
+      if (contract.jsonAttemptSchema.failure_stage.values.includes(requestStage)) currentStage = requestStage;
+      try { onProgress?.(contract.validateJsonAttempt({ ...data, outcome: "started" })); } catch {}
+    }
     const fail = (check, stage, source, value, limit, status, details) => {
       // Concurrent files may fail together. Retain the first actual guard,
       // rather than replacing it with a sibling's abort after cancellation.
-      if (data.failure_check) return;
+      if (data.failure_check && !recoveredFileFailure) return;
+      // A skipped file keeps its first closed cause separately. A later fatal
+      // guard must own failure_* so its stage, size and type remain consistent.
+      if (recoveredFileFailure) for (const key of Object.keys(data)) if (key.startsWith("failure_")) delete data[key];
+      recoveredFileFailure = false;
       set({ ...details, failure_check: check, failure_stage: stage, failure_value_source: source,
         failure_value: value, failure_limit: limit, http_status: status });
+    };
+    const recoverFile = (error, requestStage = "attachment_body") => {
+      if (!data.failure_check) fail(error?.captureDetail || "attachment_failed", requestStage);
+      set({ skipped_file_check: data.skipped_file_check || data.failure_check, outcome: "partial" });
+      add("files_skipped");
+      recoveredFileFailure = true;
     };
     const response = (stage, limit, header, countRequest = true) => {
       const began = clock();
@@ -301,6 +409,7 @@
     };
     const timed = (key, fn) => {
       const began = clock();
+      if (key === "serialize_ms") stage("serialize");
       try { return fn(); } finally { add(key, clock() - began); }
     };
     const transcript = text => {
@@ -315,23 +424,31 @@
       add("files_ignored");
       add(image ? "files_ignored_image" : type === "pdf" || type === "application/pdf" ? "files_ignored_pdf" : "files_ignored_other");
     };
+    const exception = error => {
+      // A bridge may replace the native exception with a safe generic Error.
+      // Retain only the first allowlisted class, never its message or stack.
+      if (!data.failure_error_type && contract.jsonAttemptSchema.failure_error_type.values.includes(error?.name))
+        set({ failure_error_type: error.name });
+    };
     const finish = error => {
       set({ total_ms: clock() - started });
       if (error) {
+        if (data.step === "hook") set({ hook_ms: clock() - started });
         const detail = error.diagnostics?.capture_detail || error.captureDetail;
         const site = error.diagnostics?.failure_site;
-        const stage = error.diagnostics?.capture_request_stage || error.captureRequestStage
-          || (contract.jsonAttemptSchema.failure_stage.values.includes(site?.slice(8)) ? site.slice(8) : "serialize");
-        fail(detail || "unknown", stage);
+        const failedStage = error.diagnostics?.capture_request_stage || error.captureRequestStage
+          || (contract.jsonAttemptSchema.failure_stage.values.includes(site?.slice(8)) ? site.slice(8) : currentStage);
+        fail(detail || "unknown", failedStage);
         // Do not derive categories from exception prose or fetch/parser snippets.
-        if (!data.failure_check) fail("unknown", "serialize");
+        if (!data.failure_check) fail("unknown", failedStage);
+        exception(error);
         set({ outcome: detail === "conversation_changed" || detail === "cancelled" ? "cancelled" : "failed" });
       }
       return contract.validateJsonAttempt(data);
     };
     set(initial);
-    return { data, set, add, fail, response, timed, transcript, ignored, finish,
-      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) set(safe); } };
+    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception, checkpoint, recoverFile,
+      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) { set(safe); recoveredFileFailure = ["partial", "started"].includes(safe.outcome) && Boolean(safe.skipped_file_check); checkpoint(safe.step, safe.step_stage); } } };
   }
   root.CapJsonCaptureMetrics = { create };
 })(globalThis);

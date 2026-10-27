@@ -1,5 +1,5 @@
 (() => {
-  const version = 26;
+  const version = 27;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -97,7 +97,9 @@
       owns_fetch: window.fetch === wrappedFetch, online: globalThis.navigator?.onLine });
     const controller = new AbortController();
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxCaptureBytes,
-      raw_bytes: 0, requests: 0, auth_refreshes: 0 });
+      raw_bytes: 0, requests: 0, auth_refreshes: 0 }, progress => {
+      if (request.measureOnly !== true) window.postMessage({ ...reply, type: "capture_progress", jsonCapture: progress }, location.origin);
+    });
     active = controller;
     activeMeasurementId = request.measureOnly === true ? request.id : null;
     activeCaptureId = request.measureOnly === true ? null : request.id;
@@ -142,6 +144,8 @@
     const fetchJson = async (url, options = {}) => {
       delete reply.status;
       delete metrics.data.http_status;
+      const stage = reply.captureRequestStage || "history";
+      metrics.checkpoint("request", stage, stage === "history" ? { history_request_sent: true } : undefined);
       metrics.add("requests");
       const began = Date.now();
       try {
@@ -152,7 +156,7 @@
       debug("fetch_start", { native, stage: reply.captureRequestStage || "history", requests: metrics.data.requests });
       try { const response = await Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
-      }]); metrics.set({ http_status: response.status });
+      }]); metrics.set({ http_status: response.status }); metrics.checkpoint("response", stage);
         debugPhase = "body";
         debug("headers", { native, stage: reply.captureRequestStage || "history", status: response.status, headers_ms: Date.now() - began });
         return response;
@@ -177,9 +181,11 @@
         const decoder = new TextDecoder("utf-8", { fatal: true });
         const parts = [];
         let responseBytes = 0;
+        metrics.checkpoint("read", stage);
         if (reader) while (true) {
           // Retry a rejected network read, not decoder/JSON/size failures.
-          const { done, value } = await reader.read().catch(() => {
+          const { done, value } = await reader.read().catch(error => {
+            metrics.exception(error);
             if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
             bodyReadFailed = true;
             metrics.fail("network_error", stage);
@@ -202,10 +208,13 @@
         observation.end();
         debugPhase = "processing";
         debug("body_done", { native, stage, bytes: responseBytes });
+        metrics.checkpoint("parse", stage, stage === "history" ? { history_response_read: true } : undefined);
         const parsed = metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
         debug("parse_done", { native, stage });
+        metrics.checkpoint("check", stage, stage === "history" ? { history_parsed: true } : undefined);
         return parsed;
       } catch (error) {
+        metrics.exception(error);
         if (error?.name === "SyntaxError") metrics.fail("invalid_json", stage);
         if (error?.name === "SyntaxError") reply.captureDetail = "invalid_json";
         if (reader) await reader.cancel().catch(() => {});
@@ -237,6 +246,7 @@
         const bytes = new Uint8Array(expectedSize);
         reader = response.body?.getReader();
         let size = 0;
+        metrics.checkpoint("read", "attachment_body");
         if (reader) while (true) {
           const { done, value } = await reader.read();
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
@@ -316,6 +326,7 @@
     try {
       reply.captureRequestStage = "history";
       if (!chat || request.chat !== chat) throw new Error("changed");
+      metrics.checkpoint("route", "history", { saved_chat: true, route_found: true, route_reason: "available" });
       const url = `/backend-api/conversation/${encodeURIComponent(chat)}`;
       // Retry an expired bearer token once. Never retry a partial tree or guess
       // another workspace on 403; both must fail visibly.
@@ -417,7 +428,10 @@
         } catch (error) {
           // File-local failure excludes the entire body, never a decoded prefix.
           // Capture-wide identity, cancellation and read limits remain terminal.
-          if (!readLimitExceeded && !controller.signal.aborted && !navigated && currentChat() === chat && error.message !== "auth") continue;
+          if (!readLimitExceeded && !controller.signal.aborted && !navigated && currentChat() === chat && error.message !== "auth") {
+            metrics.recoverFile(error, reply.captureRequestStage);
+            continue;
+          }
           throw new Error(error?.message === "network" ? "network" : "paste");
         }
       }
@@ -430,7 +444,7 @@
       reply.error = navigated || controller.signal.reason === "account_changed" ? "changed"
         : controller.signal.reason === "capture_cancelled" ? "cancelled" : controller.signal.aborted ? "timeout"
         : ["http", "partial", "format", "auth", "changed", "paste", "size"].includes(error?.message) ? error.message : error?.name === "SyntaxError" ? "invalid_json" : "network";
-      metrics.finish({ captureDetail: ({ http: "http_error", partial: "partial_response", format: "non_json_response", auth: "auth_missing", changed: "conversation_changed", paste: "attachment_failed", timeout: "timeout", cancelled: "cancelled", invalid_json: "invalid_json", network: "network_error" })[reply.error], captureRequestStage: reply.captureRequestStage });
+      metrics.finish({ name: error?.name, captureDetail: ({ http: "http_error", partial: "partial_response", format: "non_json_response", auth: "auth_missing", changed: "conversation_changed", paste: "attachment_failed", timeout: "timeout", cancelled: "cancelled", invalid_json: "invalid_json", network: "network_error" })[reply.error], captureRequestStage: reply.captureRequestStage });
     } finally {
       clearTimeout(debugTimer);
       try { if (resourceObserver) logResourceTiming(resourceObserver.takeRecords()); } catch {}

@@ -559,8 +559,20 @@ for (const format of ["stream", "json"]) test(`summary response retry: a broken 
   assert.equal(result.ok, true);
   assert.equal(result.summary, "Fresh complete carry");
   assert.equal(result.timing.attempt, 2);
+  const failures = result.diagnostics.summary_response_failures;
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].attempt, 1);
+  assert.equal(failures[0].reason, "body_read_failed");
+  assert.equal(failures[0].phase, format === "stream" ? "stream_read" : "response_body");
+  if (format === "stream") {
+    assert.equal(failures[0].chunks_received, 1);
+    assert.equal(failures[0].final_result, true);
+    assert.equal(failures[0].eof, false);
+  }
   assert.deepEqual(requests, [requests[0], requests[0]]);
-  assert.equal((await sendSummary("Retry the same complete model input.")).summary, result.summary);
+  const cached = await sendSummary("Retry the same complete model input.");
+  assert.equal(cached.summary, result.summary);
+  assert.equal(cached.diagnostics, undefined, "A later cache hit must not inherit another transfer's failures.");
   assert.equal(requests.length, 2, "Cache only the accepted retry.");
 });
 
@@ -570,7 +582,9 @@ test("summary response retry: two broken bodies return failure without a third r
     fetches++;
     return { ok: true, status: 200, json: async () => { throw new TypeError("network error"); } };
   });
-  assert.equal((await sendSummary("Both reads fail")).ok, false);
+  const result = await sendSummary("Both reads fail");
+  assert.equal(result.ok, false);
+  assert.deepEqual(Array.from(result.diagnostics.summary_response_failures, entry => entry.attempt), [1, 2]);
   assert.equal(fetches, 2);
 });
 
@@ -584,8 +598,53 @@ for (const kind of ["json", "utf8", "content", "http", "fetch"]) test(`summary r
     if (kind === "http") return new Response('{"error":"Service unavailable"}', { status: 503 });
     return new Response(new Uint8Array([255]), { headers: { "content-type": "application/x-ndjson" } });
   });
-  assert.equal((await sendSummary("Reject without retry: " + kind)).ok, false);
+  const result = await sendSummary("Reject without retry: " + kind);
+  assert.equal(result.ok, false);
+  if (kind === "fetch") assert.equal(result.diagnostics.summary_response_failures, undefined, "This checkpoint starts at response headers.");
+  else {
+    const failure = result.diagnostics.summary_response_failures[0];
+    assert.equal(failure.reason, { json: "json_parse_failed", utf8: "utf8_decode_failed", content: "summary_invalid", http: "http_rejected" }[kind]);
+    if (kind === "utf8") assert.equal(failure.bytes_received, 1);
+  }
   assert.equal(fetches, 1);
+});
+
+for (const format of ["json", "ndjson"]) test(`summary response diagnosis: valid ${format} service-error envelopes are distinguished from broken parsing`, async () => {
+  let requests = 0;
+  const data = { ok: false, code: "service_busy", status: 503, error: "PRIVATE_SERVICE_ERROR" };
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    requests++;
+    return new Response(JSON.stringify(format === "json" ? data : { type: "result", data }) + (format === "ndjson" ? "\n" : ""),
+      { headers: { "content-type": format === "json" ? "application/json" : "application/x-ndjson" } });
+  });
+  const result = await sendSummary("PRIVATE_CHAT_SENTINEL");
+  const record = result.diagnostics.summary_response_failures[0];
+  assert.equal(record.reason, "service_rejected");
+  assert.equal(record.http_status, 200);
+  assert.equal(record.service_code, "service_busy");
+  assert.equal(record.service_status, 503);
+  assert.equal(record.eof, true);
+  assert.equal(record.final_result, true);
+  assert.equal(requests, 1);
+  assert.doesNotMatch(JSON.stringify(result.diagnostics), /PRIVATE/);
+});
+
+for (const kind of ["invalid_event", "missing_result", "trailing_data"]) test(`summary response diagnosis: ${kind} records the actual failed stream check without private data`, async () => {
+  const body = kind === "invalid_event" ? '{"type":"PRIVATE_RESPONSE_SENTINEL"}\n'
+    : kind === "missing_result" ? '{"type":"delta","text":"PRIVATE_RESPONSE_SENTINEL"}\n'
+    : '{"type":"result","data":{"summary":"PRIVATE_RESPONSE_SENTINEL"}}\nPRIVATE_TRAILING_SENTINEL';
+  const sendSummary = loadBackgroundForSummaryTest(async () => new Response(body, { headers: {
+    "content-type": "application/x-ndjson", "x-vercel-id": "PRIVATE_REQUEST_ID", "x-private": "PRIVATE_HEADER"
+  } }));
+  const result = await sendSummary("PRIVATE_CHAT_SENTINEL");
+  const record = result.diagnostics.summary_response_failures[0];
+  assert.equal(record.reason, kind === "invalid_event" ? "stream_event_invalid" : "stream_completion_invalid");
+  assert.equal(record.http_status, 200);
+  assert.equal(record.format, "ndjson");
+  assert.ok(record.bytes_received > 0);
+  assert.equal(record.eof, kind !== "invalid_event");
+  assert.equal(record.final_result, kind === "trailing_data");
+  assert.doesNotMatch(JSON.stringify(result.diagnostics), /PRIVATE|https:|vercel|stack|"headers"|"summary"/);
 });
 
 test("summary response retry: the second request cannot renew the total deadline", async () => {
@@ -596,7 +655,11 @@ test("summary response retry: the second request cannot renew the total deadline
     now += 319001;
     return { summary: "Too late for the original budget" };
   } }), { clock: Clock });
-  assert.equal((await sendSummary("Use one total time budget")).diagnostics.error_code, "summary_timeout");
+  const result = await sendSummary("Use one total time budget");
+  assert.equal(result.diagnostics.error_code, "summary_timeout");
+  assert.equal(result.diagnostics.summary_response_failures[1].aborted, true);
+  assert.equal(result.diagnostics.summary_response_failures[1].deadline_elapsed, true);
+  assert.equal(result.diagnostics.summary_response_failures[1].reason, "aborted");
   assert.equal(fetches, 2);
 });
 

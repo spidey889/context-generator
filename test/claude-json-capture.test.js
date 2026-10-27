@@ -49,6 +49,21 @@ test("Claude structured turns preserve quoted role labels, thinking and source w
   assert.equal(capture.text, `Claude conversation:\n\nUser: ${text}\n\nAssistant: Private reasoning\n\nSelected answer`);
 });
 
+test("Claude unexpected serializer errors retain their step and class without private exception text", async () => {
+  const h = setup(fixture(), { resources: [endpoint], beforeMessage(reply) {
+    if (reply.type === "response" && reply.data) Object.defineProperty(reply.data, "chat_messages", {
+      get() { throw new TypeError("PRIVATE chat filename.csv https://PRIVATE"); }
+    });
+  } });
+  await assert.rejects(h.window.__capCaptureClaudeJson(), error => {
+    assert.equal(error.jsonCapture.failure_stage, "serialize");
+    assert.equal(error.jsonCapture.failure_check, "unknown");
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
+    assert.doesNotMatch(JSON.stringify(error.jsonCapture), /PRIVATE|filename|https/);
+    return true;
+  });
+});
+
 test("Claude fresh DOM size check counts readable file text despite another incomplete file", async () => {
   const data = fixture();
   data.chat_messages[0].attachments = [
@@ -203,6 +218,7 @@ test("Claude interrupted history body stays retryable and a fresh capture keeps 
     assert.equal(shouldRetryJson(error), true, "The real transfer retry policy must accept this body-network failure.");
     assert.equal(error.diagnostics.capture_request_stage, "history");
     assert.equal(error.diagnostics.capture_http_status, 200);
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
     assert.doesNotMatch(error.message + JSON.stringify(error.diagnostics), /PRIVATE_READ_SENTINEL/);
     return true;
   });
@@ -782,4 +798,76 @@ test("Claude can estimate unsupported history without admitting it or counting a
   assert.equal(result.messageTurnCount, 2);
   assert.ok(result.estimatedCharacterCount > 0 && result.estimatedCharacterCount < 1000);
   assert.ok(Object.values(result).every(value => Number.isSafeInteger(value)));
+});
+
+clockTest("Claude routing checkpoints distinguish no observations, unrelated resources and another chat without logging addresses", async () => {
+  for (const resources of [[], ["https://claude.ai/assets/PRIVATE.js"], [endpoint.replace(chat,"another-private-chat")]]) {
+    const h = setup(fixture(), { resources });
+    await assert.rejects(h.window.__capCaptureClaudeJson(), error => {
+      const d = error.jsonCapture;
+      assert.equal(d.step,"route"); assert.equal(d.step_stage,"history");
+      assert.equal(d.failure_check,"routing_unavailable");
+      assert.equal(d.hook_ready,true); assert.equal(d.saved_chat,true); assert.equal(d.route_found,false);
+      assert.equal(d.route_reason,"no_matching_endpoint"); assert.equal(d.route_resources,resources.length);
+      assert.equal(d.route_candidates,resources.some(url=>url.includes("chat_conversations")) ? 1 : 0);
+      assert.equal(d.history_request_sent,false); assert.equal(d.requests,0);
+      assert.doesNotMatch(JSON.stringify(d),/PRIVATE|another-private|https|test-org|test-chat/);
+      return true;
+    });
+  }
+});
+
+test("Claude checkpoints identify fetch, headers, read, parse and validation failures without changing capture", async () => {
+  for (const [options, step, reason] of [
+    [{fetchImpl:async()=>{throw new TypeError("PRIVATE network");}},"request","network_error"],
+    [{status:403},"response","http_error"],
+    [{body:"PRIVATE malformed JSON"},"parse","invalid_json"],
+    [{fetchImpl:async()=>new Response(new ReadableStream({pull(c){c.error(new TypeError("PRIVATE stream"));}}),{headers:{"content-type":"application/json"}})},"read","network_error"],
+    [{},"complete",undefined]
+  ]) {
+    const h=setup(fixture(),{resources:[endpoint],...options});
+    if (!reason) { const c=await h.window.__capCaptureClaudeJson(); assert.equal(c.jsonCapture.step,step); assert.equal(c.jsonCapture.history_checked,true); continue; }
+    await assert.rejects(h.window.__capCaptureClaudeJson(),error=>{
+      assert.equal(error.jsonCapture.step,step); assert.equal(error.jsonCapture.failure_check,reason);
+      assert.equal(error.jsonCapture.hook_ready,true); assert.equal(error.jsonCapture.route_found,true);
+      assert.doesNotMatch(JSON.stringify(error.jsonCapture),/PRIVATE|https|test-chat/); return true;
+    });
+  }
+});
+
+clockTest("Claude bridge timeout retains the last native checkpoint when the final response is lost",async()=>{
+  const h=setup(fixture(),{resources:[endpoint],beforeMessage(reply){if(reply.type==="response")reply.channel="ignored";}});
+  await assert.rejects(h.window.__capCaptureClaudeJson(),error=>{
+    const d=error.jsonCapture;assert.equal(d.failure_check,"timeout");assert.equal(d.step,"check");
+    assert.equal(d.hook_ready,true);assert.equal(d.route_found,true);assert.equal(d.history_response_read,true);assert.equal(d.history_parsed,true);
+    assert.equal(d.history_checked,false);assert.ok(d.total_ms>=17000);return true;
+  });
+});
+
+clockTest("Claude hook failures distinguish missing runtime, rejected install, rejected promise and stale version",async()=>{
+  for(const status of ["runtime_missing","install_rejected","install_failed","version_mismatch","no_reply"]){
+    const runtime=status==="runtime_missing"?undefined:{sendMessage:async()=>{if(status==="install_failed")throw new Error("PRIVATE");return{ok:status!=="install_rejected"};}};
+    const h=setup(fixture(),{resources:[endpoint],runtime,beforeMessage(reply){if(status==="version_mismatch"&&reply.type==="pong")reply.version=-1;}});
+    if(status!=="version_mismatch")h.window.__capClaudeFetchState.dispose();
+    await assert.rejects(h.window.__capCaptureClaudeJson(),error=>{
+      assert.equal(error.jsonCapture.step,"hook");assert.equal(error.jsonCapture.hook_ready,false);assert.equal(error.jsonCapture.hook_status,status);
+      assert.equal(error.jsonCapture.failure_check,"hook_unavailable");assert.ok(error.jsonCapture.hook_ms>=250);return true;
+    });
+  }
+});
+
+clockTest("a late failed installer cannot overwrite a correlated ready hook",async()=>{
+  for(const installer of ["reject","not_ok"]){
+    let h,failInstall,replyInstall,finishFetch,fetchStarted;
+    const began=new Promise(resolve=>{fetchStarted=resolve;});
+    h=setup(fixture(),{resources:[endpoint],runtime:{sendMessage:()=>{
+      h.reinstall();return new Promise((resolve,reject)=>{replyInstall=resolve;failInstall=reject;});
+    }},fetchImpl:()=>{fetchStarted();return new Promise(resolve=>{finishFetch=resolve;});}});
+    h.window.__capClaudeFetchState.dispose();
+    const pending=h.window.__capCaptureClaudeJson();await began;
+    if(installer==="reject")failInstall(new Error("PRIVATE_INSTALLER"));else replyInstall({ok:false});
+    await new Promise(setImmediate);
+    finishFetch(new Response(JSON.stringify(fixture()),{headers:{"content-type":"application/json"}}));
+    const capture=await pending;assert.equal(capture.jsonCapture.hook_ready,true);assert.equal(capture.jsonCapture.hook_status,"ready");
+  }
 });

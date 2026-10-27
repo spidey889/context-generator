@@ -135,6 +135,88 @@ function summaryWithin(background, deadlineAt = null, conversation = "Complete c
   return { request, observed };
 }
 
+for (const recovered of [true, false]) test(`browser response failures survive ${recovered ? "retry success" : "two failed reads"}, stale progress and worker restart`, async () => {
+  let requests = 0;
+  const background = worker((url, options) => {
+    if (!url.endsWith("/api/summarize")) return rejection(503, "temporary_unavailable");
+    requests++;
+    return { ok: true, status: 200, headers: new Headers({ "x-vercel-id": "PRIVATE_REQUEST_ID" }), json: async () => {
+      if (recovered && requests === 2) return { summary: "PRIVATE_COMPLETE_SUMMARY" };
+      throw new TypeError("PRIVATE_NETWORK_EXCEPTION https://PRIVATE/file.txt");
+    } };
+  });
+  await background.settled();
+  await background.ack(event());
+  const result = await summaryWithin(background, null, "PRIVATE_CHAT_SENTINEL").request;
+  assert.equal(result.ok, recovered);
+  assert.equal(requests, 2);
+  await background.settled();
+  const records = JSON.parse(JSON.stringify(result.diagnostics.summary_response_failures));
+  assert.equal(records.length, recovered ? 1 : 2);
+  assert.equal(records[0].reason, "body_read_failed");
+  // Delayed source progress and terminal snapshots can contain less evidence.
+  await background.ack(event(1, { diagnostics: { version: 1, summary_response_failures: records.slice(0, 1) } }));
+  await background.ack(event(1, { status: recovered ? "succeeded" : "failed",
+    lastStage: recovered ? "completed" : "summary_response_started", failureReason: recovered ? null : "summary_failed",
+    diagnostics: { version: 1, summary_response_failures: records.slice(0, 1) } }));
+  await background.settled();
+  assert.deepEqual(background.shared.local[OUTBOX][0].payload.diagnostics.summary_response_failures, records);
+  const delivered = [];
+  const restarted = worker((_url, options) => { delivered.push(JSON.parse(options.body)); return success(); },
+    background.shared, background.shared.local[DIAGNOSTICS].retry.nextAttemptAt);
+  await restarted.settled();
+  assert.deepEqual(delivered.at(-1).diagnostics.summary_response_failures, records);
+  assert.equal(delivered.at(-1).status, recovered ? "succeeded" : "failed");
+  assert.doesNotMatch(JSON.stringify(delivered), /PRIVATE|https:|filename|stack|"headers"|"summary"/);
+});
+
+test("worker queues the failed response before a retry or source reply completes", async () => {
+  let requests = 0, finish, began;
+  const retryBegan = new Promise(resolve => { began = resolve; });
+  const background = worker(url => {
+    if (!url.endsWith("/api/summarize")) return rejection(503, "temporary_unavailable");
+    requests++;
+    return { ok: true, status: 200, json: () => {
+      if (requests === 1) return Promise.reject(new TypeError("PRIVATE_CONNECTION_ERROR"));
+      began();
+      return new Promise(resolve => { finish = resolve; });
+    } };
+  });
+  await background.settled(); await background.ack(event());
+  const pending = summaryWithin(background).request;
+  await retryBegan;
+  try {
+    await background.settled();
+    const checkpoint = background.shared.local[OUTBOX][0].payload.diagnostics;
+    assert.ok(checkpoint);
+    assert.equal(checkpoint.summary_response_failures[0].attempt, 1);
+  } finally {
+    finish({ summary: "Complete carry" });
+    assert.equal((await pending).ok, true);
+    await background.settled();
+  }
+});
+
+test("optional response logging never waits for stalled storage before retrying and returning a summary", async () => {
+  let requests = 0;
+  const background = worker(url => {
+    if (!url.endsWith("/api/summarize")) return success();
+    requests++;
+    return { ok: true, status: 200, json: async () => {
+      if (requests === 1) throw new TypeError("PRIVATE_CONNECTION_ERROR");
+      return { summary: "Complete carry" };
+    } };
+  });
+  await background.settled(); await background.ack(event()); await background.settled();
+  const release = blockStorage(background, "local", "set");
+  try {
+    const result = await summaryWithin(background).observed;
+    assert.equal(result?.ok, true);
+    assert.equal(result.diagnostics.summary_response_failures.length, 1);
+    assert.equal(requests, 2);
+  } finally { release(); await background.settled(); }
+});
+
 test("worker teardown cannot turn toolbar badge updates into uncaught rejections", async () => {
   const background = worker(success);
   await background.settled();
@@ -1328,4 +1410,24 @@ clockTest("the summary transport deadline also interrupts receipt storage withou
     await operation.request;
     await background.settled();
   }
+});
+
+test("JSON attempts survive stale source snapshots, durable compaction and worker restart",async()=>{
+  const background=worker(async()=>{throw new Error("offline");}); await background.settled();
+  const first={mode:"prefetch",outcome:"failed",step:"route",step_stage:"history",failure_check:"routing_unavailable",hook_ready:true,route_found:false,progress_seq:2};
+  const retry={mode:"retry",outcome:"started",step:"read",step_stage:"history",progress_seq:5};
+  const report=entries=>({version:1,json_attempts:entries});
+  await background.ack(event(1,{diagnostics:report([first,retry])}));
+  await background.ack(event(1,{diagnostics:report([{...retry,step:"hook",progress_seq:1}])}));
+  await background.settled();
+  const read=()=>background.shared.local[OUTBOX][0].payload.diagnostics.json_attempts;
+  assert.deepEqual(read(),[first,retry]);
+  const final={...retry,outcome:"failed",failure_check:"timeout",progress_seq:6};
+  await background.ack(event(1,{diagnostics:report([final])}));
+  await background.ack(event(1,{status:"failed",failureReason:"capture_failed",diagnostics:report([{...retry,progress_seq:99}])}));
+  await background.settled(); assert.deepEqual(read(),[first,final]);
+  const delivered=[];
+  const restarted=worker(async(_url,options)=>{delivered.push(JSON.parse(options.body));return success();},background.shared);
+  await restarted.settled(); await restarted.retry();
+  assert.deepEqual(delivered.at(-1).diagnostics.json_attempts,[first,final]);
 });

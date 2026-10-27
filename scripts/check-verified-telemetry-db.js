@@ -431,6 +431,7 @@ async function main() {
         equal(updated.replace(pattern, "RULES"), original.replace(pattern, "RULES"));
         equal(JSON.parse(updated.match(pattern)[1]), { ...JSON.parse(original.match(pattern)[1]), destination_auth_prompt: { type: "boolean" } });
         const historicalSchema = structuredClone(require("../extension/transfer-diagnostics.js").schema);
+        delete historicalSchema.summary_response_failures;
         historicalSchema.capture_detail.values = historicalSchema.capture_detail.values.filter(value => value !== "invalid_utf8");
         equal(JSON.parse(updated.match(pattern)[1]), historicalSchema);
         checks += await require("./check-diagnostics-samples.js").checkDiagnosticsSamples(db,
@@ -440,6 +441,10 @@ async function main() {
         checks += await require("./check-million-character-limits-db.js").checkMillionCharacterLimits(db, sql);
       } else if (name.endsWith("_attachment_decode_diagnostics.sql")) {
         checks += await require("./check-json-capture-diagnostics-db.js").checkAttachmentDecodeDiagnostics(db, sql);
+      } else if (name.endsWith("_summary_response_failure_diagnostics.sql")) {
+        checks += await require("./check-summary-response-diagnostics-db.js").checkSummaryResponseDiagnostics(db, sql);
+      } else if (name.endsWith("_json_capture_checkpoints.sql")) {
+        checks += await require("./check-json-checkpoints-db.js").checkJsonCheckpoints(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

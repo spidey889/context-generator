@@ -3335,6 +3335,11 @@ async function run() {
       assert.ok(attempts?.length >= 1 && attempts.length <= 2);
       assert.equal(attempts.at(-1).outcome, JSON_FALLBACK_SMOKE ? "failed" : "succeeded");
       assert.ok(attempts.at(-1).raw_bytes > 0);
+      assert.equal(attempts.at(-1).hook_ready, true);
+      assert.equal(attempts.at(-1).hook_status, "ready");
+      assert.equal(attempts.at(-1).history_request_sent, true);
+      assert.equal(attempts.at(-1).step, JSON_FALLBACK_SMOKE ? "serialize" : "complete");
+      assert.equal(attempts.at(-1).history_checked, !JSON_FALLBACK_SMOKE);
       if (!JSON_FALLBACK_SMOKE) {
         assert.ok(attempts.at(-1).transcript_chars > 0);
         assert.ok(attempts.at(-1).transcript_bytes > 0);

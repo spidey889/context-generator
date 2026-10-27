@@ -242,6 +242,35 @@ async function discover(harness) {
   await harness.window.fetch(new Request(`https://chatgpt.com/backend-api/conversations/${chat}?num_turns=10`, { headers: { Authorization: "Bearer TEST_ONLY", "ChatGPT-Account-Id": "test-account" } }));
 }
 
+test("ChatGPT unexpected serializer errors retain their step and class without private exception text", async () => {
+  const h = setup(fixture(), 200, { beforeMessage(reply) {
+    if (reply.type === "response" && reply.data) Object.defineProperty(reply.data, "mapping", {
+      get() { throw new TypeError("PRIVATE chat filename.csv https://PRIVATE"); }
+    });
+  } });
+  await discover(h);
+  await assert.rejects(h.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.jsonCapture.failure_stage, "serialize");
+    assert.equal(error.jsonCapture.failure_check, "unknown");
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
+    assert.doesNotMatch(JSON.stringify(error.jsonCapture), /PRIVATE|filename|https/);
+    return true;
+  });
+  assert.equal(h.navigationListeners(), 0);
+});
+
+test("ChatGPT bridge exceptions retain hook stage instead of being mislabeled as serialization failures", async () => {
+  const h = setup();
+  h.window.postMessage = () => { throw Object.assign(new Error("PRIVATE chat https://PRIVATE filename.csv"), { name: "SecurityError" }); };
+  await assert.rejects(h.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.jsonCapture.failure_stage, "hook");
+    assert.equal(error.jsonCapture.failure_check, "unknown");
+    assert.equal(error.jsonCapture.failure_error_type, "SecurityError");
+    assert.doesNotMatch(JSON.stringify(error.jsonCapture), /PRIVATE|filename|https/);
+    return true;
+  });
+});
+
 test("ChatGPT local timing report traces a complete read without private content or unrelated resource timings", async () => {
   let disconnected = 0;
   const data = fixture();
@@ -442,6 +471,7 @@ for (const stage of ["session", "history", "descriptor"]) test("ChatGPT interrup
     assert.equal(shouldRetryJson(error), true, "The real transfer retry policy must accept this body-network failure.");
     assert.equal(error.diagnostics.capture_request_stage, stage === "descriptor" ? "attachment_descriptor" : stage);
     assert.equal(error.diagnostics.capture_http_status, 200);
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
     assert.doesNotMatch(error.message + JSON.stringify(error.diagnostics), /PRIVATE_READ_SENTINEL/);
     return true;
   });
@@ -1005,7 +1035,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 26);
+  assert.equal(harness.window.__capChatGptFetchState.version, 27);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
@@ -1558,4 +1588,22 @@ test("ChatGPT publishes the rough estimate while original pasted-file reads are 
   assert.equal(finished, false);
   releaseFile(new Response("A pasted source body", { headers: { "content-type": "text/plain" } }));
   assert.ok((await pending).characterCount > 0);
+});
+
+test("ChatGPT checkpoints separate session failure from history transport, parsing and checks",async()=>{
+  for (const [options,step,reason] of [[{fetchImpl:async()=>{throw new TypeError("PRIVATE");}},"request","network_error"],
+    [{body:"PRIVATE invalid JSON"},"parse","invalid_json"],[{status:503},"response","http_error"],[{},"complete",undefined]]) {
+    const h=setup(fixture(),options.status||200,options); await discover(h).catch(()=>{});
+    if (!reason) { const c=await h.window.__capCaptureChatGptJson(); assert.equal(c.jsonCapture.step,step); assert.equal(c.jsonCapture.history_checked,true); continue; }
+    await assert.rejects(h.window.__capCaptureChatGptJson(),error=>{
+      assert.equal(error.jsonCapture.step,step); assert.equal(error.jsonCapture.failure_check,reason);
+      assert.equal(error.jsonCapture.hook_ready,true); assert.equal(error.jsonCapture.route_found,true);
+      assert.doesNotMatch(JSON.stringify(error.jsonCapture),/PRIVATE|https|test-chat/); return true;
+    });
+  }
+  const h=setup(); h.location.pathname="/new-chat";
+  await assert.rejects(h.window.__capCaptureChatGptJson(),error=>{
+    assert.equal(error.jsonCapture.route_reason,"path_unrecognized"); assert.equal(error.jsonCapture.saved_chat,false);
+    assert.equal(error.jsonCapture.history_request_sent,false); assert.equal(h.requests.length,0); return true;
+  });
 });

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-capture-merge-v186";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-json-diagnostics-merge-v187";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1220,6 +1220,7 @@
           transferId: trace?.id || null,
           deadlineAt: trace?.deadlineAt
         });
+        mergeTransferDiagnostics(trace, response?.diagnostics);
         if (!response?.summary?.trim()) {
           throw new Error("Backup summarizer returned no summary.");
         }
@@ -1652,8 +1653,11 @@
 
   function recordJsonCaptureFailure(trace, error) {
     const details = globalThis.CapTransferDiagnostics?.errorDetails(error, "capture_json");
+    // A second failure must not inherit the first request's cause/status;
+    // each original observation remains available in json_attempts.
+    if (trace?.diagnostics) for (const key of ["capture_detail", "capture_request_stage", "capture_http_status"]) delete trace.diagnostics[key];
     updateTransferDiagnostics(trace, { ...details,
-      capture_error_code: globalThis.CapTransferDiagnostics?.errorCode(error, "capture_json_failed"),
+      capture_error_code: details?.error_code || globalThis.CapTransferDiagnostics?.errorCode(error, "capture_json_failed"),
       capture_failure_site: details?.failure_site, capture_error_type: details?.error_type });
   }
 
@@ -1662,17 +1666,22 @@
     if (!trace || !safe) return;
     // Each component's timeline has its own elapsed clock, never guessed wall time.
     const sourceEvents = trace.diagnostics?.events;
+    const jsonAttempts = globalThis.CapTransferDiagnostics?.mergeJsonAttempts(trace.diagnostics?.json_attempts, safe.json_attempts);
     Object.assign(trace.diagnostics ||= { version: 1 }, safe);
     if (sourceEvents) trace.diagnostics.events = sourceEvents;
+    if (jsonAttempts?.length) trace.diagnostics.json_attempts = jsonAttempts;
   }
 
   function recordTransferFailureDiagnostics(trace, error) {
-    mergeTransferDiagnostics(trace, error?.diagnostics);
     const contract = globalThis.CapTransferDiagnostics;
+    const details = contract?.errorDetails(error, trace?.diagnostics?.last_operation);
+    // Merge the normalized observation so a broad wrapper cannot put a
+    // discarded network label back after recordJsonCaptureFailure.
+    mergeTransferDiagnostics(trace, details ? { version: 1, ...details } : error?.diagnostics);
     const code = isNoConversationError(error) ? "no_conversation"
       : isExtensionContextInvalidated(error) ? "extension_reloaded"
-      : error?.diagnostics?.error_code || contract?.errorCode(error, contract.operationErrorCode(trace?.diagnostics?.last_operation)) || "unknown_error";
-    updateTransferDiagnostics(trace, { ...contract?.errorDetails(error, trace?.diagnostics?.last_operation),
+      : details?.error_code || error?.diagnostics?.error_code || contract?.errorCode(error, contract.operationErrorCode(trace?.diagnostics?.last_operation)) || "unknown_error";
+    updateTransferDiagnostics(trace, { ...details,
       error_code: code, error_origin: trace?.diagnostics?.error_origin || "source",
       source_changed: code === "conversation_changed", cancelled: code === "user_cancelled" });
     globalThis.CapTransferDiagnostics?.event(trace?.diagnostics, "failure", getNow() - trace.startedAt, "events", code);
@@ -7894,7 +7903,8 @@
     state.controller.abort();
   }
 
-  function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false, omitLargeFiles = false, signal = null) {
+  function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false, omitLargeFiles = false, signal = null, onProgress) {
+    try { onProgress?.({ outcome: "started", mode: "fresh", step: "queue", step_stage: "hook" }); } catch {}
     // Native bridges allow one read at a time. Cancellation releases this queue
     // only after the owning MAIN read acknowledges cleanup, avoiding busy races.
     const transferTrace = isRunning ? activeTransferTrace : null;
@@ -7912,7 +7922,7 @@
       if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
       const read = captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal
         : currentPlatform.id === "chatgpt" ? signal || undefined : omitLargeFiles || undefined,
-        measureOnly ? transferTrace?.domSizeCheck?.onEstimate : undefined);
+        measureOnly ? transferTrace?.domSizeCheck?.onEstimate : onProgress);
       if (currentPlatform.id !== "chatgpt") return read;
       return Promise.resolve(read).then(capture => {
         traceChatGptCapture("queue_done", { queue, ok: true, elapsed_ms: Date.now() - queuedAt });
@@ -7945,7 +7955,11 @@
     entry.promise = captureSourceJson(path, () => {
       checkTransferDeadline(entry.trace);
       return entry.selected || pickerJsonCapture === entry;
-    }, false, false, entry.controller?.signal)
+    }, false, false, entry.controller?.signal, progress => {
+      if (entry.discarded || !instanceActive) return;
+      entry.jsonProgress = progress;
+      if (entry.selected && entry.trace) recordJsonCaptureProgress(entry.trace, progress, "prefetch");
+    })
       .then(capture => entry.discarded ? {} : { capture }, error => entry.discarded ? {} : { error });
   }
 
@@ -8003,6 +8017,16 @@
       || ["network_error", "busy", "hook_unavailable", "auth_missing", "routing_unavailable"].includes(detail));
   }
 
+  function recordJsonCaptureProgress(trace, progress, mode) {
+    if (!trace || trace.completed || trace.telemetryFinished) return;
+    const safe = globalThis.CapTransferDiagnostics?.validateJsonAttempt({ ...progress, mode });
+    if (!safe) return;
+    const previous = trace.diagnostics?.json_attempts?.find(entry => entry.mode === mode);
+    globalThis.CapTransferDiagnostics.jsonAttempt(trace.diagnostics, {
+      ...previous, ...safe, mode, progress_seq: (previous?.progress_seq || 0) + 1
+    });
+  }
+
   async function takePickerJsonCapture(expectedPath, omitLargeFiles = false) {
     const entry = pickerJsonCapture;
     const trace = activeTransferTrace;
@@ -8012,16 +8036,21 @@
     const record = (value, mode) => {
       const observations = value?.jsonCapture || (typeof value?.text === "string" ? { outcome: "succeeded" }
         : { outcome: value?.diagnosticCode === "conversation_changed" ? "cancelled" : "failed",
+          step_stage: "hook",
+          ...(value?.diagnosticCode === "capture_json_unavailable" ? { step: "hook", hook_ready: false } : {}),
           failure_check: value?.diagnosticCode === "capture_json_unavailable" ? "hook_unavailable"
             : value?.diagnosticCode === "conversation_changed" ? "conversation_changed" : "unknown" });
-      globalThis.CapTransferDiagnostics?.jsonAttempt?.(trace?.diagnostics, { ...observations, mode });
+      recordJsonCaptureProgress(trace, observations, mode);
+      // Persist failed reads before retry/DOM recovery or a lost final source
+      // callback. This uses the same attempt, durable outbox and Supabase JSONB.
+      if (observations.outcome !== "succeeded") reportCaptureProgress(trace, `${currentPlatform.id}-json`, true);
     };
     const read = async (mode = "fresh") => {
       try {
         const capture = await captureSourceJson(expectedPath, () => {
           checkTransferDeadline(trace);
           return true;
-        }, false, omitLargeFiles);
+        }, false, omitLargeFiles, null, progress => recordJsonCaptureProgress(trace, progress, mode));
         record(capture, mode);
         return capture;
       } catch (error) { record(error, mode); throw error; }
@@ -8032,6 +8061,7 @@
           if (isPickerJsonCaptureCurrent(entry)) {
             entry.trace = trace;
             entry.selected = true;
+            if (entry.jsonProgress) recordJsonCaptureProgress(trace, entry.jsonProgress, "prefetch");
             const waitingAt = Date.now();
             traceChatGptCapture("prefetch_wait", { pending: true });
             const result = await entry.promise;
@@ -8041,6 +8071,11 @@
               if (result.error) throw result.error;
               return result.capture;
             }
+            // Hydration/branch changes can invalidate a selected pending read.
+            // Its progress belongs to the discarded snapshot, not the fresh read.
+            entry.discarded = true;
+            if (trace?.diagnostics?.json_attempts) trace.diagnostics.json_attempts = trace.diagnostics.json_attempts
+              .filter(attempt => attempt.mode !== "prefetch" || attempt.outcome !== "started");
           }
         } finally {
           entry.guard.dispose();

@@ -216,6 +216,38 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: native
     return true;
   });
 });
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: unexpected native serializer exceptions retain stage and class without a guessed network cause`, async () => {
+  const h = setup(platform);
+  await h.observe();
+  h.api[platform] = () => { throw new TypeError("PRIVATE chat filename.csv https://PRIVATE"); };
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.jsonCapture.failure_stage, "serialize");
+    assert.equal(error.jsonCapture.failure_check, "unknown");
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
+    const details = require("../extension/transfer-diagnostics.js").errorDetails(error, "capture_json");
+    assert.equal(details.capture_detail, undefined);
+    assert.equal(details.failure_site, "capture_serialize");
+    assert.doesNotMatch(JSON.stringify(details) + JSON.stringify(error.jsonCapture), /PRIVATE|filename|https/);
+    return true;
+  });
+});
+
+test("Network bridge validation exceptions are reported immediately with the observed serialization stage", async () => {
+  const h = setup("grok", undefined, { beforeMessage(reply) {
+    if (reply.type === "response" && reply.capture) Object.defineProperty(reply.capture, "text", {
+      get() { throw new TypeError("PRIVATE chat filename.csv https://PRIVATE"); }
+    });
+  } });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.jsonCapture.failure_stage, "serialize");
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
+    assert.equal(error.jsonCapture.failure_check, "unknown");
+    assert.doesNotMatch(JSON.stringify(error.jsonCapture), /PRIVATE|filename|https/);
+    return true;
+  });
+});
+
 function setup(platform, fixture = fixtures(platform), { fetchImpl, responseTransform, runtime, schedule = setTimeout, beforeMessage, localStorage } = {}) {
   const requests = [], replies = [], listeners = new Set(), navigation = new Set(), storage = new Set();
   const host = { gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }[platform];
@@ -304,6 +336,10 @@ test("DeepSeek: an invalid UTF-8 attachment cannot discard healthy text or later
   } });
   await h.observe();
   const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.jsonCapture.step,"complete");
+  assert.equal(capture.jsonCapture.history_checked,true);
+  assert.equal(capture.jsonCapture.skipped_file_check,"invalid_utf8");
+  assert.equal(capture.jsonCapture.files_skipped,2);
   for (const file of f.uploads) assert.equal(capture.text.includes(f.files[file.id]), !invalid.has(file.id));
   assert.deepEqual(JSON.parse(JSON.stringify(capture.skippedFiles)), [{ name: "source-0.py" }, { name: "source-3.py" }]);
   assert.equal(h.requests.length, 8, "bad files must not stop queued healthy downloads");
@@ -1009,7 +1045,7 @@ test("DeepSeek: one incomplete upload preserves siblings and a fresh capture ret
   assert.ok(!capture.text.includes(f.files[f.uploads[0].id]));
   assert.equal(h.requests.length, 7, "failure must not stop queued downloads");
   assert.equal(aborted.length, 0);
-  assert.equal(h.window.__capNetworkFetchState.version, 33);
+  assert.equal(h.window.__capNetworkFetchState.version, 34);
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
   healthy = true;
@@ -1089,7 +1125,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 27 : platform === "gemini" ? 16 : 19;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 33 : platform === "grok" ? 22 : 19);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 34 : platform === "grok" ? 23 : 20);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -1702,4 +1738,14 @@ test("DeepSeek publishes a rough estimate before file downloads finish without r
   const final = await pending;
   assert.ok(final.characterCount > estimate.estimatedCharacterCount, "The final guard includes downloaded supported text.");
   assert.equal(final.messageTurnCount, 4);
+});
+
+for (const platform of ["gemini","grok","deepseek"]) test(platform+": checkpoints preserve native read progress and successful validation",async()=>{
+  const h=setup(platform); await h.observe(); const progress=[];
+  const c=await h.window.__capCaptureNetworkJson(undefined,false,d=>progress.push(d));
+  assert.equal(c.jsonCapture.step,"complete"); assert.equal(c.jsonCapture.hook_ready,true);
+  assert.equal(c.jsonCapture.route_found,true); assert.equal(c.jsonCapture.history_request_sent,true);
+  assert.equal(c.jsonCapture.history_response_read,true); assert.equal(c.jsonCapture.history_parsed,true); assert.equal(c.jsonCapture.history_checked,true);
+  for (const step of ["hook","route","request","response","read","parse","check","serialize","complete"]) assert.ok(progress.some(d=>d.step===step),step);
+  assert.doesNotMatch(JSON.stringify(progress),/AUTH_SENTINEL|SIGNED_SENTINEL|PRIVATE|https/);
 });
