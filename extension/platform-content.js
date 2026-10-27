@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-logged-out-placement-v188";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-logged-out-notice-v189";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -121,6 +121,8 @@
   const ONBOARDING_SHOW_DELAY_MS = 650;
   const NO_CONVERSATION_ERROR_TITLE = "Chat is empty";
   const NO_CONVERSATION_ERROR_MESSAGE = "Send a message first, then try again.";
+  const CHATGPT_LOGGED_OUT_ERROR_TITLE = "You are not logged into ChatGPT";
+  const CHATGPT_LOGGED_OUT_ERROR_MESSAGE = "Log in to ChatGPT, then try again.";
   const SUMMARY_RETRY_ERROR_TITLE = "Try again";
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
   // Only this middle range reaches api/request-security.js; direct carries stay local.
@@ -9533,6 +9535,10 @@
     if (sourceSurface && sourceSurface === sheet) hideDestinationSheet({ restoreFocus: false });
     if (sourceSurface && sourceSurface === handoff) hideOverlay();
     const isNoConversationError = message === NO_CONVERSATION_ERROR_MESSAGE;
+    // Guest /uc chats use a separate transcript layout. Explain the missing
+    // login only when the active native composer explicitly marks this state.
+    const isChatGptLoggedOutError = isNoConversationError && currentPlatform.id === "chatgpt" &&
+      findPlatformInput()?.closest("form")?.hasAttribute("data-logged-out");
     const isSummaryRetryError = message === SUMMARY_RETRY_ERROR_MESSAGE;
     let errorDiv = document.getElementById("context-generator-error-overlay");
     if (!errorDiv) {
@@ -9635,11 +9641,13 @@
 
     const title = document.getElementById("context-generator-error-title");
     if (title) {
-      title.textContent = isNoConversationError
-        ? NO_CONVERSATION_ERROR_TITLE
-        : isSummaryRetryError
-          ? SUMMARY_RETRY_ERROR_TITLE
-          : "Transfer failed";
+      title.textContent = isChatGptLoggedOutError
+        ? CHATGPT_LOGGED_OUT_ERROR_TITLE
+        : isNoConversationError
+          ? NO_CONVERSATION_ERROR_TITLE
+          : isSummaryRetryError
+            ? SUMMARY_RETRY_ERROR_TITLE
+            : "Transfer failed";
     }
 
     const mark = document.getElementById("context-generator-error-mark");
@@ -9649,7 +9657,7 @@
 
     const textSpan = document.getElementById("context-generator-error-text");
     if (textSpan) {
-      textSpan.textContent = message;
+      textSpan.textContent = isChatGptLoggedOutError ? CHATGPT_LOGGED_OUT_ERROR_MESSAGE : message;
     }
 
     hideErrorOverlay(errorDiv, { immediate: true });

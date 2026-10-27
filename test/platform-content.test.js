@@ -3685,6 +3685,29 @@ test("logged-out ChatGPT mounts inside its native trailing slot without changing
   assert.equal(hooks.findChatGptInlineToolbar(signedIn.input).footer, signedIn.footer);
 });
 
+clockTest("ChatGPT empty-chat notice explains login only for the active logged-out composer", () => {
+  for (const [hostname, pathname, loggedOut, message, needsLogin] of [
+    ["chatgpt.com", "/", true, "Send a message first, then try again.", true],
+    ["chatgpt.com", "/uc/guest-chat", true, "Send a message first, then try again.", true],
+    ["chatgpt.com", "/c/saved", false, "Send a message first, then try again.", false],
+    ["claude.ai", "/new", true, "Send a message first, then try again.", false],
+    ["chatgpt.com", "/uc/guest-chat", true, "Another transfer error", false]
+  ]) {
+    const f = loggedOutChatGptFixture();
+    if (!loggedOut) f.body.removeAttribute("data-logged-out");
+    const hooks = loadPlatformContent(Object.values(f), hostname, { pathname });
+    for (const id of ["overlay", "title", "text", "mark"]) {
+      hooks.registerElementId(`context-generator-error-${id}`, new FakeElement());
+    }
+    hooks.showContextTransferFailure(new Error(message));
+    const empty = message === "Send a message first, then try again.";
+    assert.equal(hooks.document.getElementById("context-generator-error-title").textContent,
+      needsLogin ? "You are not logged into ChatGPT" : empty ? "Chat is empty" : "Transfer failed", `${hostname}${pathname}`);
+    assert.equal(hooks.document.getElementById("context-generator-error-text").textContent,
+      needsLogin ? "Log in to ChatGPT, then try again." : message);
+  }
+});
+
 test("ChatGPT free transition grid mounts beside Think without responsive-footer markers", () => {
   const f = gridChatGptFixture();
   const hooks = loadPlatformContent(Object.values(f));
