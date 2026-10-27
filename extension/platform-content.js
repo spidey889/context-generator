@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v194";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v195";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -9717,7 +9717,7 @@
       errorDiv.style.right = "20px";
       errorDiv.style.bottom = copiedContext ? "auto" : "80px";
       errorDiv.style.left = "auto";
-      errorDiv.style.top = copiedContext ? "20px" : "auto";
+      errorDiv.style.top = copiedContext ? "80px" : "auto";
       const settle = () => {
         errorDiv.contextGeneratorAnimationFrame = null;
         errorDiv.style.opacity = "1";
