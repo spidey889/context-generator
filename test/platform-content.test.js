@@ -984,12 +984,12 @@ test("a hidden local handoff skips motion and cancelled preparation cannot finis
   assert.ok(!cancelled.marks.some(mark => mark.label === "local handoff done"));
 });
 
-function createHandoffMotionFixture() {
+function createHandoffMotionFixture(stageId = "capture") {
   const hooks = loadPlatformContent([]);
   const properties = new Map();
   const stage = new FakeElement();
   stage.dataset.state = "active";
-  stage.dataset.contextGeneratorLineProgress = "0.0400";
+  stage.dataset.contextGeneratorLineProgress = stageId === "capture" ? "0.0400" : "0.0500";
   stage.style.setProperty = (key, value) => properties.set(key, value);
   const overlay = new FakeElement();
   overlay.style.display = "flex";
@@ -1051,6 +1051,84 @@ test("native handoff activity keeps its position when DOM recovery resumes measu
   paint(16);
   assert.ok(Number(stage.dataset.contextGeneratorLineProgress) > nativePosition);
   assert.ok(Number(stage.dataset.contextGeneratorLineProgress) < 0.94);
+});
+
+test("summary handoff activity keeps moving beyond its estimate and preserves progress when restarted", () => {
+  for (const inputChars of [10000, 120000]) {
+    const { hooks, stage, paint } = createHandoffMotionFixture("summary");
+    hooks.startHandoffActivityProgress("summary", inputChars);
+    let previous = Number(stage.dataset.contextGeneratorLineProgress);
+    for (const elapsed of [1000, 70000, 70000]) {
+      assert.equal(paint(elapsed), true);
+      const current = Number(stage.dataset.contextGeneratorLineProgress);
+      assert.ok(current > previous && current < 1, "Pending summary must keep advancing after the display estimate.");
+      previous = current;
+    }
+    hooks.startHandoffActivityProgress("summary", inputChars);
+    assert.equal(paint(16), true);
+    assert.ok(Number(stage.dataset.contextGeneratorLineProgress) >= previous, "Restarting activity cannot move the line backwards.");
+    hooks.stopHandoffActivityProgress();
+    assert.equal(paint(1000), false);
+  }
+});
+
+function createHandoffCompletionFixture(activeStage = "summary") {
+  const hooks = loadPlatformContent([]);
+  const stageIds = ["capture", "summary", "paste"];
+  const stages = stageIds.map((id, index) => {
+    const stage = new FakeElement();
+    stage.dataset.state = index < stageIds.indexOf(activeStage) ? "complete" : id === activeStage ? "active" : "upcoming";
+    stage.dataset.contextGeneratorLineProgress = stage.dataset.state === "complete" ? "1.0000" : "0.3500";
+    stage.properties = new Map();
+    stage.writes = [];
+    stage.style.setProperty = (key, value) => { stage.properties.set(key, value); stage.writes.push([key, value]); };
+    // The target may differ from the rendered width during a live transition.
+    const connector = new FakeElement({ rect: { width: 100 } });
+    const fill = new FakeElement({ rect: { width: stage.dataset.state === "complete" ? 100 : 35 } });
+    stage.querySelector = selector => selector.endsWith("-connector") ? connector : selector.endsWith("-connector-fill") ? fill : null;
+    return stage;
+  });
+  const findStage = selector => stages[stageIds.findIndex(id => selector.includes(`'${id}'`))] || null;
+  const progress = new FakeElement();
+  progress.querySelector = findStage;
+  progress.querySelectorAll = () => stages;
+  const status = new FakeElement();
+  status.querySelector = () => new FakeElement();
+  const overlay = new FakeElement();
+  overlay.classList = { remove() {} };
+  overlay.style.display = "flex";
+  for (const [id, element] of [["context-generator-overlay", overlay], ["context-generator-handoff-progress", progress],
+    ["context-generator-text", status], ["context-generator-text-label", new FakeElement()]]) hooks.registerElementId(id, element);
+  hooks.document.querySelector = findStage;
+  return { hooks, stage: stages[stageIds.indexOf(activeStage)] };
+}
+
+test("handoff completion glides from the rendered position and the next stage preserves that glide", () => {
+  for (const activeStage of ["capture", "summary"]) {
+    const { hooks, stage } = createHandoffCompletionFixture(activeStage);
+    hooks.setHandoffProgress(activeStage, "done");
+    assert.equal(stage.dataset.state, "complete");
+    assert.equal(stage.properties.get("--context-generator-stage-progress-duration"), "220ms");
+    assert.equal(stage.properties.get("--context-generator-stage-progress-easing"), "ease-out");
+    const ratioWrites = stage.writes.filter(([key]) => key === "--context-generator-stage-progress-ratio").map(([, value]) => value);
+    assert.deepEqual(ratioWrites, ["0.3500", "1.0000"], "Completion must start at the visible width before targeting the end.");
+    const writesBeforeAdvance = stage.writes.length;
+    hooks.setHandoffProgress(activeStage === "capture" ? "summary" : "paste", "active");
+    assert.equal(stage.writes.length, writesBeforeAdvance, "The next stage cannot snap or restart a line already completing.");
+    hooks.stopHandoffActivityProgress();
+  }
+});
+
+test("handoff completion is immediate when hidden or reduced motion is requested", () => {
+  for (const mode of ["hidden", "reduced"]) {
+    const { hooks, stage } = createHandoffCompletionFixture();
+    if (mode === "hidden") hooks.document.visibilityState = "hidden";
+    else hooks.window.matchMedia = () => ({ matches: true });
+    hooks.setHandoffProgress("summary", "done");
+    assert.equal(stage.properties.get("--context-generator-stage-progress-duration"), "0ms", mode);
+    assert.equal(stage.dataset.contextGeneratorLineProgress, "1.0000", mode);
+    assert.equal(hooks.animationFrameCallbacks.length, 0, mode);
+  }
 });
 
 test("new-chat routes never bypass empty detection, while saved JSON chats may be unrendered", () => {

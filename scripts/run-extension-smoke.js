@@ -2161,6 +2161,31 @@ async function verifyHandoffPalette(session) {
   await session.evaluate("new Promise(resolve => setTimeout(resolve, 400))");
   assert.deepEqual(firstFrameMarkers, await session.evaluate(markerStyles),
     "Capture must lose its highlight and summary must gain it in the same frame as the heading");
+  const lineMotion = await session.evaluate(`new Promise(resolve => {
+    const read = () => {
+      const stage = document.querySelector('[data-context-generator-stage="summary"]');
+      return stage.querySelector('.context-generator-handoff-stage-connector-fill').getBoundingClientRect().width
+        / stage.querySelector('.context-generator-handoff-stage-connector').getBoundingClientRect().width;
+    };
+    window.__capSmokeHandoffStage("summary");
+    const start = read();
+    setTimeout(() => {
+      const running = read();
+      window.__capSmokeHandoffStage("summary", "done");
+      window.__capSmokeHandoffStage("paste");
+      const immediate = read();
+      setTimeout(() => {
+        const middle = read();
+        setTimeout(() => resolve({ start, running, immediate, middle, end: read() }), 240);
+      }, 60);
+    }, 600);
+  })`, contextId);
+  assert.ok(lineMotion.running > lineMotion.start && lineMotion.running < 0.9,
+    `Pending summary moves smoothly: ${JSON.stringify(lineMotion)}`);
+  assert.ok(lineMotion.immediate < 0.99 && lineMotion.middle > lineMotion.immediate && lineMotion.middle < 0.999,
+    `Abrupt completion glides through an intermediate width across the paste update: ${JSON.stringify(lineMotion)}`);
+  assert.ok(lineMotion.end >= 0.999, "The completion glide reaches the end.");
+  process.stdout.write("✓ Handoff line keeps moving while pending and glides to completion across stage changes.\n");
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await session.evaluate(`window.__capHandoffPaletteSnapshot = () => {
     const root = document.getElementById("context-generator-overlay");

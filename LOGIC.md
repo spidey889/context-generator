@@ -413,6 +413,8 @@ Long native ChatGPT DOM chats have historically under-captured. Simulated virtua
 
 ## Summaries and backend
 
+Handoff line motion is presentation only. Native capture and summarizing use bounded, continuous activity that keeps advancing past the display estimate without claiming completion. Real completion glides from the rendered position to the end in 220 ms; subsequent stage updates preserve that glide instead of snapping or restarting it. Hidden/reduced-motion completion stays immediate, and existing local sweeps and destination timing remain unchanged.
+
 ### Profiles and exact local carries
 
 Input length selects output allowances, not the first generated model. Word targets are advisory; sections have no quotas and sparse long chats should remain short and factual.
