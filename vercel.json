@@ -5,7 +5,7 @@
     { "source": "/index.html", "destination": "https://spreadz.in/", "permanent": true },
     { "source": "/brag/brag.mp4", "destination": "https://context-generator-website.vercel.app/brag/brag.mp4", "permanent": true },
     { "source": "/brag/brag.jpg", "destination": "https://context-generator-website.vercel.app/brag/brag.jpg", "permanent": true },
-    { "source": "/2026-05-10 09-51-15.mp4", "destination": "https://context-generator-website.vercel.app/2026-05-10%2009-51-15.mp4", "permanent": true }
+    { "source": "/2026-05-10%2009-51-15.mp4", "destination": "https://context-generator-website.vercel.app/2026-05-10%2009-51-15.mp4", "permanent": true }
   ],
   "functions": {
     "api/summarize.js": {
