@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-json-diagnostics-merge-v187";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-logged-out-placement-v188";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -4906,6 +4906,7 @@
 
   function findChatGptInlineToolbar(input) {
     if (!input?.isConnected || !isVisible(input)) return null;
+    if (input.hasAttribute("data-mobile-composer-prompt")) return findLoggedOutChatGptInlineToolbar(input);
     const body = input.closest("[data-composer-body]");
     const editor = input.closest("[data-composer-input]");
     if (!body || isComposerPopupControl(body, input)) return null;
@@ -4953,6 +4954,27 @@
     while (anchor.parentElement !== slot) anchor = anchor.parentElement;
     const modelBranch = model ? anchor : null;
     return { input, body, footer, left, right, controls, slot, anchor, modelBranch };
+  }
+
+  function findLoggedOutChatGptInlineToolbar(input) {
+    // The unauthenticated composer has its own named grid and Voice is a link.
+    // Require its explicit ownership markers; signed-in discovery stays separate.
+    const body = input.closest("form");
+    if (!body?.hasAttribute("data-logged-out") || !body.hasAttribute("data-mobile-composer") ||
+        isComposerPopupControl(body, input)) return null;
+    const ownedVisible = (node) => node.closest("form") === body && isVisible(node) && !isComposerPopupControl(node, input);
+    const attach = Array.from(body.querySelectorAll("[data-composer-action]")).find((node) => node.matches("button") && ownedVisible(node));
+    const left = attach?.closest("[data-mobile-composer-action-field]");
+    const rows = Array.from(body.querySelectorAll("[data-composer-trailing]")).filter(ownedVisible);
+    if (!left || rows.length !== 1) return null;
+    const right = rows[0];
+    const action = Array.from(right.querySelectorAll("[data-start-dictation], [data-start-voice], [data-composer-submit]"))
+      .find((node) => node.matches("button, a") && ownedVisible(node));
+    const rect = body.getBoundingClientRect();
+    if (!action || right.contains(input) || right.contains(left) || rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) return null;
+    let anchor = action;
+    while (anchor.parentElement !== right) anchor = anchor.parentElement;
+    return { input, body, footer: body, left, right, controls: right, slot: right, anchor, modelBranch: null, loggedOut: true };
   }
 
   function ensureChatGptInlineStyles() {
@@ -5010,7 +5032,7 @@
     chatGptInlineMount.pathname = window.location.pathname;
     clearLegacyInlineBackup({ keepControlObserver: true });
     ensureChatGptInlineStyles();
-    const markers = [[toolbar.footer, "footer"], [toolbar.controls, "controls"]];
+    const markers = [[toolbar.footer, toolbar.loggedOut ? "logged-out-footer" : "footer"], [toolbar.controls, "controls"]];
     if (toolbar.modelBranch) markers.push([toolbar.modelBranch, "model"]);
     markers.forEach(([node, value]) => {
       if (node.getAttribute(CHATGPT_INLINE_MARKER) !== value) node.setAttribute(CHATGPT_INLINE_MARKER, value);

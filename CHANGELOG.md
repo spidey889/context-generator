@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-27
 
+- **Keep the orb inside logged-out ChatGPT.** Add an adapter for the observed unauthenticated mobile composer, mounting in its named trailing group and accepting the native Voice link. Preserve the form's grid tracks and require explicit logged-out ownership, leaving signed-in placement unchanged. The new regression fails before the fix; existing composer tests and the real logged-out landing page verify placement.
+
 - **Refresh summary validation documentation.** Update current size boundaries, response retry and local recovery; retain telemetry audit and remove two superseded audits, with historical evidence available in Git. Runtime behavior is unchanged.
 
 - **Consolidate provider documentation.** Make `docs/provider-fallbacks.md` the detailed provider reference linked from `LOGIC.md`; update size limits, large-chat routing, budgets and recovery from current source. Remove three superseded audits while retaining historical references in Git. No runtime behavior changed.

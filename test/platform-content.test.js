@@ -3646,6 +3646,45 @@ function gridChatGptFixture() {
   return f;
 }
 
+function loggedOutChatGptFixture() {
+  const body = new FakeElement({ tag: "form", attrs: { "data-logged-out": "", "data-mobile-composer": "" } });
+  const input = new FakeElement({ tag: "textarea", attrs: { "data-mobile-composer-prompt": "", placeholder: "Ask ChatGPT" } });
+  const left = new FakeElement({ attrs: { "data-mobile-composer-action-field": "" } });
+  const attach = new FakeElement({ tag: "button", attrs: { "data-composer-action": "" } });
+  const right = new FakeElement({ attrs: { "data-composer-trailing": "", "data-slot": "composer-trailing-actions" } });
+  const dictation = new FakeElement({ attrs: { "data-slot": "composer-dictation-control" } });
+  const mic = new FakeElement({ tag: "button", attrs: { "data-start-dictation": "" } });
+  const send = new FakeElement({ attrs: { "data-slot": "composer-send-control" } });
+  const voice = new FakeElement({ tag: "a", attrs: { "data-start-voice": "" } });
+  body.appendChild(input); body.appendChild(left); body.appendChild(right);
+  left.appendChild(attach); right.appendChild(dictation); dictation.appendChild(mic);
+  right.appendChild(send); send.appendChild(voice);
+  return { body, input, left, attach, right, dictation, mic, send, voice };
+}
+
+test("logged-out ChatGPT mounts inside its native trailing slot without changing signed-in discovery", () => {
+  const f = loggedOutChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(bubble.parentElement, f.right);
+  assert.equal(bubble.nextElementSibling, f.dictation);
+  assert.equal(bubble.style.position, "static");
+  assert.equal(bubble.style.width, "36px");
+  assert.notEqual(f.body.getAttribute("data-context-generator-chatgpt-inline"), "footer", "preserve the logged-out form's named grid tracks");
+  f.mic.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(bubble.nextElementSibling, f.send, "Voice is a link on the empty logged-out page");
+  f.right.setAttribute("role", "menu");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
+  f.right.removeAttribute("role");
+  f.body.removeAttribute("data-logged-out");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null, "the new path requires explicit logged-out ownership");
+  const signedIn = inlineChatGptFixture();
+  assert.equal(hooks.findChatGptInlineToolbar(signedIn.input).footer, signedIn.footer);
+});
+
 test("ChatGPT free transition grid mounts beside Think without responsive-footer markers", () => {
   const f = gridChatGptFixture();
   const hooks = loadPlatformContent(Object.values(f));
