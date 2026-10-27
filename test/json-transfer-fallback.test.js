@@ -29,6 +29,7 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
     clearRunningResetTimer() {}, resetRunningFlag: () => { context.isRunning = false; },
     getDetectedConversationMessageCount: () => 2,
     transitionDestinationSheetToHandoff: async () => {}, showOverlay: () => { calls.handoff++; }, releaseDestinationSheetBackdrop() {},
+    isHandoffOverlayVisible: () => calls.handoff > 0,
     advanceTransferTelemetryStage() {}, setHandoffProgress() {}, markCaptureDone() {},
     prepareDestinationTab: () => { calls.destination++; return prepared; },
     prepareSourceForCapture: async () => {
@@ -446,6 +447,13 @@ test("ChatGPT queued picker cancellation skips its download and selection retain
     } else {
       const transfer = context.start("claude"); queued.resolve(); await started.promise;
       assert.equal(signal.aborted, false, "Selecting a destination must keep the owning read alive.");
+      // Selection now yields through the picker-to-handoff transition before
+      // claiming the queued snapshot. Dismissing that old picker is safe once
+      // the transfer has taken ownership, not while the transition is pending.
+      await new Promise(setImmediate);
+      assert.equal(calls.handoff, 1, "Pending JSON must already be shown in the handoff.");
+      assert.equal(context.pickerJsonCapture, null, "The transfer must own the selected read.");
+      assert.equal(calls.flows.length, 0, "The pending read must not dispatch a transfer.");
       context.clearPickerJsonCapture();
       assert.equal(signal.aborted, false, "Picker cleanup after selection cannot cancel the transfer's read.");
       response.resolve({ text: "Selected pending chat", messageTurnCount: 2 }); await transfer;
