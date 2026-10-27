@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-glass-v197";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-glass-v198";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -9713,14 +9713,16 @@
     if (copiedContext || errorDiv.dataset.contextGeneratorCopyGlass === "true") {
       const glass = Boolean(copiedContext);
       errorDiv.dataset.contextGeneratorCopyGlass = String(glass);
+      // Zen's browser chrome preserves backdrop tint instead of using an opaque
+      // panel. Approximate that native material inside the page with warm glass.
       errorDiv.style.setProperty("background", glass
-        ? "linear-gradient(135deg,rgba(39,47,59,0.78),rgba(14,19,28,0.70))"
+        ? "radial-gradient(ellipse at 0% 0%,rgba(229,198,156,0.23),transparent 75%),radial-gradient(ellipse at 100% 100%,rgba(180,164,185,0.12),transparent 80%),linear-gradient(130deg,rgba(58,53,47,0.58),rgba(28,27,25,0.54))"
         : "linear-gradient(145deg,#111111 0%,#171721 58%,#101015 100%)", "important");
-      errorDiv.style.setProperty("border-color", glass ? "rgba(225,237,255,0.12)" : "rgba(255,255,255,0.12)", "important");
+      errorDiv.style.setProperty("border-color", glass ? "rgba(245,227,198,0.20)" : "rgba(255,255,255,0.12)", "important");
       errorDiv.style.setProperty("box-shadow", glass
-        ? "0 16px 44px rgba(0,0,0,0.25),0 2px 6px rgba(0,0,0,0.12),inset 0 1px 0 rgba(255,255,255,0.10)"
+        ? "0 16px 44px rgba(0,0,0,0.22),0 2px 6px rgba(0,0,0,0.10),inset 0 1px 0 rgba(255,240,216,0.16)"
         : "0 18px 44px rgba(0,0,0,0.38),inset 0 1px 0 rgba(255,255,255,0.06)", "important");
-      errorDiv.style.backdropFilter = glass ? "blur(30px) saturate(140%)" : "none";
+      errorDiv.style.backdropFilter = glass ? "blur(30px) saturate(120%)" : "none";
       errorDiv.style.webkitBackdropFilter = errorDiv.style.backdropFilter;
       errorDiv.style.padding = glass ? "16px" : "14px";
       errorDiv.style.width = glass ? "min(328px,calc(100vw - 32px))" : "min(340px,calc(100vw - 32px))";
@@ -9728,32 +9730,35 @@
       errorDiv.style.gap = glass ? "10px" : "12px";
       const accent = document.getElementById("context-generator-error-accent");
       if (accent) accent.style.display = glass ? "none" : "block";
-      if (title) title.style.setProperty("font-weight", glass ? "600" : "760", glass ? "important" : "");
+      if (title) {
+        title.style.setProperty("font-weight", glass ? "600" : "760", glass ? "important" : "");
+        title.style.setProperty("color", glass ? "#fff8ee" : "#ffffff", "important");
+      }
       if (textSpan) {
-        textSpan.style.setProperty("color", glass ? "rgba(231,239,250,0.84)" : "rgba(255,255,255,0.72)", "important");
+        textSpan.style.setProperty("color", glass ? "rgba(245,237,225,0.84)" : "rgba(255,255,255,0.72)", "important");
         textSpan.style.setProperty("font-weight", glass ? "400" : "500", glass ? "important" : "");
         textSpan.style.fontSize = glass ? "13px" : "12.5px";
         textSpan.style.lineHeight = glass ? "1.5" : "1.42";
         textSpan.style.marginLeft = glass ? "36px" : "0";
       }
       if (mark) {
-        mark.style.setProperty("background", glass ? "rgba(132,222,184,0.10)" : "rgba(255,255,255,0.08)", "important");
-        mark.style.setProperty("border-color", glass ? "rgba(160,224,190,0.14)" : "rgba(255,255,255,0.14)", "important");
-        mark.style.setProperty("color", glass ? "#c5f4dd" : "#ffffff", "important");
+        mark.style.setProperty("background", glass ? "rgba(233,195,132,0.14)" : "rgba(255,255,255,0.08)", "important");
+        mark.style.setProperty("border-color", glass ? "rgba(245,216,164,0.22)" : "rgba(255,255,255,0.14)", "important");
+        mark.style.setProperty("color", glass ? "#f1d6a2" : "#ffffff", "important");
         mark.style.width = mark.style.height = glass ? "26px" : "28px";
         mark.style.borderRadius = glass ? "8px" : "999px";
         mark.style.fontWeight = glass ? "600" : "800";
       }
       const dismiss = document.getElementById("context-generator-error-dismiss");
       if (dismiss) {
-        dismiss.style.setProperty("background", glass ? "rgba(255,255,255,0.035)" : "rgba(255,255,255,0.07)", "important");
-        dismiss.style.setProperty("border-color", glass ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.12)", "important");
-        dismiss.style.setProperty("color", glass ? "rgba(223,234,246,0.74)" : "rgba(255,255,255,0.86)", "important");
+        dismiss.style.setProperty("background", glass ? "rgba(255,237,210,0.045)" : "rgba(255,255,255,0.07)", "important");
+        dismiss.style.setProperty("border-color", glass ? "rgba(255,237,210,0.10)" : "rgba(255,255,255,0.12)", "important");
+        dismiss.style.setProperty("color", glass ? "rgba(243,231,213,0.76)" : "rgba(255,255,255,0.86)", "important");
       }
       if (copyAgain) {
-        copyAgain.style.setProperty("background", "rgba(236,242,250,0.94)", "important");
-        copyAgain.style.setProperty("border-color", "rgba(255,255,255,0.34)", "important");
-        copyAgain.style.setProperty("color", "#1e2937", "important");
+        copyAgain.style.setProperty("background", "linear-gradient(135deg,rgba(244,219,178,0.94),rgba(221,192,150,0.88))", "important");
+        copyAgain.style.setProperty("border-color", "rgba(255,235,202,0.42)", "important");
+        copyAgain.style.setProperty("color", "#382b1d", "important");
       }
       // Explicit typography prevents the host page's serif/button rules from
       // turning this compact notice into a second version of its own UI.
