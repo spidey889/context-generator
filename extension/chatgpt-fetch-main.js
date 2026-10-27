@@ -1,5 +1,9 @@
 (() => {
-  const version = 28;
+  const version = 29;
+  // A large history and its original files share one bounded capture, but a
+  // healthy later request must not inherit milliseconds left by earlier work.
+  const captureTimeoutMs = 45000;
+  const readIdleTimeoutMs = 15000;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -97,7 +101,7 @@
     debug("capture_start", { native, measure: request.measureOnly === true, visibility: globalThis.document?.visibilityState,
       owns_fetch: window.fetch === wrappedFetch, online: globalThis.navigator?.onLine });
     const controller = new AbortController();
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxCaptureBytes,
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: captureTimeoutMs, raw_limit_bytes: maxCaptureBytes,
       raw_bytes: 0, requests: 0, auth_refreshes: 0 }, progress => {
       if (request.measureOnly !== true) window.postMessage({ ...reply, type: "capture_progress", jsonCapture: progress }, location.origin);
     });
@@ -139,7 +143,21 @@
         controller.abort();
       }
     };
-    const timer = setTimeout(() => controller.abort(), 15000);
+    const captureDeadline = Date.now() + captureTimeoutMs;
+    const timer = setTimeout(() => controller.abort(), captureTimeoutMs);
+    let idleTimer, idleDeadline;
+    const checkCaptureActive = () => {
+      if (Date.now() >= captureDeadline || idleDeadline !== undefined && Date.now() >= idleDeadline) controller.abort();
+      if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+    };
+    const finishReadProgress = () => { clearTimeout(idleTimer); idleDeadline = undefined; };
+    const noteReadProgress = () => {
+      clearTimeout(idleTimer);
+      if (!controller.signal.aborted) {
+        idleDeadline = Math.min(captureDeadline, Date.now() + readIdleTimeoutMs);
+        idleTimer = setTimeout(() => controller.abort(), Math.max(0, idleDeadline - Date.now()));
+      }
+    };
     window.navigation?.addEventListener("navigate", changed);
     window.addEventListener("popstate", changed);
     const recordReadFailure = (error, completedDescriptor = false) => {
@@ -173,6 +191,8 @@
       if (metrics.data.failure_stage === currentRead.stage) metrics.set(details);
     };
     const fetchJson = async (url, options = {}) => {
+      checkCaptureActive();
+      noteReadProgress();
       delete reply.status;
       delete metrics.data.http_status;
       const stage = reply.captureRequestStage || "history";
@@ -189,11 +209,19 @@
       try { const response = await Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
       }]); currentRead.response = response; currentRead.phase = "headers";
+        checkCaptureActive();
+        noteReadProgress();
         metrics.set({ http_status: response.status }); metrics.checkpoint("response", stage);
         debugPhase = "body";
         debug("headers", { native, stage: reply.captureRequestStage || "history", status: response.status, headers_ms: Date.now() - began });
         return response;
-      } catch (error) { recordReadFailure(error); throw error; }
+      } catch (error) {
+        recordReadFailure(error);
+        // A late headers response still owns a body even if the absolute
+        // deadline wins before a reader can start.
+        try { currentRead.response?.body?.cancel()?.catch?.(() => {}); } catch {}
+        throw error;
+      }
       finally { metrics.add("download_ms", Date.now() - began); }
     };
     // Discard owned responses before retry/fallback; cleanup must never replace
@@ -209,7 +237,7 @@
       const remaining = Math.min(responseLimit, maxCaptureBytes - bytesRead);
       const observation = metrics.response(stage, remaining, response.headers.get("content-length"), false);
       try {
-        if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+        checkCaptureActive();
         if (Number(response.headers.get("content-length")) > remaining) { readLimitExceeded = true; metrics.fail("raw_header_limit", stage, "content_length", Number(response.headers.get("content-length")), remaining, response.status); throw new Error("partial"); }
         reader = response.body?.getReader();
         const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -227,8 +255,9 @@
             metrics.fail("network_error", stage);
             throw new Error("network");
           });
-          if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+          checkCaptureActive();
           if (done) break;
+          noteReadProgress();
           if (!responseBytes) debug("first_byte", { native, stage });
           bytesRead += value.byteLength;
           responseBytes += value.byteLength;
@@ -243,6 +272,7 @@
         }
         // Flush partial UTF-8 at EOF. Silent replacement would alter source
         // text; parse only a complete, strictly decoded response.
+        finishReadProgress();
         currentRead.phase = "decode";
         try { parts.push(decoder.decode()); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
         observation.end();
@@ -251,6 +281,7 @@
         metrics.checkpoint("parse", stage, stage === "history" ? { history_response_read: true } : undefined);
         currentRead.phase = "parse";
         const parsed = metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
+        checkCaptureActive();
         debug("parse_done", { native, stage });
         metrics.checkpoint("check", stage, stage === "history" ? { history_parsed: true } : undefined);
         currentRead.complete = true;
@@ -273,7 +304,7 @@
       debug("body_start", { native, stage: "attachment_body" });
       const observation = metrics.response("attachment_body", maxCaptureBytes - bytesRead, response.headers.get("content-length"), false);
       try {
-        if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+        checkCaptureActive();
         if (response.status !== 200 || response.headers.has("content-range")
           || responseMediaType(response) !== "text/plain") {
           metrics.fail(response.status !== 200 ? "http_error" : response.headers.has("content-range") ? "partial_response" : "non_json_response", "attachment_body", undefined, undefined, undefined, response.status);
@@ -293,8 +324,9 @@
         metrics.checkpoint("read", "attachment_body");
         if (reader) while (true) {
           const { done, value } = await reader.read();
-          if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+          checkCaptureActive();
           if (done) break;
+          noteReadProgress();
           if (!size) debug("first_byte", { native, stage: "attachment_body" });
           observation.chunk(value.byteLength);
           currentRead.bytes += value.byteLength;
@@ -306,11 +338,15 @@
           bytes.set(value, size); size += value.byteLength;
         }
         if (size !== expectedSize) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", size, expectedSize); throw new Error("paste"); }
+        finishReadProgress();
         debugPhase = "processing";
         debug("body_done", { native, stage: "attachment_body", bytes: size });
         // Preserve complete UTF-8, BOM and whitespace through chunk boundaries.
         currentRead.phase = "decode";
-        try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch (error) { metrics.fail("invalid_utf8", "attachment_body"); throw error; }
+        let text;
+        try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch (error) { metrics.fail("invalid_utf8", "attachment_body"); throw error; }
+        checkCaptureActive();
+        return text;
       } catch (error) {
         recordReadFailure(error);
         if (reader) await reader.cancel().catch(() => {});
@@ -486,7 +522,7 @@
           throw new Error(error?.message === "network" ? "network" : "paste");
         }
       }
-      if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+      checkCaptureActive();
       reply.pastedTexts = pastedTexts;
       reply.data = data;
       reply.sourceTreeCounts = sourceTreeCounts;
@@ -501,6 +537,7 @@
       try { if (resourceObserver) logResourceTiming(resourceObserver.takeRecords()); } catch {}
       try { resourceObserver?.disconnect(); } catch {}
       clearTimeout(timer);
+      clearTimeout(idleTimer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
       if (active === controller) { active = null; activeMeasurementId = null; activeCaptureId = null; }

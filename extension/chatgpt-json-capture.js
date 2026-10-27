@@ -1,8 +1,9 @@
 (() => {
   const channel = "cap-context-chatgpt-json-v2";
+  const responseTimeoutMs = 47000; // MAIN's 45s cap plus message/serialization headroom.
   const debug = (event, fields = {}) => {
     try {
-      const data = { build: 27, ...fields };
+      const data = { build: 28, ...fields };
       console.info?.(`[CapCapture] ${JSON.stringify({ world: "bridge", event, ...data })}`);
       window.postMessage({ channel, type: "debug", world: "bridge", event, fields: data }, location.origin);
     } catch { /* Timing is local and cannot change capture. */ }
@@ -302,11 +303,11 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.type === "pong" && reply.id === id
-            && reply.version !== 28) metrics?.set({ hook_status: "version_mismatch" });
+            && reply.version !== 29) metrics?.set({ hook_status: "version_mismatch" });
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
           && reply.type === "pong" && reply.id === id) {
           debug("hook_reply", { observed_version: Number.isSafeInteger(reply.version) ? reply.version : 0 });
-          if (reply.version === 28) finish(true);
+          if (reply.version === 29) finish(true);
         }
       };
       const ping = () => {
@@ -358,7 +359,7 @@
         }
       }
       if (signal?.aborted) throw cancelledError();
-      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 28 });
+      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 29 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       metrics.checkpoint("route", "history");
       return await new Promise((resolve, reject) => {
@@ -415,7 +416,7 @@
             }
           } catch (error) { reject(error); }
         };
-        const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
+        const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, responseTimeoutMs);
         signal?.addEventListener("abort", onAbort, { once: true });
         window.addEventListener("message", receive);
         debug("bridge_request", { measure: measureOnly });
@@ -432,14 +433,14 @@
   // picker snapshots stay in memory and never create telemetry reports.
   const readCapture = window.__capCaptureChatGptJson;
   window.__capMeasureChatGptJson = async (expectedPath, signal, onEstimate) => {
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: responseTimeoutMs });
     metrics.transcript = () => true;
     const capture = await readCapture(expectedPath, metrics, true, signal, onEstimate);
     return { characterCount: capture.text.length, messageTurnCount: capture.messageTurnCount,
       ...(capture.estimatedCharacterCount !== undefined ? { estimatedCharacterCount: capture.estimatedCharacterCount } : {}) };
   };
   window.__capCaptureChatGptJson = async (expectedPath, signal, onProgress) => {
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 }, onProgress);
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: responseTimeoutMs }, onProgress);
     metrics.stage("hook");
     try {
       const capture = await readCapture(expectedPath, metrics, false, signal);
