@@ -576,18 +576,6 @@ for (const format of ["stream", "json"]) test(`summary response retry: a broken 
   assert.equal(requests.length, 2, "Cache only the accepted retry.");
 });
 
-test("summary response retry: two broken bodies return failure without a third request", async () => {
-  let fetches = 0;
-  const sendSummary = loadBackgroundForSummaryTest(async () => {
-    fetches++;
-    return { ok: true, status: 200, json: async () => { throw new TypeError("network error"); } };
-  });
-  const result = await sendSummary("Both reads fail");
-  assert.equal(result.ok, false);
-  assert.deepEqual(Array.from(result.diagnostics.summary_response_failures, entry => entry.attempt), [1, 2]);
-  assert.equal(fetches, 2);
-});
-
 for (const kind of ["json", "utf8", "content", "http", "fetch"]) test(`summary response retry: ${kind} rejection is not retried`, async () => {
   let fetches = 0;
   const sendSummary = loadBackgroundForSummaryTest(async () => {
@@ -845,6 +833,7 @@ test("a new transfer opens and delivers after Escape on every destination", asyn
     const harness = loadBackgroundForTransferTest({ sourceTab });
     const first = await harness.prepare(destination, sourceTab);
     assert.equal(first.ok, true, destination);
+    if (destination === "gemini") assert.equal(harness.operations.created[0].options.url, "https://gemini.google.com/app");
     await harness.cancel(sourceTab.id);
     const next = await harness.prepare(destination, sourceTab, null, "next-attempt");
     assert.equal(next.ok, true, `${destination}: cancellation cannot poison a later attempt`);
@@ -1411,12 +1400,6 @@ test("Claude, ChatGPT and Gemini focus and settle prepared and fresh composers b
   }
 });
 
-test("Gemini opens its native new-chat app directly", async () => {
-  const harness = loadBackgroundForTransferTest();
-  assert.equal((await harness.prepare("gemini")).ok, true);
-  assert.equal(harness.operations.created[0].options.url, "https://gemini.google.com/app");
-});
-
 clockTest("Gemini activates before recovering a receiver that waits for visibility", { tickMs: 100, maxElapsedMs: 90000 }, async () => {
   const sourceTab = { id: 9, windowId: 4, index: 1, url: "https://chatgpt.com/c/source" };
   const harness = loadBackgroundForTransferTest({ sourceTab,
@@ -1662,19 +1645,32 @@ test("handoff styling rejects untrusted or oversized requests and reports API fa
   assert.equal((await new Promise(resolve => listener(message, sender, resolve))).ok, false);
 });
 
-test("Claude on-demand MAIN installation accepts only a Claude top-frame sender", async () => {
+test("on-demand MAIN installation accepts only matching top-frame sources", async () => {
   let listener;
   const injections = [];
   loadBackgroundForSummaryTest(async () => {}, { injections, onMessage: value => { listener = value; } });
-  const request = sender => new Promise(resolve => listener({ type: "ENSURE_CLAUDE_JSON_HOOK" }, sender, resolve));
-  for (const sender of [{}, { tab: { id: 1, url: "https://chatgpt.com/c/a" }, frameId: 0 }, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 2 }]) {
-    assert.equal((await request(sender)).ok, false);
+  const cases = [
+    { type: "ENSURE_CLAUDE_JSON_HOOK", valid: ["https://claude.ai/chat/a"], wrong: "https://chatgpt.com/c/a",
+      files: ["json-capture-metrics-main.js", "claude-fetch-main.js"] },
+    { type: "ENSURE_CHATGPT_JSON_HOOK", valid: ["https://chatgpt.com/g/project/c/a"], wrong: "https://claude.ai/chat/a", invalidFrame: "https://chatgpt.com/c/a",
+      files: ["json-capture-metrics-main.js", "chatgpt-fetch-main.js"] },
+    { type: "ENSURE_NETWORK_JSON_HOOK", valid: ["https://gemini.google.com/app/a", "https://grok.com/c/a", "https://chat.deepseek.com/a/chat/s/a"],
+      wrong: "https://chatgpt.com/c/a", invalidFrame: "https://grok.com/c/a", files: ["json-capture-metrics-main.js", "network-json-data.js", "network-fetch-main.js"] }
+  ];
+  for (const { type, valid, wrong, invalidFrame = valid[0], files } of cases) {
+    injections.length = 0;
+    const request = sender => new Promise(resolve => listener({ type }, sender, resolve));
+    for (const sender of [{}, { tab: { id: 1, url: wrong }, frameId: 0 }, { tab: { id: 1, url: invalidFrame }, frameId: 2 }]) {
+      assert.equal((await request(sender)).ok, false, type);
+    }
+    assert.equal(injections.length, 0, type);
+    for (const url of valid) assert.equal((await request({ tab: { id: 1, url }, frameId: 0 })).ok, true, url);
+    assert.equal(injections.length, valid.length, type);
+    for (const injection of injections) {
+      assert.equal(injection.world, "MAIN", type);
+      assert.deepEqual([...injection.files], files, type);
+    }
   }
-  assert.equal(injections.length, 0);
-  assert.equal((await request({ tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 })).ok, true);
-  assert.equal(injections.length, 1);
-  assert.equal(injections[0].world, "MAIN");
-  assert.deepEqual([...injections[0].files], ["json-capture-metrics-main.js", "claude-fetch-main.js"]);
 });
 
 test("Claude MAIN installation failures are returned without affecting default startup injection", async () => {
@@ -1682,31 +1678,6 @@ test("Claude MAIN installation failures are returned without affecting default s
   loadBackgroundForSummaryTest(async () => {}, { injectionError: true, onMessage: value => { listener = value; } });
   const reply = await new Promise(resolve => listener({ type: "ENSURE_CLAUDE_JSON_HOOK" }, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 }, resolve));
   assert.equal(reply.ok, false);
-});
-
-
-test("ChatGPT on-demand MAIN readiness is restricted to its top-frame source", async () => {
-  let listener;
-  const injections = [];
-  loadBackgroundForSummaryTest(async () => {}, { injections, onMessage: value => { listener = value; } });
-  const request = sender => new Promise(resolve => listener({ type: "ENSURE_CHATGPT_JSON_HOOK" }, sender, resolve));
-  for (const sender of [{}, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 }, { tab: { id: 1, url: "https://chatgpt.com/c/a" }, frameId: 2 }]) assert.equal((await request(sender)).ok, false);
-  assert.equal(injections.length, 0);
-  assert.equal((await request({ tab: { id: 1, url: "https://chatgpt.com/g/project/c/a" }, frameId: 0 })).ok, true);
-  assert.equal(injections.length, 1);
-  assert.equal(injections[0].world, "MAIN");
-  assert.deepEqual([...injections[0].files], ["json-capture-metrics-main.js", "chatgpt-fetch-main.js"]);
-});
-
-test("New network MAIN readiness accepts only Gemini/Grok/DeepSeek top frames", async () => {
-  let listener; const injections = [];
-  loadBackgroundForSummaryTest(async () => {}, { injections, onMessage: value => { listener = value; } });
-  const request = sender => new Promise(resolve => listener({ type: "ENSURE_NETWORK_JSON_HOOK" }, sender, resolve));
-  for (const sender of [{}, { tab: { id: 1, url: "https://chatgpt.com/c/a" }, frameId: 0 }, { tab: { id: 1, url: "https://grok.com/c/a" }, frameId: 2 }]) assert.equal((await request(sender)).ok, false);
-  assert.equal(injections.length, 0);
-  for (const url of ["https://gemini.google.com/app/a", "https://grok.com/c/a", "https://chat.deepseek.com/a/chat/s/a"]) assert.equal((await request({ tab: { id: 1, url }, frameId: 0 })).ok, true);
-  assert.equal(injections.length, 3);
-  assert.ok(injections.every(item => item.world === "MAIN"));
 });
 
 clockTest("DOM extension survives the old deadline with the same prepared destination and cancellation token", async t => {

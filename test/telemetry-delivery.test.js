@@ -153,6 +153,7 @@ for (const recovered of [true, false]) test(`browser response failures survive $
   await background.settled();
   const records = JSON.parse(JSON.stringify(result.diagnostics.summary_response_failures));
   assert.equal(records.length, recovered ? 1 : 2);
+  assert.deepEqual(records.map(record => record.attempt), recovered ? [1] : [1, 2]);
   assert.equal(records[0].reason, "body_read_failed");
   // Delayed source progress and terminal snapshots can contain less evidence.
   await background.ack(event(1, { diagnostics: { version: 1, summary_response_failures: records.slice(0, 1) } }));
