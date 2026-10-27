@@ -281,7 +281,7 @@
       ...(captureWarning ? { captureWarning } : {}), ...(skippedFiles.size ? { skippedFiles: [...skippedFiles.values()] } : {}) };
   }
 
-  function waitForHook(timeoutMs, install = false, signal) {
+  function waitForHook(timeoutMs, install = false, signal, metrics) {
     const started = Date.now();
     debug("hook_wait", { wait_ms: timeoutMs, pending: install });
     return new Promise(resolve => {
@@ -301,10 +301,12 @@
       const onAbort = () => finish(false);
       const receive = event => {
         const reply = event.data;
+        if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.type === "pong" && reply.id === id
+            && reply.version !== 27) metrics?.set({ hook_status: "version_mismatch" });
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
           && reply.type === "pong" && reply.id === id) {
           debug("hook_reply", { observed_version: Number.isSafeInteger(reply.version) ? reply.version : 0 });
-          if (reply.version === 26) finish(true);
+          if (reply.version === 27) finish(true);
         }
       };
       const ping = () => {
@@ -321,7 +323,7 @@
         // A busy/cold worker's reply can lag behind a working MAIN hook. Trust
         // the correlated pong, not the installation callback, as readiness proof.
         Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_CHATGPT_JSON_HOOK" }))
-          .then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
+          .then(reply => { if (!settled && !reply?.ok) { metrics?.set({ hook_status: "install_rejected" }); finish(false); } }, () => { if (!settled) { metrics?.set({ hook_status: "install_failed" }); finish(false); } });
       }
     });
   }
@@ -331,7 +333,8 @@
     const cancelledError = (stage = "hook") => measureOnly ? new Error("Size check cancelled.")
       : Object.assign(new Error("ChatGPT capture cancelled."), { diagnosticCode: "user_cancelled", captureDetail: "cancelled", captureRequestStage: stage });
     const chat = currentChat(expectedPath);
-    if (!chat) throw captureError("Open a saved ChatGPT conversation to use JSON capture.", "unavailable", "routing_unavailable", "hook");
+    metrics.set({ saved_chat: Boolean(chat) });
+    if (!chat) { metrics.set({ route_reason: "path_unrecognized", route_found: false }); throw captureError("Open a saved ChatGPT conversation to use JSON capture.", "unavailable", "routing_unavailable", "hook"); }
     let changed = currentChat() !== chat;
     const navigated = event => {
       const destination = event?.destination ? new URL(event.destination.url) : location;
@@ -345,16 +348,19 @@
       if (changed) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       // Usually document_start already installed MAIN; don't wake/reinstall it
       // on every capture. Missing/older/replaced hooks get bounded recovery.
-      if (!await waitForHook(250, false, signal)) {
+      metrics.set({ hook_ready: false, hook_status: "no_reply" });
+      if (!await waitForHook(250, false, signal, metrics)) {
         if (signal?.aborted) throw cancelledError();
-        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal)) {
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) metrics.set({ hook_status: "runtime_missing" });
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal, metrics)) {
           if (signal?.aborted) throw cancelledError();
           throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
         }
       }
       if (signal?.aborted) throw cancelledError();
-      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 26 });
+      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 27 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
+      metrics.checkpoint("route", "history");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         // Await the native cancellation reply before releasing the shared read
@@ -363,13 +369,17 @@
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); };
         const receive = event => {
           const reply = event.data;
-          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || !["response", "measurement_progress"].includes(reply.type) || reply.id !== id) return;
+          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || !["response", "measurement_progress", "capture_progress"].includes(reply.type) || reply.id !== id) return;
           if (reply.type === "measurement_progress") {
             if (measureOnly && !signal?.aborted && !changed && currentChat() === chat && reply.chat === chat
                 && Number.isSafeInteger(reply.messageTurnCount) && reply.messageTurnCount > 0
                 && Number.isSafeInteger(reply.estimatedCharacterCount) && reply.estimatedCharacterCount >= 0) {
               try { onEstimate?.({ messageTurnCount: reply.messageTurnCount, estimatedCharacterCount: reply.estimatedCharacterCount }); } catch {}
             }
+            return;
+          }
+          if (reply.type === "capture_progress") {
+            if (!measureOnly && reply.chat === chat && !changed) metrics.adopt(reply.jsonCapture);
             return;
           }
           debug("bridge_reply", { elapsed_ms: Date.now() - hookStarted, aborted: Boolean(signal?.aborted) });
@@ -392,6 +402,7 @@
               const stage = ["session", "history", "attachment_descriptor", "attachment_body"].includes(reply.captureRequestStage) ? reply.captureRequestStage : "history";
               throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason, detail, stage, reply.status);
             }
+            metrics.stage("serialize");
             try {
               debug("serialize_start");
               const capture = metrics.timed("serialize_ms", () => serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts, metrics, measureOnly));
@@ -427,10 +438,12 @@
     return { characterCount: capture.text.length, messageTurnCount: capture.messageTurnCount,
       ...(capture.estimatedCharacterCount !== undefined ? { estimatedCharacterCount: capture.estimatedCharacterCount } : {}) };
   };
-  window.__capCaptureChatGptJson = async (expectedPath, signal) => {
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
+  window.__capCaptureChatGptJson = async (expectedPath, signal, onProgress) => {
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 }, onProgress);
+    metrics.stage("hook");
     try {
       const capture = await readCapture(expectedPath, metrics, false, signal);
+      metrics.checkpoint("complete", "serialize", { history_checked: true });
       metrics.set({ selected_turns: capture.messageTurnCount });
       if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });
       return { ...capture, jsonCapture: metrics.finish() };

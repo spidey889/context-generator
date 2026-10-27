@@ -4,6 +4,18 @@ Extension 1.4.12 introduced one optional JSONB record to `transfers.diagnostics`
 Older attempts retain NULL; their missing observations cannot be recovered.
 The existing `failure_reason` and `last_stage` remain compatible.
 
+## JSON capture checkpoints
+
+`diagnostics.json_attempts` keeps one flat record per selected JSON read, under the existing transfer `attempt_id` (original `prefetch`/`fresh`, then `retry`; two maximum). It does not create another table or log a checkpoint timeline.
+
+- `step` and `step_stage` identify where work stopped; the existing `failure_check`, exception class, HTTP status, byte/count and timing fields explain the observed failure.
+- `hook_status` distinguishes no probe reply, incompatible version, missing extension runtime, rejected installation, failed installation promise and ready.
+- `saved_chat`, `hook_ready`, `route_found`, `history_request_sent`, `history_response_read`, `history_parsed` and `history_checked` retain yes/no progress. `history_checked` becomes true only after the owning capture passes validation.
+- `route_candidates` and `route_resources` distinguish an empty routing observation from unrelated resources or routes for other chats. `route_reason = path_unrecognized` means the existing saved-chat matcher rejected the source path; `no_matching_endpoint` means Claude did not observe a matching history address. Neither records an address or proves why the site omitted that request.
+- `progress_seq` orders updates to a pending read; a completed observation wins over late progress. Failures are reported before recovery, and first completed records survive source, worker, durable outbox and SQL merges. A lost final MAIN reply retains its last correlated checkpoint through the bridge timeout.
+
+Unused picker captures and numeric-only size probes never upload these records. Telemetry remains best effort: a process killed before reporting, an unavailable relay or an older client cannot supply observations it did not send. No chat text, title, filename, address, identifier, raw exception or stack is admitted. Capture behavior is unchanged. Deploy DB, Edge and Vercel validators before updating clients.
+
 ## Minimal login/signup clue
 
 `destination_auth_prompt` is an optional boolean in the existing diagnosis:

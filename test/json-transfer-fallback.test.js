@@ -359,8 +359,9 @@ test("history changing during a pending picker read triggers one fresh capture",
   let history = "Old reply";
   context.getConversationTurns = () => [{ role: "assistant", text: history }];
   const started = deferred(), response = deferred();
-  context.window.__capCaptureChatGptJson = () => {
+  context.window.__capCaptureChatGptJson = (_path, _unused, onProgress) => {
     calls.json++;
+    onProgress?.({ mode: "fresh", outcome: "started", step: "read", step_stage: "history" });
     if (calls.json === 1) { started.resolve(); return response.promise; }
     return Promise.resolve({ text: history, messageTurnCount: 2 });
   };
@@ -373,6 +374,8 @@ test("history changing during a pending picker read triggers one fresh capture",
   assert.equal(calls.json, 2);
   assert.equal(calls.flows[0].text, "New reply");
   assert.equal(calls.notice, 0);
+  assert.deepEqual(Array.from(calls.flows[0].trace.diagnostics.json_attempts, attempt => attempt.mode), ["fresh"],
+    "Discarded picker progress cannot occupy one of the two accepted read slots.");
 });
 
 test("closed picker results are discarded and reopening never overlaps native reads", async () => {
@@ -547,6 +550,34 @@ const transientError = (reason = "request_failed", detail = "network_error", sta
     ...(status === undefined ? {} : { capture_http_status: status }) }
 });
 
+test("fresh and prefetched JSON failures save native evidence even when their wrapper says unknown_error", async () => {
+  for (const prefetched of [false, true]) for (const check of ["invalid_utf8", "unknown"]) {
+    const stage = check === "unknown" ? "serialize" : "attachment_body";
+    const { context, calls } = harness("chatgpt");
+    context.window.__capCaptureChatGptJson = async () => {
+      calls.json++;
+      throw Object.assign(new Error("MUST_NOT_APPEAR chat https://PRIVATE filename.csv"), {
+        diagnosticCode: "unknown_error", diagnostics: { version: 1, error_code: "unknown_error", capture_detail: "network_error", capture_request_stage: "history" },
+        jsonCapture: { outcome: "failed", mode: "fresh", failure_check: check, failure_stage: stage, failure_error_type: "TypeError" }
+      });
+    };
+    if (prefetched) { context.startPickerJsonCapture(); await context.pickerJsonCapture.promise; }
+    await context.start("claude");
+    assert.equal(calls.json, 1, "Richer reporting must not change retry decisions.");
+    assert.equal(calls.finished.length, 1);
+    const details = calls.finished[0].diagnostics;
+    assert.equal(details.error_code, "capture_json_failed");
+    assert.equal(details.capture_error_code, "capture_json_failed");
+    assert.equal(details.capture_detail, check === "unknown" ? undefined : check);
+    assert.equal(details.capture_request_stage, stage);
+    assert.equal(details.failure_site, `capture_${stage}`);
+    assert.equal(details.capture_failure_site, `capture_${stage}`);
+    assert.equal(details.capture_error_type, "TypeError");
+    assert.equal(details.json_attempts[0].failure_check, check);
+    assert.doesNotMatch(JSON.stringify(details), /MUST_NOT_APPEAR|PRIVATE|filename|https/);
+  }
+});
+
 test("only DeepSeek -> ChatGPT retries an oversized picker file as a separate-upload note", async () => {
   for (const destination of ["chatgpt", "claude"]) {
     const { context, calls } = harness("deepseek", { mode: "success" });
@@ -661,7 +692,7 @@ test("size failures stop all five platforms without partial DOM transfer, includ
     assert.equal(context.isRunning, false);
     const diagnostics = calls.finished[0].diagnostics;
     assert.equal(diagnostics.error_code, "conversation_too_large");
-    assert.equal(diagnostics.capture_detail, error.diagnostics.capture_detail);
+    assert.equal(diagnostics.capture_detail, "size_limit", "The recorded size guard is more precise than the generic wrapper.");
     assert.equal(diagnostics.json_fallback_code, undefined);
     assert.equal(diagnostics.json_attempts[0].failure_check, error.jsonCapture.failure_check);
     assert.equal(diagnostics.json_attempts[0].failure_value, error.jsonCapture.failure_value);
@@ -1290,4 +1321,20 @@ test("rough progress reaches the owning DOM handoff before the final count and n
   final.resolve({ characterCount: 1000001 }); await new Promise(setImmediate);
   assert.equal(trace.deadlineAt, deadline, "Late progress cannot extend completed capture.");
   assert.equal(calls.errors.length, 0);
+});
+
+test("a failed JSON read is queued before retry can replace its diagnosis",async()=>{
+  const {context,calls}=harness("deepseek");const snapshots=[];
+  context.startTransferTelemetry=trace=>{trace.telemetryStarted=true;trace.telemetryLastStage="capture_started";};
+  context.sendTransferTelemetrySnapshot=trace=>snapshots.push(JSON.parse(JSON.stringify(trace.diagnostics)));
+  context.window.__capCaptureNetworkJson=async()=>{
+    calls.json++;
+    if(calls.json===1)throw Object.assign(transientError(),{jsonCapture:{outcome:"failed",step:"route",step_stage:"history",hook_ready:true,route_found:false,
+      route_reason:"no_matching_endpoint",failure_check:"routing_unavailable"}});
+    assert.equal(snapshots.find(d=>d.json_attempts?.length).json_attempts[0].failure_check,"routing_unavailable");
+    return{text:"JSON transcript",messageTurnCount:2,jsonCapture:{outcome:"succeeded",step:"complete",history_checked:true}};
+  };
+  await context.start("claude");assert.equal(calls.json,2);assert.equal(calls.dom,0);
+  assert.equal(calls.flows[0].trace.id,"same-attempt");
+  assert.deepEqual(Array.from(calls.flows[0].trace.diagnostics.json_attempts,d=>d.mode),["fresh","retry"]);
 });

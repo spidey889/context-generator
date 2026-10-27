@@ -484,7 +484,13 @@ function mergeTransferTelemetryEvents(previous, next) {
     characterCount: next.characterCount ?? previous.characterCount,
     ...((previous.diagnostics || next.diagnostics) ? { diagnostics: {
       ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.lastStage) >= stages.indexOf(previous.lastStage)
-        ? next.diagnostics || {} : {}) } } : {}),
+        ? next.diagnostics || {} : {}),
+      ...((previous.diagnostics?.json_attempts || next.diagnostics?.json_attempts) ? { version: 1,
+        json_attempts: globalThis.CapTransferDiagnostics.mergeJsonAttempts(previous.diagnostics?.json_attempts, next.diagnostics?.json_attempts) } : {}),
+      ...((previous.diagnostics?.summary_response_failures || next.diagnostics?.summary_response_failures) ? {
+        version: 1,
+        summary_response_failures: globalThis.CapTransferDiagnostics.mergeSummaryResponseFailures(
+          previous.diagnostics?.summary_response_failures, next.diagnostics?.summary_response_failures) } : {}) } } : {}),
     ...(previous.reportedModel || next.reportedModel ? { reportedModel: previous.reportedModel || next.reportedModel } : {})
   };
 }
@@ -880,7 +886,13 @@ function mergeTelemetryPayloads(previous, next) {
     failure_reason: terminal ? previous.failure_reason : next.failure_reason,
     ...((previous.diagnostics || next.diagnostics) ? { diagnostics: terminal
       ? previous.diagnostics || (next.status === previous.status && next.last_stage === previous.last_stage && next.failure_reason === previous.failure_reason ? next.diagnostics : undefined)
-      : { ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.last_stage) >= stages.indexOf(previous.last_stage) ? next.diagnostics || {} : {}) } } : {}),
+      : { ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.last_stage) >= stages.indexOf(previous.last_stage) ? next.diagnostics || {} : {}),
+        ...((previous.diagnostics?.json_attempts || next.diagnostics?.json_attempts) ? { version: 1,
+          json_attempts: globalThis.CapTransferDiagnostics.mergeJsonAttempts(previous.diagnostics?.json_attempts, next.diagnostics?.json_attempts) } : {}),
+        ...((previous.diagnostics?.summary_response_failures || next.diagnostics?.summary_response_failures) ? {
+          version: 1,
+          summary_response_failures: globalThis.CapTransferDiagnostics.mergeSummaryResponseFailures(
+            previous.diagnostics?.summary_response_failures, next.diagnostics?.summary_response_failures) } : {}) } } : {}),
     // Late incomplete progress cannot erase the known captured count or the
     // extension version authenticated by an already generated receipt.
     character_count: previous.summary_proof ? previous.character_count : next.character_count ?? previous.character_count,
@@ -1160,7 +1172,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "SUMMARIZE_WITH_BACKEND") {
     summarizeWithBackend(message.conversation, message.transferId, message.deadlineAt, sender?.tab, message.messages, message.platform)
-      .then((result) => sendResponse({ ok: true, summary: result.summary, timing: result.timing }))
+      .then((result) => sendResponse({ ok: true, summary: result.summary, timing: result.timing,
+        ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}) }))
       .catch((error) => {
         // The source recovers summary-service failures with a verified local
         // carry. Only terminal errors should advertise a failed transfer here.
@@ -1264,8 +1277,15 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
   // one authoritative final result; previews never become pasted context.
   debug.phase = "response_body";
   debug.format = response.headers?.get("content-type")?.includes("application/x-ndjson") ? "ndjson" : "json";
-  if (debug.format === "json") return response.json().catch(markInterruptedSummaryResponse);
+  debug.final_result = false;
+  if (debug.format === "json") return response.json().catch(markInterruptedSummaryResponse).then(data => {
+    debug.eof = true;
+    debug.final_result = Boolean(data && typeof data === "object");
+    return data;
+  });
   debug.bytes = 0; debug.chunks = 0; debug.events = 0;
+  debug.eof = false;
+  const responseStartedAt = Date.parse(debug.started_at);
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "", result, eof = false;
@@ -1312,6 +1332,7 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
         debug.bytes += chunk.value.byteLength;
         debug.chunks++;
         debug.last_chunk_at = new Date().toISOString();
+        debug.last_chunk_ms = Date.now() - responseStartedAt;
       }
       debug.phase = "stream_utf8_decode";
       buffer += eof ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
@@ -1329,8 +1350,8 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
 }
 
 function logSummaryResponseFailure(debug, error) {
-  // Local-only metadata: never store response text, arbitrary error messages,
-  // URLs, auth headers or stack traces. The Vercel ID can correlate server logs.
+  // Retain the existing local copy. Remote reports use a separate closed
+  // schema below, never this debug object or its local-only Vercel request ID.
   const message = String(error?.message || "");
   const entry = { ...debug, failed_at: new Date().toISOString(),
     error_name: ["TypeError", "SyntaxError", "AbortError", "TimeoutError", "Error"].includes(error?.name) ? error.name : "Other",
@@ -1341,6 +1362,49 @@ function logSummaryResponseFailure(debug, error) {
   console.info?.("[Cap Context] Summary response failure (local diagnostic)", entry);
   // Keep only the latest failure; logging must never delay or replace fallback.
   try { Promise.resolve(chrome.storage.local.set({ "context-generator-summary-response-debug-v1": entry })).catch(() => {}); } catch {}
+}
+
+function makeSummaryResponseFailure(debug, error, attempt, requestSignal, requestDeadlineAt, deadlineAt) {
+  const contract = globalThis.CapTransferDiagnostics;
+  if (!contract) return null;
+  const phase = contract.summaryResponseFailureSchema.phase.values.includes(debug.phase) ? debug.phase : "unknown";
+  const reason = debug.aborted ? "aborted" : debug.http_status >= 400 ? "http_rejected"
+    : error?.summaryServiceFailure ? "service_rejected"
+    : phase === "stream_utf8_decode" ? "utf8_decode_failed"
+    : phase === "stream_json_parse" || (phase === "response_body" && error?.name === "SyntaxError") ? "json_parse_failed"
+    : phase === "stream_event_validation" ? "stream_event_invalid"
+    : phase === "stream_completion_validation" ? "stream_completion_invalid"
+    : phase === "summary_validation" ? "summary_invalid"
+    : phase === "near_end_callback" ? "callback_failed"
+    : phase === "stream_read" || (phase === "response_body" && error?.summaryResponseInterrupted) ? "body_read_failed" : "unexpected_exception";
+  const record = { attempt, phase, reason,
+    error_type: contract.summaryResponseFailureSchema.error_type.values.includes(error?.name) ? error.name : "other",
+    format: ["json", "ndjson"].includes(debug.format) ? debug.format : "unknown",
+    aborted: debug.aborted === true, caller_aborted: requestSignal?.aborted === true,
+    deadline_elapsed: Date.now() >= requestDeadlineAt,
+    transfer_deadline_elapsed: Number.isFinite(deadlineAt) && Date.now() >= deadlineAt };
+  for (const [key, value] of Object.entries({ http_status: debug.http_status, bytes_received: debug.bytes,
+    chunks_received: debug.chunks, events_received: debug.events, elapsed_ms: debug.elapsed_ms,
+    headers_ms: debug.headers_ms, last_chunk_ms: debug.last_chunk_ms, deadline_remaining_ms: debug.deadline_remaining_ms })) {
+    if (Number.isFinite(value)) record[key] = Math.max(0, Math.min(2147483647, Math.round(value)));
+  }
+  for (const key of ["eof", "final_result"]) if (typeof debug[key] === "boolean") record[key] = debug[key];
+  if (error?.summaryServiceFailure) {
+    record.service_code = contract.summaryResponseFailureSchema.service_code.values.includes(error.code) ? error.code : "other";
+    if (Number.isInteger(error.status) && error.status >= 100 && error.status <= 599) record.service_status = error.status;
+  }
+  if (typeof globalThis.navigator?.onLine === "boolean") record.online = globalThis.navigator.onLine;
+  return contract.validateSummaryResponseFailure(record);
+}
+
+function recordKnownSummaryResponseFailures(transferId, failures) {
+  const active = activeTransferTelemetry.get(transferId);
+  if (!active || active.status !== "started") return;
+  // Independent of the source reply: a reload or successful retry must not
+  // erase an observed failure. Persist through the normal outbox, without
+  // awaiting storage/network or changing the transfer's outcome/stage.
+  recordTransferTelemetry({ ...active, diagnostics: { ...(active.diagnostics || {}),
+    version: 1, summary_response_failures: failures.map(record => ({ ...record })) } }).catch(() => {});
 }
 
 function markInterruptedSummaryResponse(error) {
@@ -1414,6 +1478,7 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
     checkTransferDeadline(deadlineAt);
     await checkTransferSource(operation);
     recordKnownTransferTelemetryStage(transferId, "summary_response_started");
+    if (result.diagnostics?.summary_response_failures) recordKnownSummaryResponseFailures(transferId, result.diagnostics.summary_response_failures);
     return result;
   } catch (error) {
     checkTransferOperation(operation);
@@ -1433,11 +1498,12 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
 async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }) {
   const startedAt = nowMs();
   const retryDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity);
+  const responseFailures = [];
   for (let attempt = 1; attempt <= 2; attempt++) {
     requestSignal?.throwIfAborted();
     checkTransferDeadline(deadlineAt);
     try {
-      const result = await fetchSummaryFromBackendOnce(conversationText, transferId, deadlineAt, requestSignal, onNearEnd, payload, retryDeadlineAt);
+      const result = await fetchSummaryFromBackendOnce(conversationText, transferId, deadlineAt, requestSignal, onNearEnd, payload, retryDeadlineAt, attempt, responseFailures);
       result.timing.attempt = attempt;
       result.timing.summaryMs = Math.round(nowMs() - startedAt);
       return result;
@@ -1450,7 +1516,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
   }
 }
 
-async function fetchSummaryFromBackendOnce(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }, retryDeadlineAt = Infinity) {
+async function fetchSummaryFromBackendOnce(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }, retryDeadlineAt = Infinity, attempt = 1, responseFailures = []) {
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
   const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "summary_request" };
@@ -1510,6 +1576,8 @@ async function fetchSummaryFromBackendOnce(conversationText, transferId = null, 
     responseDebug.phase = "response_headers";
     responseDebug.headers_at = new Date().toISOString();
     responseDebug.http_status = response.status;
+    responseDebug.headers_ms = Math.round(nowMs() - summaryStartedAt);
+    responseDebug.format = response.headers?.get("content-type")?.includes("application/x-ndjson") ? "ndjson" : "json";
     const vercelId = response.headers?.get("x-vercel-id");
     if (typeof vercelId === "string" && /^[a-zA-Z0-9:;._=-]{1,160}$/.test(vercelId)) responseDebug.vercel_request_id = vercelId;
     globalThis.CapTransferDiagnostics?.update(diagnostics, { summary_http_status: response.status,
@@ -1530,6 +1598,7 @@ async function fetchSummaryFromBackendOnce(conversationText, transferId = null, 
       throw createSummaryBackendPayloadError(data, data?.status || response.status);
     }
     if (!data.summary?.trim()) throw Object.assign(new Error("Backup summarizer returned no summary."), { diagnosticCode: "summary_empty" });
+    responseDebug.phase = "summary_confirmation";
     const confirmation = sanitizeSummaryConfirmation({
       summary_proof: data.summaryProofV3 || data.summaryProofV2 || data.summaryProof,
       ...(data.summaryProofV3 || data.summaryProofV2 ? { summary_confirmed_at: data.summaryConfirmedAt } : {}),
@@ -1564,14 +1633,27 @@ async function fetchSummaryFromBackendOnce(conversationText, transferId = null, 
       backendInputChars: data.timing?.inputChars || null,
       backend: data.timing || null
     };
-    return { summary, timing };
+    return { summary, timing, ...(responseFailures.length ? { diagnostics: { version: 1,
+      summary_response_failures: responseFailures.map(record => ({ ...record })) } } : {}) };
   } catch (error) {
     responseDebug.elapsed_ms = Math.round(nowMs() - summaryStartedAt);
-    responseDebug.aborted = controller.signal.aborted;
     responseDebug.deadline_remaining_ms = Math.max(0, requestDeadlineAt - Date.now());
-    if (responseReceived) logSummaryResponseFailure(responseDebug, error);
     let failure = error;
     try { checkSummaryDeadline(); } catch (deadlineError) { failure = deadlineError; }
+    responseDebug.aborted = controller.signal.aborted;
+    if (responseReceived) {
+      // Reporting is optional. Even broken storage/console hooks must not
+      // suppress the original error, retry, local carry or deadline handling.
+      try { logSummaryResponseFailure(responseDebug, error); } catch {}
+      try {
+        const record = makeSummaryResponseFailure(responseDebug, error, attempt, requestSignal, requestDeadlineAt, deadlineAt);
+        if (record && responseFailures.length < 2) responseFailures.push(record);
+        if (responseFailures.length) {
+          diagnostics.summary_response_failures = responseFailures.map(entry => ({ ...entry }));
+          recordKnownSummaryResponseFailures(transferId, responseFailures);
+        }
+      } catch {}
+    }
     const fallback = controller.signal.aborted ? "summary_timeout" : responseReceived ? "summary_invalid_response" : "summary_transport_failed";
     globalThis.CapTransferDiagnostics?.update(diagnostics, { summary_ms: Math.round(nowMs() - summaryStartedAt),
       ...globalThis.CapTransferDiagnostics?.errorDetails(failure, responseReceived ? "summary_response" : "summary_request"),
