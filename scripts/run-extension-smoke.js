@@ -2136,11 +2136,12 @@ async function verifyHandoffPalette(session) {
   })`, contextId);
   assert.equal(firstCaption, "Capturing chat", "Instant JSON capture must paint its own caption before the summary caption");
   await waitFor(async () => await session.evaluate('document.getElementById("context-generator-text-label").textContent') === "Summarizing", "the capture cue completing before summary presentation");
-  assert.ok(await session.evaluate(`(() => {
+  // The real stage can advance while its nonblocking finish glide is visible.
+  await waitFor(() => session.evaluate(`(() => {
     const capture = document.querySelector('[data-context-generator-stage="capture"]');
     return capture.querySelector('.context-generator-handoff-stage-connector-fill').getBoundingClientRect().width
-      / capture.querySelector('.context-generator-handoff-stage-connector').getBoundingClientRect().width >= 0.99;
-  })()`), "The capture line must be complete when Summarizing appears");
+      / capture.querySelector('.context-generator-handoff-stage-connector').getBoundingClientRect().width >= 0.999;
+  })()`), "capture line finishing its glide after Summarizing starts", 1000);
   await session.evaluate('window.__capSmokeRebuildHandoff(); window.__capSmokeHandoffStage("capture"); window.__capSmokeHandoffStage("capture", "done"); window.__capSmokeHandoffStage("summary"); window.__capSmokeHandoffStage("paste", "done")', contextId);
   await session.evaluate("new Promise(resolve => setTimeout(resolve, 500))");
   assert.equal(await session.evaluate('document.getElementById("context-generator-text-label").textContent'), "Pasted into Claude",
@@ -2174,15 +2175,19 @@ async function verifyHandoffPalette(session) {
       window.__capSmokeHandoffStage("summary", "done");
       window.__capSmokeHandoffStage("paste");
       const immediate = read();
-      setTimeout(() => {
-        const middle = read();
-        setTimeout(() => resolve({ start, running, immediate, middle, end: read() }), 240);
-      }, 60);
+      const fill = document.querySelector('[data-context-generator-stage="summary"] .context-generator-handoff-stage-connector-fill');
+      const finish = fill.getAnimations().find(animation => animation.transitionProperty === "transform");
+      // Seek the browser's real transition instead of relying on a 60ms timer
+      // being delivered before completion on a busy CI display.
+      if (finish) { finish.pause(); finish.currentTime = 60; }
+      const middle = read();
+      finish?.finish();
+      resolve({ start, running, immediate, middle, end: read(), finishing: Boolean(finish) });
     }, 600);
   })`, contextId);
   assert.ok(lineMotion.running > lineMotion.start && lineMotion.running < 0.9,
     `Pending summary moves smoothly: ${JSON.stringify(lineMotion)}`);
-  assert.ok(lineMotion.immediate < 0.99 && lineMotion.middle > lineMotion.immediate && lineMotion.middle < 0.999,
+  assert.ok(lineMotion.finishing && lineMotion.immediate < 0.99 && lineMotion.middle > lineMotion.immediate && lineMotion.middle < 0.999,
     `Abrupt completion glides through an intermediate width across the paste update: ${JSON.stringify(lineMotion)}`);
   assert.ok(lineMotion.end >= 0.999, "The completion glide reaches the end.");
   process.stdout.write("✓ Handoff line keeps moving while pending and glides to completion across stage changes.\n");
