@@ -1,5 +1,9 @@
 (() => {
-  const version = 27;
+  const version = 29;
+  // A large history and its original files share one bounded capture, but a
+  // healthy later request must not inherit milliseconds left by earlier work.
+  const captureTimeoutMs = 45000;
+  const readIdleTimeoutMs = 15000;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -93,10 +97,11 @@
     if (active) { debug("capture_done", { result: "busy" }); window.postMessage({ ...reply, error: "busy" }, location.origin); return; }
     const native = ++debugSequence, debugStarted = Date.now();
     let debugPhase = "processing", debugTimer = null;
+    let currentRead, currentFile;
     debug("capture_start", { native, measure: request.measureOnly === true, visibility: globalThis.document?.visibilityState,
       owns_fetch: window.fetch === wrappedFetch, online: globalThis.navigator?.onLine });
     const controller = new AbortController();
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxCaptureBytes,
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: captureTimeoutMs, raw_limit_bytes: maxCaptureBytes,
       raw_bytes: 0, requests: 0, auth_refreshes: 0 }, progress => {
       if (request.measureOnly !== true) window.postMessage({ ...reply, type: "capture_progress", jsonCapture: progress }, location.origin);
     });
@@ -138,16 +143,63 @@
         controller.abort();
       }
     };
-    const timer = setTimeout(() => controller.abort(), 15000);
+    const captureDeadline = Date.now() + captureTimeoutMs;
+    const timer = setTimeout(() => controller.abort(), captureTimeoutMs);
+    let idleTimer, idleDeadline;
+    const checkCaptureActive = () => {
+      if (Date.now() >= captureDeadline || idleDeadline !== undefined && Date.now() >= idleDeadline) controller.abort();
+      if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+    };
+    const finishReadProgress = () => { clearTimeout(idleTimer); idleDeadline = undefined; };
+    const noteReadProgress = () => {
+      clearTimeout(idleTimer);
+      if (!controller.signal.aborted) {
+        idleDeadline = Math.min(captureDeadline, Date.now() + readIdleTimeoutMs);
+        idleTimer = setTimeout(() => controller.abort(), Math.max(0, idleDeadline - Date.now()));
+      }
+    };
     window.navigation?.addEventListener("navigate", changed);
     window.addEventListener("popstate", changed);
+    const recordReadFailure = (error, completedDescriptor = false) => {
+      if (!currentRead || currentRead.failed || currentRead.complete && !completedDescriptor) return;
+      currentRead.failed = true;
+      const response = currentRead.response;
+      const rules = globalThis.CapTransferDiagnostics.jsonAttemptSchema;
+      const reason = navigated || controller.signal.reason === "account_changed" ? "conversation_changed"
+        : ["capture_cancelled", "measurement_cancelled"].includes(controller.signal.reason) ? "cancelled"
+        : controller.signal.aborted ? "timeout" : error?.name === "SyntaxError" ? "invalid_json"
+        : ({ http: "http_error", partial: "partial_response", format: "non_json_response", auth: "auth_missing",
+          changed: "conversation_changed", paste: "attachment_failed", network: "network_error" })[error?.message] || "network_error";
+      const mediaType = response && responseMediaType(response);
+      const details = {
+        failure_phase: currentRead.phase,
+        failure_error_type: rules.failure_error_type.values.includes(currentRead.errorType || error?.name) ? currentRead.errorType || error.name : "other",
+        failure_request_ms: Date.now() - currentRead.began,
+        failure_read_bytes: currentRead.bytes,
+        failure_response_type: !response ? "none" : rules.failure_response_type.values.includes(response.type) ? response.type : "other",
+        failure_online: typeof navigator === "undefined" || typeof navigator.onLine !== "boolean" ? "unknown" : navigator.onLine ? "online" : "offline",
+        failure_abort: !controller.signal.aborted ? "none" : navigated || ["account_changed", "capture_cancelled", "measurement_cancelled"].includes(controller.signal.reason) ? "other" : "capture_timeout",
+        ...(response ? { failure_http_status: response.status, failure_content_type: mediaType === "text/plain" ? "text"
+          : mediaType === "application/json" ? "json" : mediaType === "text/html" ? "html"
+          : mediaType === "application/octet-stream" ? "octet_stream" : mediaType ? "other" : "missing" } : {}),
+        ...(currentRead.file ? { failure_file_index: currentRead.file.index, failure_file_bytes: currentRead.file.size } : {})
+      };
+      // These fields already pass the hosted closed schema. Keep only counts
+      // and fixed labels from the actual failing request, never the preceding
+      // history/descriptor status, native exception prose, file ID or URL.
+      metrics.fail(reason, currentRead.stage, undefined, undefined, undefined, response?.status, details);
+      if (metrics.data.failure_stage === currentRead.stage) metrics.set(details);
+    };
     const fetchJson = async (url, options = {}) => {
+      checkCaptureActive();
+      noteReadProgress();
       delete reply.status;
       delete metrics.data.http_status;
       const stage = reply.captureRequestStage || "history";
       metrics.checkpoint("request", stage, stage === "history" ? { history_request_sent: true } : undefined);
       metrics.add("requests");
       const began = Date.now();
+      currentRead = { began, stage, phase: "fetch", bytes: 0, file: currentFile };
       try {
         if (debugRequests.length < 64) debugRequests.push({ url: new URL(url, location.href).href,
           started: globalThis.performance?.now?.() ?? 0 });
@@ -156,11 +208,21 @@
       debug("fetch_start", { native, stage: reply.captureRequestStage || "history", requests: metrics.data.requests });
       try { const response = await Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
-      }]); metrics.set({ http_status: response.status }); metrics.checkpoint("response", stage);
+      }]); currentRead.response = response; currentRead.phase = "headers";
+        checkCaptureActive();
+        noteReadProgress();
+        metrics.set({ http_status: response.status }); metrics.checkpoint("response", stage);
         debugPhase = "body";
         debug("headers", { native, stage: reply.captureRequestStage || "history", status: response.status, headers_ms: Date.now() - began });
         return response;
-      } finally { metrics.add("download_ms", Date.now() - began); }
+      } catch (error) {
+        recordReadFailure(error);
+        // A late headers response still owns a body even if the absolute
+        // deadline wins before a reader can start.
+        try { currentRead.response?.body?.cancel()?.catch?.(() => {}); } catch {}
+        throw error;
+      }
+      finally { metrics.add("download_ms", Date.now() - began); }
     };
     // Discard owned responses before retry/fallback; cleanup must never replace
     // the bounded capture error with private upstream cancellation details.
@@ -175,47 +237,59 @@
       const remaining = Math.min(responseLimit, maxCaptureBytes - bytesRead);
       const observation = metrics.response(stage, remaining, response.headers.get("content-length"), false);
       try {
-        if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+        checkCaptureActive();
         if (Number(response.headers.get("content-length")) > remaining) { readLimitExceeded = true; metrics.fail("raw_header_limit", stage, "content_length", Number(response.headers.get("content-length")), remaining, response.status); throw new Error("partial"); }
         reader = response.body?.getReader();
         const decoder = new TextDecoder("utf-8", { fatal: true });
         const parts = [];
         let responseBytes = 0;
+        currentRead.phase = "body";
         metrics.checkpoint("read", stage);
         if (reader) while (true) {
           // Retry a rejected network read, not decoder/JSON/size failures.
           const { done, value } = await reader.read().catch(error => {
+            currentRead.errorType = error?.name;
             metrics.exception(error);
             if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
             bodyReadFailed = true;
             metrics.fail("network_error", stage);
             throw new Error("network");
           });
-          if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+          checkCaptureActive();
           if (done) break;
+          noteReadProgress();
           if (!responseBytes) debug("first_byte", { native, stage });
           bytesRead += value.byteLength;
           responseBytes += value.byteLength;
+          currentRead.bytes += value.byteLength;
           observation.chunk(value.byteLength);
           if (responseBytes > remaining) { readLimitExceeded = true; metrics.fail("raw_response_stream_limit", stage, "reader_bytes", responseBytes, remaining, response.status); throw new Error("partial"); }
           let part;
+          currentRead.phase = "decode";
           try { part = decoder.decode(value, { stream: true }); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
           if (part) parts.push(part);
+          currentRead.phase = "body";
         }
         // Flush partial UTF-8 at EOF. Silent replacement would alter source
         // text; parse only a complete, strictly decoded response.
+        finishReadProgress();
+        currentRead.phase = "decode";
         try { parts.push(decoder.decode()); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
         observation.end();
         debugPhase = "processing";
         debug("body_done", { native, stage, bytes: responseBytes });
         metrics.checkpoint("parse", stage, stage === "history" ? { history_response_read: true } : undefined);
+        currentRead.phase = "parse";
         const parsed = metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
+        checkCaptureActive();
         debug("parse_done", { native, stage });
         metrics.checkpoint("check", stage, stage === "history" ? { history_parsed: true } : undefined);
+        currentRead.complete = true;
         return parsed;
       } catch (error) {
         metrics.exception(error);
         if (error?.name === "SyntaxError") metrics.fail("invalid_json", stage);
+        recordReadFailure(error);
         if (error?.name === "SyntaxError") reply.captureDetail = "invalid_json";
         if (reader) await reader.cancel().catch(() => {});
         else await discardResponse(response);
@@ -230,7 +304,7 @@
       debug("body_start", { native, stage: "attachment_body" });
       const observation = metrics.response("attachment_body", maxCaptureBytes - bytesRead, response.headers.get("content-length"), false);
       try {
-        if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+        checkCaptureActive();
         if (response.status !== 200 || response.headers.has("content-range")
           || responseMediaType(response) !== "text/plain") {
           metrics.fail(response.status !== 200 ? "http_error" : response.headers.has("content-range") ? "partial_response" : "non_json_response", "attachment_body", undefined, undefined, undefined, response.status);
@@ -246,13 +320,16 @@
         const bytes = new Uint8Array(expectedSize);
         reader = response.body?.getReader();
         let size = 0;
+        currentRead.phase = "body";
         metrics.checkpoint("read", "attachment_body");
         if (reader) while (true) {
           const { done, value } = await reader.read();
-          if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+          checkCaptureActive();
           if (done) break;
+          noteReadProgress();
           if (!size) debug("first_byte", { native, stage: "attachment_body" });
           observation.chunk(value.byteLength);
+          currentRead.bytes += value.byteLength;
           // Rejected chunks still consume the shared read budget. Skipping a
           // bad file must not reset that allowance for the following files.
           bytesRead += value.byteLength;
@@ -261,11 +338,17 @@
           bytes.set(value, size); size += value.byteLength;
         }
         if (size !== expectedSize) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", size, expectedSize); throw new Error("paste"); }
+        finishReadProgress();
         debugPhase = "processing";
         debug("body_done", { native, stage: "attachment_body", bytes: size });
         // Preserve complete UTF-8, BOM and whitespace through chunk boundaries.
-        try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch (error) { metrics.fail("invalid_utf8", "attachment_body"); throw error; }
+        currentRead.phase = "decode";
+        let text;
+        try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch (error) { metrics.fail("invalid_utf8", "attachment_body"); throw error; }
+        checkCaptureActive();
+        return text;
       } catch (error) {
+        recordReadFailure(error);
         if (reader) await reader.cancel().catch(() => {});
         else await discardResponse(response);
         throw error;
@@ -281,7 +364,7 @@
         if (response.status !== 200) { reply.status = response.status; throw new Error("http"); }
         if (response.headers.has("content-range")) throw new Error("partial");
         if (responseMediaType(response) !== "application/json") throw new Error("format");
-      } catch (error) { metrics.fail(({ http: "http_error", partial: "partial_response", format: "non_json_response" })[error?.message], reply.captureRequestStage, undefined, undefined, undefined, response.status); await discardResponse(response); throw error; }
+      } catch (error) { metrics.fail(({ http: "http_error", partial: "partial_response", format: "non_json_response" })[error?.message], reply.captureRequestStage, undefined, undefined, undefined, response.status); recordReadFailure(error); await discardResponse(response); throw error; }
     };
     const refreshAuth = async () => {
       metrics.add("auth_refreshes");
@@ -400,7 +483,10 @@
       // Validate the complete qualifying manifest before remote file work.
       // Repeated IDs share one read, but every declaration must match its bytes.
       if (request.measureOnly !== true && pastedBytes > maxCaptureBytes - bytesRead) { metrics.fail("raw_remaining_files_limit", "attachment_descriptor", "declared_files", pastedBytes, maxCaptureBytes - bytesRead); throw new Error("paste"); }
+      let fileIndex = 0;
       for (const file of uploads.values()) {
+        currentFile = { index: ++fileIndex, size: file.size };
+        currentRead = null;
         try {
           reply.captureRequestStage = "attachment_descriptor";
           const descriptorResponse = await fetchAuthenticatedJson(`/backend-api/files/download/${encodeURIComponent(file.id)}`, { redirect: "error" });
@@ -426,6 +512,7 @@
           reply.status = textResponse.status;
           pastedTexts[file.id] = await readPaste(textResponse, file.size);
         } catch (error) {
+          recordReadFailure(error, currentRead?.stage === "attachment_descriptor" && reply.captureRequestStage === "attachment_descriptor");
           // File-local failure excludes the entire body, never a decoded prefix.
           // Capture-wide identity, cancellation and read limits remain terminal.
           if (!readLimitExceeded && !controller.signal.aborted && !navigated && currentChat() === chat && error.message !== "auth") {
@@ -435,7 +522,7 @@
           throw new Error(error?.message === "network" ? "network" : "paste");
         }
       }
-      if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+      checkCaptureActive();
       reply.pastedTexts = pastedTexts;
       reply.data = data;
       reply.sourceTreeCounts = sourceTreeCounts;
@@ -450,6 +537,7 @@
       try { if (resourceObserver) logResourceTiming(resourceObserver.takeRecords()); } catch {}
       try { resourceObserver?.disconnect(); } catch {}
       clearTimeout(timer);
+      clearTimeout(idleTimer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
       if (active === controller) { active = null; activeMeasurementId = null; activeCaptureId = null; }

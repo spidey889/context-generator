@@ -6,10 +6,11 @@ Word targets are advisory allowances and diagnostic metadata; generated sections
 
 ## Provider acceptance
 
-`createSummaryWithProvider()` uses `getSummaryContentRejectionReason()` before structural diagnostics. Only refusal-only and substantively empty output advance to another provider:
+`createSummaryWithProvider()` uses `getSummaryContentRejectionReason()` before structural diagnostics. Refusal-only, substantively empty and recognizable self-reasoning replies advance to another provider:
 
 - Empty output includes whitespace/decorations or recognized headings, fixed destination instructions, exact profile-template placeholders, and empty markers (`None`, `N/A`, `[Not provided]`, `[No context]`, `[Insert context here]`, `[Insert summary here]`) with no actual content.
 - Refusal-only output consists entirely of task-refusal/apology sentences and narrowly recognized retry/provide-transcript courtesies. Known refusal prefixes must concern summarizing, helping, assisting, complying, providing, or fulfilling. This conservative English heuristic cannot identify every refusal or prove semantic usefulness.
+- A reply opening with a refusal to provide/reproduce reasoning and an offer to summarize its own thinking is rejected even when it includes bullets. That combination answers the source conversation instead of carrying it forward. The check examines only the first two paragraphs, leaves attributed/quoted discussion inside a handoff alone, and records the existing metadata-only `provider_output_rejected` failure. It does not detect every wrong-task answer or verify factual coverage.
 - The check scans every line, preserving inline bodies and content from repeated sections; section parsing must not erase useful text before acceptance.
 - Quoted refusals, a user's inability to connect/build, and useful content alongside refusal wording are retained. There is no minimum accepted word count.
 
@@ -27,4 +28,4 @@ Recovery applies after successful supported capture. The extension uses exact lo
 
 ## Verification
 
-`test/summarize.test.js` covers refusal/empty Mistral-to-local fallback, exact retained transcript, short/code/mixed/contextual content, template-only output, and useful token-limited delivery without fallback. `test/platform-content.test.js` covers source-local recovery for backend rejection/empty replies/missing worker and the retained size boundary. Run the focused tests, deterministic suite and isolated Brave extension smoke after related changes. Production deployment and live-provider behavior require separate verification.
+`test/summarize.test.js` covers refusal/empty/self-reasoning recovery, exact retained transcript, large-input Dots-to-TokenHarbor fallback, short/code/mixed/contextual content, template-only output, and useful token-limited delivery without fallback. `test/platform-content.test.js` covers source-local recovery for backend rejection/empty replies/missing worker and the retained size boundary. Run focused checks for the affected boundary; browser checks apply when capture/delivery changes. Production deployment and live-provider behavior require separate verification.
