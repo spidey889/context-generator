@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v191";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v192";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -9529,6 +9529,7 @@
 
   function showErrorOverlay(message, copiedContext = null) {
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const noticeDurationMs = copiedContext ? 16000 : 8000;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
     const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
@@ -9694,7 +9695,7 @@
             if (errorDiv.contextGeneratorCopyNoticeOwner !== owner) return;
             copyAgain.textContent = "Copied again!";
             clearTimeout(errorDiv.contextGeneratorHideTimer);
-            errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), 8000);
+            errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), noticeDurationMs);
           } catch {
             if (errorDiv.contextGeneratorCopyNoticeOwner !== owner) return;
             hideErrorOverlay(errorDiv, { immediate: true });
@@ -9727,7 +9728,7 @@
         void errorDiv.offsetWidth;
         errorDiv.contextGeneratorAnimationFrame = requestAnimationFrame(settle);
       }
-      errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), 8000);
+      errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), noticeDurationMs);
     };
     if (sourceSurface && !reducedMotion) errorDiv.contextGeneratorEnterTimer = setTimeout(reveal, exitMs);
     else reveal();
