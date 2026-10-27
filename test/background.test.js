@@ -576,18 +576,6 @@ for (const format of ["stream", "json"]) test(`summary response retry: a broken 
   assert.equal(requests.length, 2, "Cache only the accepted retry.");
 });
 
-test("summary response retry: two broken bodies return failure without a third request", async () => {
-  let fetches = 0;
-  const sendSummary = loadBackgroundForSummaryTest(async () => {
-    fetches++;
-    return { ok: true, status: 200, json: async () => { throw new TypeError("network error"); } };
-  });
-  const result = await sendSummary("Both reads fail");
-  assert.equal(result.ok, false);
-  assert.deepEqual(Array.from(result.diagnostics.summary_response_failures, entry => entry.attempt), [1, 2]);
-  assert.equal(fetches, 2);
-});
-
 for (const kind of ["json", "utf8", "content", "http", "fetch"]) test(`summary response retry: ${kind} rejection is not retried`, async () => {
   let fetches = 0;
   const sendSummary = loadBackgroundForSummaryTest(async () => {

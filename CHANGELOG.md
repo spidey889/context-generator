@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-28
 
+- **Consolidate duplicate summary-retry coverage.** The outbox/restart test already exercises two failed reads and verifies no third request; retain its attempt-number assertions there instead of repeating the same worker retry in a separate test.
+
 - **Remove an overlapping DeepSeek capture test.** Existing attachment tests already check untrusted download hosts and truncated files while also verifying healthy siblings and retries; keep those stronger checks.
 
 - **Align short-reply capture with scrolling completion.** Static review found that capture included short replies while its post-scroll snapshots still omitted them. At the bottom of a chat, that mismatch could look like repeated window changes and prevent the quiet stop. Use capture's turn set for sweep settling while retaining the separate admission/destination thresholds. Move the existing five-platform regression's short replies into the final window and bound repeated boundary scrolling. Advance content readiness to v201. Tests were not run at the owner's request; this is a local source correction.
