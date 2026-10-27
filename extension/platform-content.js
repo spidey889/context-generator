@@ -211,7 +211,7 @@
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
   const HANDOFF_REASSURANCE_TEXT = "Taking a little longer—still working.";
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
-  // capture reads the sweep's existing scroll diagnostics, while summary creeps below completion.
+  // native capture and summary creep below completion; DOM capture uses scroll diagnostics.
   const HANDOFF_STAGES = [
     { id: "capture", label: "Capturing chat" },
     { id: "summary", label: "Summarizing" },
@@ -220,6 +220,7 @@
   const HANDOFF_CAPTURE_LINE_MIN = 0.04;
   const HANDOFF_CAPTURE_CUE_MS = 400;
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
+  const HANDOFF_NATIVE_CAPTURE_LINE_MS = 45000; // Display pacing, independent of native read deadlines.
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
   const HANDOFF_FINAL_PAINT_WAIT_MS = 120;
@@ -1005,6 +1006,10 @@
       delay,
       getHandoffProgressState,
       getHandoffProgressStatusText,
+      startHandoffActivityProgress,
+      stopHandoffActivityProgress,
+      reportHandoffCaptureProgress,
+      transitionDestinationSheetToHandoff,
       completeHandoffForDestinationReveal,
       completeLocalHandoff,
       createEarlyDestinationReveal,
@@ -1714,6 +1719,7 @@
       ...getConversationCaptureMetrics(conversationText)
     });
     advanceTransferTelemetryStage(trace, "capture_completed");
+    stopHandoffActivityProgress();
     setHandoffProgress("capture", "done");
   }
 
@@ -7668,7 +7674,7 @@
     }
   }
 
-  async function transitionDestinationSheetToHandoff() {
+  async function transitionDestinationSheetToHandoff(trace = null) {
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       pendingHandoffOrigin = null;
       // Selection still owns the prefetched JSON when animations are skipped.
@@ -7679,6 +7685,7 @@
     // Preserve the picker's on-screen geometry so the larger handoff surface
     // can expand from the same place instead of popping into the viewport center.
     await delay(DESTINATION_TRANSFER_PRESS_MS);
+    checkTransferDeadline(trace);
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const sheetRect = sheet?.getBoundingClientRect?.();
     pendingHandoffOrigin = sheetRect
@@ -8164,14 +8171,12 @@
       if (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
-      // Native JSON may already be ready in the picker. Read it before any
-      // handoff animation; only a real AI request needs that presentation.
-      if (!useClaudeJson && !useChatGptJson && !useNetworkJson) {
-        await transitionDestinationSheetToHandoff();
-        checkTransferDeadline(trace);
-        showOverlay(destinationId);
-        releaseDestinationSheetBackdrop();
-      }
+      // Selection starts the handoff even when the prefetched native read is
+      // still pending. Preserve its ownership while the picker fades away.
+      await transitionDestinationSheetToHandoff(trace);
+      checkTransferDeadline(trace);
+      showOverlay(destinationId);
+      releaseDestinationSheetBackdrop();
       reportCaptureProgress(trace, useClaudeJson || useChatGptJson || useNetworkJson ? `${currentPlatform.id}-json` : "structured");
       advanceTransferTelemetryStage(trace, "capture_started");
       if (!useClaudeJson && !useChatGptJson && !useNetworkJson) await prepareSourceForCapture();
@@ -8185,6 +8190,7 @@
       let conversationText;
       if (useClaudeJson || useChatGptJson || useNetworkJson) {
         updateTransferDiagnostics(trace, { last_operation: "capture_json" }, "capture_json");
+        startHandoffActivityProgress("capture");
         try {
           const capture = await takePickerJsonCapture(claudeJsonPath || chatGptJsonPath || geminiJsonPath || deepseekJsonPath || grokJsonUrl,
             currentPlatform.id === "deepseek" && destinationId === "chatgpt");
@@ -8232,6 +8238,7 @@
             showOverlay(destinationId);
             releaseDestinationSheetBackdrop();
           }
+          stopHandoffActivityProgress();
           showFastCaptureFallbackMessage();
           const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
           updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");
@@ -9191,7 +9198,11 @@
         "#context-generator-handoff-progress [data-context-generator-stage='capture']"
       );
       if (captureStage?.dataset.state === "active") {
-        setHandoffStageLineProgress("capture", lineProgress);
+        captureStage.style.setProperty("--context-generator-stage-progress-duration", "1.35s");
+        // A native read may have advanced the display before DOM recovery.
+        // Keep its position rather than moving backwards on the first scroll.
+        setHandoffStageLineProgress("capture", Math.max(lineProgress,
+          Number(captureStage.dataset.contextGeneratorLineProgress || 0)));
       }
     };
 
@@ -9211,8 +9222,28 @@
 
   function startHandoffActivityProgress(stageId, inputChars = 0) {
     stopHandoffActivityProgress();
-    if (stageId !== "summary" || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (!["capture", "summary"].includes(stageId) || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     if (!window.requestAnimationFrame) return;
+
+    if (stageId === "capture") {
+      const startedAt = getNow();
+      const advance = () => {
+        handoffActivityProgressFrame = null;
+        const stage = document.querySelector("#context-generator-handoff-progress [data-context-generator-stage='capture']");
+        if (!stage || stage.dataset.state !== "active" || !isHandoffOverlayVisible()) return;
+        // Display-only activity, never a measured percentage or a deadline.
+        // Approach the cap gently; only verified capture can complete the line.
+        const elapsed = Math.max(0, getNow() - startedAt);
+        const estimated = HANDOFF_CAPTURE_LINE_MIN
+          + (HANDOFF_CAPTURE_LINE_MAX - HANDOFF_CAPTURE_LINE_MIN) * elapsed / (elapsed + HANDOFF_NATIVE_CAPTURE_LINE_MS);
+        stage.style.setProperty("--context-generator-stage-progress-duration", "0ms");
+        setHandoffStageLineProgress("capture", Math.max(estimated,
+          Number(stage.dataset.contextGeneratorLineProgress || 0)));
+        handoffActivityProgressFrame = requestAnimationFrame(advance);
+      };
+      handoffActivityProgressFrame = requestAnimationFrame(advance);
+      return;
+    }
 
     // Two frames let the 5% start paint before the long transition begins.
     handoffActivityProgressFrame = requestAnimationFrame(() => {
@@ -9333,7 +9364,9 @@
       statusText.style.animation = "contextGeneratorHeadlineIn 340ms cubic-bezier(0.16,1,0.3,1) both";
     }
     progress.setAttribute("aria-label", `Transfer progress: ${currentStatus}`);
-    if (phase === "active") startHandoffActivityProgress(stageId, inputChars);
+    // Native capture starts its own activity after source admission; DOM capture
+    // continues to use measured scrolling rather than an estimated animation.
+    if (phase === "active" && stageId === "summary") startHandoffActivityProgress(stageId, inputChars);
   }
 
   async function completeHandoffStageLine(stageId, durationMs) {
