@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v192";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v193";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -9991,6 +9991,10 @@
           return;
         }
 
+        copyBtn.textContent = "Copied!";
+        copyBtn.style.setProperty("background", draftPresent ? "#cbebd8" : "linear-gradient(180deg,#69e6a2,#21b36b)", "important");
+        copyBtn.style.setProperty("color", draftPresent ? "#173e27" : "#07150d", "important");
+
         if (modal.contextGeneratorDestinationCopy) {
           const copiedContext = { text: currentText, destinationName: modal.contextGeneratorDestinationName, draftPresent };
           const finish = () => {
@@ -10007,9 +10011,6 @@
           return;
         }
 
-        copyBtn.textContent = "Copied!";
-        copyBtn.style.setProperty("background", draftPresent ? "#cbebd8" : "linear-gradient(180deg,#69e6a2,#21b36b)", "important");
-        copyBtn.style.setProperty("color", draftPresent ? "#173e27" : "#07150d", "important");
         setTimeout(() => {
           if (!copyBtn.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
           resetCopyLabel();
