@@ -43,6 +43,10 @@ test("attachment decoding clues survive both relays while private or arbitrary v
   const attempt = { mode: "fresh", outcome: "failed", failure_check: "invalid_utf8", failure_stage: "attachment_body",
     failure_decode_stage: "chunk", failure_file_extension: "csv", failure_response_charset: "missing", failure_body_hint: "unrecognized" };
   const report = changes => ({ version: 1, capture_detail: "invalid_utf8", json_attempts: [{ ...attempt, ...changes }] });
+  // A file-local failure can coexist with a successful chat capture.
+  const recovered = payload({ diagnostics: { version: 1, json_attempts: [{ ...attempt, outcome: "succeeded" }] } });
+  assert.ok(validateTelemetryPayload(recovered));
+  assert.ok(edge.validateTelemetryPayload(recovered));
   for (const key of ["failure_file_extension", "failure_response_charset", "failure_body_hint", "failure_decode_stage"]) {
     for (const value of [...diagnostics.jsonAttemptSchema[key].values, "PRIVATE_FILE.csv", "https://PRIVATE", null]) {
       const data = payload({ diagnostics: report({ [key]: value }) });
@@ -285,4 +289,15 @@ test("JSON checkpoints are closed metadata through both relays and merge one rec
   assert.deepEqual(diagnostics.mergeJsonAttempts([first,progress],[{...progress,step:"hook",progress_seq:1}]),[first,progress]);
   assert.deepEqual(diagnostics.mergeJsonAttempts([first,progress],[failed]),[first,failed]);
   assert.deepEqual(diagnostics.mergeJsonAttempts([first,failed],[{...progress,progress_seq:99}]),[first,failed]);
+});
+
+test("skipped files retain their cause while later validation owns the terminal failure",()=>{
+  const vm=require("node:vm");const context=vm.createContext({CapTransferDiagnostics:diagnostics,Date,TextEncoder});
+  new vm.Script(fs.readFileSync(path.join(__dirname,"../extension/json-capture-metrics.js"),"utf8")).runInContext(context);
+  const m=context.CapJsonCaptureMetrics.create();m.checkpoint("read","attachment_body");m.fail("invalid_utf8","attachment_body",undefined,undefined,undefined,200,{failure_decode_stage:"chunk"});
+  m.recoverFile();m.checkpoint("complete","serialize",{history_checked:true});
+  assert.equal(m.finish().step,"complete");assert.equal(m.finish().history_checked,true);assert.equal(m.finish().skipped_file_check,"invalid_utf8");
+  m.transcript("x".repeat(1000001));const d=m.finish({captureDetail:"size_limit",captureRequestStage:"serialize"});
+  assert.equal(d.failure_check,"transcript_char_limit");assert.equal(d.failure_value,1000001);assert.equal(d.failure_stage,"serialize");
+  assert.equal(d.failure_decode_stage,undefined);assert.equal(d.skipped_file_check,"invalid_utf8");assert.equal(d.files_skipped,1);
 });

@@ -78,12 +78,13 @@
     failure_decode_stage: ["chunk", "final_flush"],
     numeric_saturated: ["lower_bound"]
   };
+  jsonAttemptEnums.skipped_file_check = jsonAttemptEnums.failure_check;
   const jsonAttemptNumbers = ["adapter_version", "failure_value", "failure_limit", "http_status", "raw_bytes", "raw_limit_bytes",
     "raw_response_bytes", "raw_response_limit_bytes", "raw_header_bytes", "raw_header_limit_bytes", "history_bytes", "session_bytes",
     "descriptor_bytes", "file_body_bytes", "requests", "pages", "history_items", "selected_turns", "files_supported", "files_ignored",
     "files_ignored_pdf", "files_ignored_image", "files_ignored_other", "files_declared_bytes", "files_downloaded_bytes", "files_limit_bytes",
     "transcript_chars", "transcript_bytes", "transcript_char_limit", "transcript_byte_limit", "hook_ms", "auth_ms", "download_ms",
-    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms", "route_candidates", "route_resources", "progress_seq"];
+    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms", "route_candidates", "route_resources", "progress_seq", "files_skipped"];
   const jsonAttemptSchema = {
     ...Object.fromEntries(["saved_chat", "hook_ready", "route_found", "history_request_sent", "history_response_read", "history_parsed", "history_checked"]
       .map(key => [key, { type: "boolean" }])),

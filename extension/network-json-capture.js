@@ -33,14 +33,14 @@
     const receive = event => {
       const reply = event.data;
       if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id
-          && reply.version !== (platform === "deepseek" ? 33 : platform === "grok" ? 23 : 20)) metrics?.set({ hook_status: "version_mismatch" });
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 33 : platform === "grok" ? 23 : 20)) finish(true);
+          && reply.version !== (platform === "deepseek" ? 34 : platform === "grok" ? 23 : 20)) metrics?.set({ hook_status: "version_mismatch" });
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 34 : platform === "grok" ? 23 : 20)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
     signal?.addEventListener("abort", onAbort, { once: true });
     window.addEventListener("message", receive); ping();
-    if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!reply?.ok) { metrics?.set({ hook_status: "install_rejected" }); finish(false); } }, () => { metrics?.set({ hook_status: "install_failed" }); finish(false); });
+    if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!settled && !reply?.ok) { metrics?.set({ hook_status: "install_rejected" }); finish(false); } }, () => { if (!settled) { metrics?.set({ hook_status: "install_failed" }); finish(false); } });
   });
   window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false, signal, onEstimate, omitLargeFiles = false) => {
     const hookStarted = Date.now();
@@ -106,6 +106,9 @@
               reply.captureDetail || "network_error", reply.captureRequestStage || "history", reply.status));
             metrics.stage("serialize");
             const capture = reply.capture;
+            if (capture?.skippedFiles !== undefined && (platform !== "deepseek" || !Array.isArray(capture.skippedFiles)
+              || capture.skippedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim() || /\.pdf$/i.test(file.name.trim()))))
+              return reject(captureError("Invalid unreadable-file notice.", "incomplete"));
             if (capture?.omittedFiles !== undefined && (!omitLargeFiles || platform !== "deepseek" || !Array.isArray(capture.omittedFiles)
               || capture.omittedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim()
                 || !Number.isSafeInteger(file.bytes) || file.bytes <= 4100000))) return reject(captureError("Invalid separate-file notice.", "incomplete"));

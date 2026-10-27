@@ -251,6 +251,52 @@ test("picker JSON capture is reused ready or pending on all five platforms, with
   }
 });
 
+test("ChatGPT picker timing separates a queued read from selection and native capture", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  const messages = [], releaseQueue = deferred(), started = deferred(), response = deferred();
+  context.window.postMessage = message => messages.push(message);
+  context.pendingJsonCapture = releaseQueue.promise;
+  context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+  context.startPickerJsonCapture();
+  const transfer = context.start("claude");
+  await new Promise(setImmediate);
+  assert.equal(calls.json, 0);
+  assert.ok(messages.some(row => row.event === "queued"));
+  assert.ok(messages.some(row => row.event === "selection"));
+  assert.ok(messages.some(row => row.event === "prefetch_wait" && row.fields.pending));
+  assert.equal(messages.some(row => row.event === "dequeued"), false);
+  releaseQueue.resolve(); await started.promise;
+  assert.equal(messages.filter(row => row.event === "dequeued").length, 1);
+  response.resolve({ text: "PRIVATE_CAPTURE_CONTENT", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 1);
+  assert.equal(calls.flows[0].text, "PRIVATE_CAPTURE_CONTENT");
+  assert.ok(messages.some(row => row.event === "queue_done" && row.fields.ok));
+  assert.ok(messages.some(row => row.event === "prefetch_wait" && !row.fields.pending));
+  assert.doesNotMatch(JSON.stringify(messages), /PRIVATE_CAPTURE_CONTENT/);
+});
+
+test("ChatGPT destination timing forwards fixed steps without trace details or private error labels", () => {
+  const start = source.indexOf("  function markTransferTrace(");
+  const end = source.indexOf("  function finishTransferTrace(", start);
+  assert.ok(start >= 0 && end > start);
+  const events = [];
+  const context = vm.createContext({ currentPlatform: { id: "chatgpt" }, getNow: () => 100,
+    traceChatGptCapture: (event, fields) => events.push({ event, fields }), updateTransferDiagnostics() {} });
+  new vm.Script(source.slice(start, end)).runInContext(context);
+  const trace = { startedAt: 1, marks: [] };
+  for (const label of ["tab open start", "tab open response", "summary start", "summary done", "tab open done",
+    "paste request start", "paste done", "transfer complete", "failed: PRIVATE_UPSTREAM_ERROR"]) {
+    context.markTransferTrace(trace, label, { tabId: 999, text: "PRIVATE_CHAT", url: "PRIVATE_URL" });
+  }
+  assert.deepEqual(events.map(row => row.event), ["destination_start", "destination_reply", "carry_start", "carry_done",
+    "destination_ready", "paste_start", "paste_done", "transfer_done"]);
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE|999/);
+  context.currentPlatform.id = "claude";
+  context.markTransferTrace(trace, "tab open start");
+  assert.equal(events.length, 8, "only ChatGPT sources emit these local checkpoints");
+});
+
 test("picker handoff preserves ready and pending JSON with either motion preference", async () => {
   const hideStart = source.indexOf("  function hideDestinationSheet(");
   const hideEnd = source.indexOf("  function trackDestinationBackdropCutout(", hideStart);
@@ -350,6 +396,63 @@ test("closed picker results are discarded and reopening never overlaps native re
   await context.start("claude");
   assert.equal(calls.json, 2);
   assert.equal(calls.flows[0].text, "Fresh reopened picker");
+});
+
+test("ChatGPT closing and reopening cancels the abandoned read before its replacement starts", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  const started = deferred(), cancelled = deferred(), cleanup = deferred();
+  let firstSignal;
+  context.window.__capCaptureChatGptJson = async (_path, signal) => {
+    calls.json++;
+    if (calls.json !== 1) return { text: "Fresh reopened chat", messageTurnCount: 2 };
+    firstSignal = signal;
+    started.resolve();
+    await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
+    cancelled.resolve();
+    await cleanup.promise; // Model MAIN acknowledging native-reader cleanup.
+    throw new Error("Cancelled old capture");
+  };
+  context.startPickerJsonCapture(); await started.promise;
+  context.clearPickerJsonCapture();
+  assert.equal(firstSignal.aborted, true);
+  context.startPickerJsonCapture();
+  const replacement = context.pickerJsonCapture;
+  await cancelled.promise;
+  await new Promise(setImmediate);
+  assert.equal(calls.json, 1, "Do not race a new request against the cancelling native reader.");
+  cleanup.resolve();
+  await replacement.promise;
+  assert.equal(calls.json, 2, "Acknowledged cancellation must release the queue.");
+  await context.start("claude");
+  assert.equal(calls.flows[0].text, "Fresh reopened chat");
+  assert.equal(calls.errors.length + calls.dom, 0);
+});
+
+test("ChatGPT queued picker cancellation skips its download and selection retains its pending read", async () => {
+  for (const scenario of ["closed before start", "selected"]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    const queued = deferred(), response = deferred(), started = deferred();
+    let signal;
+    context.pendingJsonCapture = queued.promise;
+    context.window.__capCaptureChatGptJson = (_path, currentSignal) => {
+      calls.json++; signal = currentSignal; started.resolve(); return response.promise;
+    };
+    context.startPickerJsonCapture();
+    const entry = context.pickerJsonCapture, settled = entry.promise;
+    if (scenario === "closed before start") {
+      context.clearPickerJsonCapture(); queued.resolve();
+      await settled;
+      assert.equal(calls.json, 0, "A closed queued picker must never start a native download.");
+    } else {
+      const transfer = context.start("claude"); queued.resolve(); await started.promise;
+      assert.equal(signal.aborted, false, "Selecting a destination must keep the owning read alive.");
+      context.clearPickerJsonCapture();
+      assert.equal(signal.aborted, false, "Picker cleanup after selection cannot cancel the transfer's read.");
+      response.resolve({ text: "Selected pending chat", messageTurnCount: 2 }); await transfer;
+      assert.equal(calls.json, 1);
+      assert.equal(calls.flows[0].text, "Selected pending chat");
+    }
+  }
 });
 
 test("closing the picker immediately releases its snapshot and drops late results", async () => {
@@ -478,12 +581,12 @@ test("fresh and prefetched JSON failures save native evidence even when their wr
 test("only DeepSeek -> ChatGPT retries an oversized picker file as a separate-upload note", async () => {
   for (const destination of ["chatgpt", "claude"]) {
     const { context, calls } = harness("deepseek", { mode: "success" });
-    const options = [], omittedFiles = [{ name: "original.txt", bytes: 13099028 }];
+    const options = [], omittedFiles = [{ name: "original.txt", bytes: 13099028 }], skippedFiles = [{ name: "unreadable.txt" }];
     context.window.__capCaptureNetworkJson = async (_path, omitLargeFiles) => {
       calls.json++; options.push(Boolean(omitLargeFiles));
       if (!omitLargeFiles) throw Object.assign(transientError("size_limit", "attachment_size_limit"), {
         jsonCapture: { outcome: "failed", failure_check: "supported_files_limit", files_supported: 1 } });
-      return { text: "Complete chat with separate-file notice", messageTurnCount: 2, omittedFiles,
+      return { text: "Complete chat with separate-file notice", messageTurnCount: 2, omittedFiles, skippedFiles,
         jsonCapture: { outcome: "partial", files_supported: 1 } };
     };
     context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
@@ -493,6 +596,7 @@ test("only DeepSeek -> ChatGPT retries an oversized picker file as a separate-up
     assert.equal(calls.flows.length, destination === "chatgpt" ? 1 : 0);
     if (calls.flows.length) {
       assert.equal(calls.flows[0].trace.omittedFiles, omittedFiles);
+      assert.equal(calls.flows[0].trace.skippedFiles, skippedFiles);
       assert.equal(calls.flows[0].trace.diagnostics.json_attempts.length, 2);
     }
   }
@@ -640,7 +744,32 @@ test("all five platforms recover a failed picker prefetch silently with one JSON
   }
 });
 
-clockTest("temporary provider failures wait before retrying JSON", async () => {
+clockTest("ChatGPT retries temporary JSON errors immediately with no cooldown", async () => {
+  for (const prefetched of [false, true]) {
+    for (const error of [transientError(), transientError("timeout", "timeout"),
+      transientError("unavailable", "hook_unavailable"), transientError("incomplete", "attachment_failed", 429)]) {
+      const { context, calls } = harness("chatgpt", { mode: "success" });
+      const requestedAt = [];
+      context.delay = ms => { calls.waits.push(ms); return new Promise(resolve => setTimeout(resolve, ms)); };
+      context.window.__capCaptureChatGptJson = async () => {
+        requestedAt.push(Date.now());
+        if (++calls.json === 1) throw error;
+        return { text: "Immediately recovered chat", messageTurnCount: 2 };
+      };
+      if (prefetched) { context.startPickerJsonCapture(); await context.pickerJsonCapture.promise; }
+      const selectedAt = Date.now();
+      await context.start("claude");
+      assert.equal(calls.json, 2, "Keep exactly one retry.");
+      assert.equal(requestedAt[1], selectedAt, "The queued retry must start without a timer delay.");
+      assert.deepEqual(calls.waits, []);
+      assert.equal(calls.destination, 1);
+      assert.equal(calls.dom + calls.notice + calls.errors.length, 0);
+      assert.equal(calls.flows[0].text, "Immediately recovered chat");
+    }
+  }
+});
+
+clockTest("other platforms retain the existing cooldown before retrying JSON", async () => {
   const { context, calls } = harness("deepseek", { mode: "success" });
   const capture = context.window.__capCaptureNetworkJson;
   const requestedAt = [];
@@ -656,7 +785,7 @@ clockTest("temporary provider failures wait before retrying JSON", async () => {
   assert.equal(calls.dom, 0);
 });
 
-test("all five platforms scrape after one cooled-down 429 retry, without a third native size probe", async () => {
+test("all five platforms scrape after one 429 retry with their own timing, without a third native size probe", async () => {
   for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
     const { context, calls } = harness(platform);
     let probes = 0;
@@ -666,7 +795,7 @@ test("all five platforms scrape after one cooled-down 429 retry, without a third
     context.prepareSourceForCapture = async () => { calls.prepare++; context.startDomCaptureSizeCheck(context.activeTransferTrace); };
     await context.start("claude");
     assert.equal(calls.json, 2);
-    assert.deepEqual(calls.waits, [2000]);
+    assert.deepEqual(calls.waits, platform === "chatgpt" ? [] : [2000]);
     assert.equal(calls.dom, 1);
     assert.equal(probes, 0, "an exhausted provider must not immediately receive another background JSON request");
     assert.equal(calls.destination, 1);

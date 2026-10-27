@@ -4,7 +4,7 @@ Switch AIs without explaining everything all over again.
 
 You already had the conversation. Cap Context helps you carry the useful parts to Claude, ChatGPT, Gemini, Grok, or DeepSeek and continue from there.
 
-[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf) · [Visit the website](https://context-generator-five.vercel.app/).
+[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf) · [Visit the website](https://spreadz.in/).
 
 ## What does it do?
 
@@ -16,7 +16,7 @@ Cap Context prepares your conversation for another AI and places it in the new m
 
 Open the [Chrome Web Store page](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf), select **Add to Chrome**, and you are good to go. It works in Brave too.
 
-The checked-in extension source is version 1.4.28. Web Store publication of this version is tracked separately.
+The checked-in extension source is version 1.4.31. Web Store publication of this version is tracked separately.
 
 ### Load the local extension
 
@@ -25,8 +25,6 @@ The checked-in extension source is version 1.4.28. Web Store publication of this
 3. Turn on **Developer mode**.
 4. Select **Load unpacked**.
 5. Choose `extension/`, which contains `manifest.json`.
-
-For Firefox, run `npm run package:firefox` and use the generated `dist/firefox/` folder. Brave and Chrome continue to use `extension/`.
 
 ## Move a conversation
 
@@ -42,6 +40,6 @@ Cap Context handles the handoff so you can stay focused on the work.
 
 If the button does not appear immediately after installation, refresh the AI website.
 
-[Privacy policy](PRIVACY.md) · [License](LICENSE) · [Development checks](LOGIC.md#verification-and-diagnosis)
+[Privacy policy](PRIVACY.md) · [License](LICENSE)
 
 Copyright © 2026 Vinit Rajpurohit. All rights reserved.

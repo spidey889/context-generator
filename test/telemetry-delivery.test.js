@@ -804,6 +804,32 @@ test("delivery diagnosis never waits for blocked storage", async () => {
   } finally { release(); await pending; await background.settled(); }
 });
 
+test("DOM deadline extensions survive worker restart beyond the old six-minute report expiry", async () => {
+  const delivered = [];
+  const fetch = async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); };
+  const background = worker(fetch);
+  await background.settled();
+  await background.ack(event(1, { lastStage: "capture_started" }));
+  await background.settled();
+  background.evaluate('chrome.runtime.id = "extension-id"');
+  const deadlineAt = NOW + 26 * 60000;
+  const reply = await new Promise(resolve => background.listeners.message({
+    type: "EXTEND_DOM_CAPTURE_DEADLINE", transferId: id(1), deadlineAt
+  }, { id: "extension-id", frameId: 0, tab: { id: 42, url: "https://claude.ai/chat/source" } }, resolve));
+  assert.equal(reply.ok, true);
+  await background.persisted();
+  assert.equal(background.shared.session[ACTIVE][id(1)].expiresAt, deadlineAt);
+
+  // No new scroll snapshot while the browser sleeps; reload must still retain
+  // the real interruption instead of dropping this still-allowed attempt.
+  const restarted = worker(fetch, background.shared, NOW + 7 * 60000);
+  await restarted.settled();
+  await restarted.listeners.updated(42, { status: "loading" });
+  await restarted.settled();
+  assert.equal(restarted.shared.session[ACTIVE][id(1)].event.failureReason, "client_interrupted");
+  assert.ok(delivered.some(payload => payload.attempt_id === id(1) && payload.failure_reason === "client_interrupted"));
+});
+
 test("source document reload retains an interrupted report when the old page cannot reply", async () => {
   const delivered = [];
   const background = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); });

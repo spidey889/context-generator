@@ -1,5 +1,13 @@
 (() => {
   const channel = "cap-context-chatgpt-json-v2";
+  const debug = (event, fields = {}) => {
+    try {
+      const data = { build: 26, ...fields };
+      console.info?.(`[CapCapture] ${JSON.stringify({ world: "bridge", event, ...data })}`);
+      window.postMessage({ channel, type: "debug", world: "bridge", event, fields: data }, location.origin);
+    } catch { /* Timing is local and cannot change capture. */ }
+  };
+  debug("loaded");
   // Keep the MAIN download gate and serializer aligned for parameterized MIME labels.
   const isPlainTextPaste = file => file?.is_big_paste === true && typeof file.mime_type === "string"
     && file.mime_type.split(";", 1)[0].trim().toLowerCase() === "text/plain";
@@ -21,6 +29,8 @@
   function serialize(data, chat, pastedTexts = {}, sourceTreeCounts, metrics, measureOnly = false) {
     const blocked = (reason, detail = "incomplete_history") => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
+    const skippedFiles = new Map();
+    let pastedAttachmentIndex = 0;
     let captureWarning;
     if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
     const assertComplete = (scope, label) => {
@@ -127,11 +137,13 @@
       if (typeof message.content.text !== "string") throw blocked("A Python result is missing its complete text string.", "text_invalid");
       return message.content.text.trim() ? message.content.text : null;
     };
+    let hasText = false;
     const turns = branch.reverse().flatMap((message, index) => {
       const role = message.author?.role;
       if (role === "tool") {
         const output = message.metadata?.is_visually_hidden_from_conversation ? null : pythonResult(message, branch[index - 1]);
         if (output === null) { excludedContentTypes.add("tools"); return []; }
+        hasText = true;
         return [{ role: "assistant", text: `Python result:\n\n${output}` }];
       }
       if (!["user", "assistant"].includes(role) || message.metadata?.is_visually_hidden_from_conversation) return [];
@@ -139,6 +151,7 @@
       if (message.recipient && message.recipient !== "all") {
         const parts = role === "assistant" ? canvasParts(message, branch[index + 1]) : [];
         if (!parts.length) excludedContentTypes.add("tools");
+        else hasText = true;
         return parts.length ? [{ role: "assistant", text: parts.join("\n\n") }] : [];
       }
       const attachmentLabels = role === "user" && Array.isArray(message.metadata?.attachments)
@@ -202,12 +215,21 @@
         const pastedIds = new Set();
         for (const file of Array.isArray(message.metadata?.attachments) ? message.metadata.attachments : []) {
           if (!isPlainTextPaste(file)) continue;
-          if (!measureOnly) assertComplete(file, "Pasted text attachment");
+          const index = ++pastedAttachmentIndex;
+          const skipFile = () => {
+            const name = typeof file.name === "string" && file.name.trim() ? file.name : `Unnamed pasted text attachment ${index}`;
+            if (!measureOnly && !/\.pdf$/i.test(name.trim())) skippedFiles.set(file.id || name, { name });
+          };
+          if (!measureOnly) {
+            try { assertComplete(file, "Pasted text attachment"); }
+            catch { excludedContentTypes.add("uploads"); skipFile(); continue; }
+          }
           const pasted = Object.hasOwn(pastedTexts, file.id) ? pastedTexts[file.id] : null;
           if (measureOnly && typeof pasted !== "string") continue;
           if (typeof pasted !== "string" || !Number.isSafeInteger(file.size) || new TextEncoder().encode(pasted).length !== file.size) {
-            if (measureOnly) continue;
-            throw blocked("A pasted text attachment is missing or incomplete.", "attachment_failed");
+            excludedContentTypes.add("uploads");
+            skipFile();
+            continue;
           }
           if (!pasted.trim() || pastedIds.has(file.id)) continue;
           pastedIds.add(file.id);
@@ -243,10 +265,11 @@
         }
       }
       // Only explicit upload names; never serialize signed pointers or nested metadata.
+      if (parts.some(text => text.trim())) hasText = true;
       parts.push(...attachmentLabels);
       return parts.length ? [{ role, text: parts.join("\n\n") }] : [];
     });
-    if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.", "missing_text");
+    if (!hasText) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.", "missing_text");
     // Reasoning, canvas and Python result blocks belong to one assistant reply.
     // Keep every payload block intact; only the reported message count groups them.
     const messageTurnCount = turns.reduce((count, turn, index) => count +
@@ -255,10 +278,12 @@
     metrics?.set({ selected_turns: messageTurnCount });
     if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) throw captureError("This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat.", "size_limit");
     return { text, messages: turns, messageTurnCount, excludedContentTypes: [...excludedContentTypes].sort(),
-      ...(captureWarning ? { captureWarning } : {}) };
+      ...(captureWarning ? { captureWarning } : {}), ...(skippedFiles.size ? { skippedFiles: [...skippedFiles.values()] } : {}) };
   }
 
   function waitForHook(timeoutMs, install = false, signal, metrics) {
+    const started = Date.now();
+    debug("hook_wait", { wait_ms: timeoutMs, pending: install });
     return new Promise(resolve => {
       if (signal?.aborted) return resolve(false);
       const id = crypto.randomUUID();
@@ -269,6 +294,7 @@
         settled = true;
         clearTimeout(timer);
         clearTimeout(pollTimer);
+        debug("hook_done", { ok: ready, elapsed_ms: Date.now() - started, aborted: Boolean(signal?.aborted) });
         window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort);
         resolve(ready);
       };
@@ -276,9 +302,12 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.type === "pong" && reply.id === id
-            && reply.version !== 23) metrics?.set({ hook_status: "version_mismatch" });
+            && reply.version !== 27) metrics?.set({ hook_status: "version_mismatch" });
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 23) finish(true);
+          && reply.type === "pong" && reply.id === id) {
+          debug("hook_reply", { observed_version: Number.isSafeInteger(reply.version) ? reply.version : 0 });
+          if (reply.version === 27) finish(true);
+        }
       };
       const ping = () => {
         if (settled) return;
@@ -290,16 +319,19 @@
       window.addEventListener("message", receive);
       ping();
       if (install) {
+        debug("hook_install");
         // A busy/cold worker's reply can lag behind a working MAIN hook. Trust
         // the correlated pong, not the installation callback, as readiness proof.
         Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_CHATGPT_JSON_HOOK" }))
-          .then(reply => { if (!reply?.ok) { metrics?.set({ hook_status: "install_rejected" }); finish(false); } }, () => { metrics?.set({ hook_status: "install_failed" }); finish(false); });
+          .then(reply => { if (!settled && !reply?.ok) { metrics?.set({ hook_status: "install_rejected" }); finish(false); } }, () => { if (!settled) { metrics?.set({ hook_status: "install_failed" }); finish(false); } });
       }
     });
   }
 
   window.__capCaptureChatGptJson = async (expectedPath = location.pathname, metrics, measureOnly = false, signal, onEstimate) => {
     const hookStarted = Date.now();
+    const cancelledError = (stage = "hook") => measureOnly ? new Error("Size check cancelled.")
+      : Object.assign(new Error("ChatGPT capture cancelled."), { diagnosticCode: "user_cancelled", captureDetail: "cancelled", captureRequestStage: stage });
     const chat = currentChat(expectedPath);
     metrics.set({ saved_chat: Boolean(chat) });
     if (!chat) { metrics.set({ route_reason: "path_unrecognized", route_found: false }); throw captureError("Open a saved ChatGPT conversation to use JSON capture.", "unavailable", "routing_unavailable", "hook"); }
@@ -318,21 +350,22 @@
       // on every capture. Missing/older/replaced hooks get bounded recovery.
       metrics.set({ hook_ready: false, hook_status: "no_reply" });
       if (!await waitForHook(250, false, signal, metrics)) {
-        if (signal?.aborted) throw new Error("Size check cancelled.");
+        if (signal?.aborted) throw cancelledError();
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) metrics.set({ hook_status: "runtime_missing" });
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal, metrics)) {
+          if (signal?.aborted) throw cancelledError();
           throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
         }
       }
-      if (signal?.aborted) throw new Error("Size check cancelled.");
-      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 23 });
+      if (signal?.aborted) throw cancelledError();
+      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 27 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       metrics.checkpoint("route", "history");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         // Await the native cancellation reply before releasing the shared read
         // queue; rejecting immediately could race a still-active old download.
-        const onAbort = () => window.postMessage({ channel, type: "cancel_measurement", id }, location.origin);
+        const onAbort = () => { debug("cancel", { measure: measureOnly }); window.postMessage({ channel, type: measureOnly ? "cancel_measurement" : "cancel_capture", id }, location.origin); };
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); };
         const receive = event => {
           const reply = event.data;
@@ -349,8 +382,9 @@
             if (!measureOnly && reply.chat === chat && !changed) metrics.adopt(reply.jsonCapture);
             return;
           }
+          debug("bridge_reply", { elapsed_ms: Date.now() - hookStarted, aborted: Boolean(signal?.aborted) });
           cleanup();
-          if (signal?.aborted) return reject(new Error("Size check cancelled."));
+          if (signal?.aborted) return reject(cancelledError("history"));
           metrics.adopt(reply.jsonCapture);
           try {
             if (changed || currentChat() !== chat || reply.chat !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "history");
@@ -369,7 +403,12 @@
               throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason, detail, stage, reply.status);
             }
             metrics.stage("serialize");
-            try { resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts, metrics, measureOnly))); }
+            try {
+              debug("serialize_start");
+              const capture = metrics.timed("serialize_ms", () => serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts, metrics, measureOnly));
+              debug("serialize_done", { chars: capture.text.length, turns: capture.messageTurnCount });
+              resolve(capture);
+            }
             catch (error) {
               if (!measureOnly) throw error;
               resolve(roughCaptureSize(reply.data));
@@ -379,6 +418,7 @@
         const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
         signal?.addEventListener("abort", onAbort, { once: true });
         window.addEventListener("message", receive);
+        debug("bridge_request", { measure: measureOnly });
         window.postMessage({ channel, type: "request", id, chat, ...(measureOnly ? { measureOnly: true } : {}) }, location.origin);
         if (signal?.aborted) onAbort();
       });
@@ -398,11 +438,11 @@
     return { characterCount: capture.text.length, messageTurnCount: capture.messageTurnCount,
       ...(capture.estimatedCharacterCount !== undefined ? { estimatedCharacterCount: capture.estimatedCharacterCount } : {}) };
   };
-  window.__capCaptureChatGptJson = async (expectedPath, unused, onProgress) => {
+  window.__capCaptureChatGptJson = async (expectedPath, signal, onProgress) => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 }, onProgress);
     metrics.stage("hook");
     try {
-      const capture = await readCapture(expectedPath, metrics);
+      const capture = await readCapture(expectedPath, metrics, false, signal);
       metrics.checkpoint("complete", "serialize", { history_checked: true });
       metrics.set({ selected_turns: capture.messageTurnCount });
       if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });

@@ -2,8 +2,8 @@
 
 A fresh launch-video draft built after studying the owner's local Claude Cowork reference. The story is a Kyoto itinerary interrupted by Claude's limit, carried through Cap Context, and continued in ChatGPT. Marketing copy appears only after the work leaves the frame.
 
-- `brag.mp4`: final 1920 × 1080, 60 fps, 62-second H.264/AAC video.
-- `brag.jpg`: settled message card; replaces frame zero without shifting audio.
+- `brag.mp4`: generated 1920 × 1080, 60 fps, 62-second H.264/AAC export; publish the finished file in `context-generator-website`.
+- `brag.jpg`: generated poster; publish alongside the video in `context-generator-website`. It replaces frame zero without shifting audio.
 - `share-copy.txt`: postable copy.
 - `verification.json`: final export, browser playback, source provenance, click positions/sync and story checks.
 - `credits.md`: CC0 piano sample sources and staged-chat disclosure.
@@ -30,3 +30,7 @@ node work/verify.cjs
 On this machine the runtime executables are under `C:/Users/vinit/.cache/codex-runtimes/codex-primary-runtime/dependencies/`. `score.py` downloads three CC0 piano recordings when absent. Render frames, audio caches and the owner's reference footage are ignored. No private account data is accessed.
 
 Keep `will-change` disabled in this composition: retained low-resolution Chromium textures softened macro text and made snapshots depend on earlier camera positions. Removing the hint fixed both, verified by identical pixel snapshots after unrelated seeks.
+
+## Publish finished exports
+
+The public homepage and finished videos belong to https://github.com/spidey889/context-generator-website. Keep this directory's Python/Node scripts, editable composition, timeline, native UI captures, credits and local reference/audio material here. Rendering continues to use the original relative paths and writes `brag.mp4`/`brag.jpg` locally as before. After verification, copy only those two output files into that repository's `brag/` folder and commit/push there. Do not move or copy the whole rendering workspace. The earlier `2026-05-10 09-51-15.mp4` is a separate finished recording in the website repository.

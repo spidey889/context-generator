@@ -6,12 +6,11 @@ const test = require("node:test");
 const ROOT = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
 
-test("repository and public website declare proprietary source terms", () => {
+test("repository and retained public pages declare proprietary source terms", () => {
   const license = read("LICENSE");
   const packageJson = JSON.parse(read("package.json"));
   const publicCopy = [
     read("README.md"),
-    read("index.html"),
     read("privacy.html")
   ].join("\n");
 
@@ -28,7 +27,8 @@ test("repository and public website declare proprietary source terms", () => {
 });
 
 test("public website image references resolve to tracked assets", () => {
-  for (const page of ["index.html", "privacy.html", "analysis/index.html"]) {
+  // Homepage and media checks live with context-generator-website; these pages stay here.
+  for (const page of ["privacy.html", "analysis/index.html"]) {
     const source = read(page);
     const pageDirectory = path.dirname(path.join(ROOT, page));
     const imageSources = [...source.matchAll(/<img\b[^>]*\bsrc="([^"]+)"/gi)]

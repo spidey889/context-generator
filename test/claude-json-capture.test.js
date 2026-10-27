@@ -75,7 +75,7 @@ test("Claude fresh DOM size check counts readable file text despite another inco
   const result = await h.window.__capMeasureClaudeJson();
   assert.ok(result.characterCount > 1000000);
   assert.deepEqual(Object.keys(result), ["characterCount", "messageTurnCount"]);
-  await assert.rejects(h.window.__capCaptureClaudeJson(), "Ordinary capture must still reject unreadable files.");
+  await assert.rejects(h.window.__capCaptureClaudeJson(), error => error.captureFailureReason === "size_limit");
 });
 
 test("Claude cancelling a background count releases the native read before a new capture", async () => {
@@ -170,6 +170,16 @@ function setup(data = fixture(), { status = 200, headers = {}, body, resources =
 function pastedAttachment(text) {
   return { id: createHash("sha256").update(text).digest("hex"), file_name: "", file_type: "txt", file_size: Buffer.byteLength(text), extracted_content: text };
 }
+
+test("Claude rejects unreadable-only cards and upload labels without conversation text", async () => {
+  const data = fixture();
+  data.chat_messages[0].content = [];
+  data.chat_messages[0].attachments = [{ ...pastedAttachment("Missing"), extracted_content: null }, { file_name: "Guide.pdf", file_type: "pdf" }];
+  data.chat_messages[2].content = [];
+  data.chat_messages[2].text = "";
+  const harness = setup(data, { resources: [endpoint] });
+  await assert.rejects(harness.window.__capCaptureClaudeJson(), /no usable/i);
+});
 
 function streamedResponse(chunks, headers = {}, cancelError = false) {
   const stats = { bytes: 0, cancelled: 0 };
@@ -592,7 +602,7 @@ test("Claude JSON capture rejects truncated active turns and captured text/think
   }
 });
 
-test("Claude JSON capture rejects missing/truncated pasted content rather than silently dropping it", async () => {
+test("Claude JSON capture skips missing/truncated pasted content and preserves healthy cards", async () => {
   for (const attachment of [
     { ...pastedAttachment("Paste"), truncated: true },
     { ...pastedAttachment("Paste"), extracted_content: undefined },
@@ -604,10 +614,13 @@ test("Claude JSON capture rejects missing/truncated pasted content rather than s
     { ...pastedAttachment("Paste"), file_size: "5" }
   ]) {
     const data = fixture();
-    data.chat_messages[0].attachments = [attachment];
+    data.chat_messages[0].attachments = [attachment, pastedAttachment("Healthy pasted text")];
     const harness = setup(data);
     await harness.window.fetch(endpoint);
-    await assert.rejects(harness.window.__capCaptureClaudeJson(), /Pasted-text attachment.truncated|missing its complete extracted_content|does not match its file_size/);
+    const capture = await harness.window.__capCaptureClaudeJson();
+    assert.deepEqual(JSON.parse(JSON.stringify(capture.skippedFiles)), [{ name: "Unnamed pasted text attachment 1" }]);
+    assert.equal(capture.text,
+      "Claude conversation:\n\nUser: Question\n\nHealthy pasted text\n\nAssistant: Private reasoning\n\nSelected answer");
   }
 });
 
@@ -840,5 +853,21 @@ clockTest("Claude hook failures distinguish missing runtime, rejected install, r
       assert.equal(error.jsonCapture.step,"hook");assert.equal(error.jsonCapture.hook_ready,false);assert.equal(error.jsonCapture.hook_status,status);
       assert.equal(error.jsonCapture.failure_check,"hook_unavailable");assert.ok(error.jsonCapture.hook_ms>=250);return true;
     });
+  }
+});
+
+clockTest("a late failed installer cannot overwrite a correlated ready hook",async()=>{
+  for(const installer of ["reject","not_ok"]){
+    let h,failInstall,replyInstall,finishFetch,fetchStarted;
+    const began=new Promise(resolve=>{fetchStarted=resolve;});
+    h=setup(fixture(),{resources:[endpoint],runtime:{sendMessage:()=>{
+      h.reinstall();return new Promise((resolve,reject)=>{replyInstall=resolve;failInstall=reject;});
+    }},fetchImpl:()=>{fetchStarted();return new Promise(resolve=>{finishFetch=resolve;});}});
+    h.window.__capClaudeFetchState.dispose();
+    const pending=h.window.__capCaptureClaudeJson();await began;
+    if(installer==="reject")failInstall(new Error("PRIVATE_INSTALLER"));else replyInstall({ok:false});
+    await new Promise(setImmediate);
+    finishFetch(new Response(JSON.stringify(fixture()),{headers:{"content-type":"application/json"}}));
+    const capture=await pending;assert.equal(capture.jsonCapture.hook_ready,true);assert.equal(capture.jsonCapture.hook_status,"ready");
   }
 });

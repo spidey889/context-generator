@@ -6,7 +6,7 @@
   function create(initial = {}, onProgress) {
     const started = clock();
     const data = { outcome: "succeeded", mode: "fresh", history_request_sent: false, history_response_read: false, history_parsed: false, history_checked: false };
-    let currentStage;
+    let currentStage, recoveredFileFailure = false;
     const stage = value => {
       if (!contract.jsonAttemptSchema.failure_stage.values.includes(value)) return;
       currentStage = value;
@@ -23,7 +23,7 @@
     };
     const add = (key, value = 1) => set({ [key]: (data[key] || 0) + value });
     function checkpoint(step, requestStage = currentStage, facts) {
-      if (data.failure_check) return; // Sibling cleanup cannot move the first failure.
+      if (data.failure_check && !recoveredFileFailure) return; // Freeze terminal failures, not skipped files.
       set({ step, step_stage: requestStage, total_ms: clock() - started, ...facts });
       if (contract.jsonAttemptSchema.failure_stage.values.includes(requestStage)) currentStage = requestStage;
       try { onProgress?.(contract.validateJsonAttempt({ ...data, outcome: "started" })); } catch {}
@@ -31,9 +31,19 @@
     const fail = (check, stage, source, value, limit, status, details) => {
       // Concurrent files may fail together. Retain the first actual guard,
       // rather than replacing it with a sibling's abort after cancellation.
-      if (data.failure_check) return;
+      if (data.failure_check && !recoveredFileFailure) return;
+      // A skipped file keeps its first closed cause separately. A later fatal
+      // guard must own failure_* so its stage, size and type remain consistent.
+      if (recoveredFileFailure) for (const key of Object.keys(data)) if (key.startsWith("failure_")) delete data[key];
+      recoveredFileFailure = false;
       set({ ...details, failure_check: check, failure_stage: stage, failure_value_source: source,
         failure_value: value, failure_limit: limit, http_status: status });
+    };
+    const recoverFile = (error, requestStage = "attachment_body") => {
+      if (!data.failure_check) fail(error?.captureDetail || "attachment_failed", requestStage);
+      set({ skipped_file_check: data.skipped_file_check || data.failure_check, outcome: "partial" });
+      add("files_skipped");
+      recoveredFileFailure = true;
     };
     const response = (stage, limit, header, countRequest = true) => {
       const began = clock();
@@ -99,8 +109,8 @@
       return contract.validateJsonAttempt(data);
     };
     set(initial);
-    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception, checkpoint,
-      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) { set(safe); checkpoint(safe.step, safe.step_stage); } } };
+    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception, checkpoint, recoverFile,
+      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) { set(safe); recoveredFileFailure = safe.outcome === "partial" && Boolean(safe.skipped_file_check); checkpoint(safe.step, safe.step_stage); } } };
   }
   root.CapJsonCaptureMetrics = { create };
 })(globalThis);

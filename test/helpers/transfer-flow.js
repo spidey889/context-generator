@@ -34,6 +34,7 @@ function loadTransferFlow(overrides) {
     DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
     activeTransferTrace: null, isRunning: false, runningResetTimer: null,
     pickerJsonCapture: null, pendingJsonCapture: Promise.resolve(), instanceActive: true,
+    chatGptDebugSequence: 0,
     document: { getElementById: () => null },
     getConversationTurns: () => [],
     isSourceReplyInProgress: () => false,

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const contract = require("../extension/transfer-diagnostics");
 const { checkDiagnosticsSamples } = require("./check-diagnostics-samples");
-const checkpointKeys = ["step","step_stage","hook_status","route_reason","saved_chat","hook_ready","route_found","history_request_sent","history_response_read","history_parsed","history_checked","route_candidates","route_resources","progress_seq"];
+const checkpointKeys = ["skipped_file_check","files_skipped","step","step_stage","hook_status","route_reason","saved_chat","hook_ready","route_found","history_request_sent","history_response_read","history_parsed","history_checked","route_candidates","route_resources","progress_seq"];
 // Each historical replay compares the contract that existed at that boundary.
 function beforeCheckpoints(schema = contract.jsonAttemptSchema) {
   const previous = structuredClone(schema);
