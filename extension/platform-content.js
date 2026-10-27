@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-logged-out-audit-v190";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v191";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -3008,7 +3008,7 @@
       globalThis.CapTransferDiagnostics?.failure(diagnostics, error, "destination", Date.now() - startedAt);
       error.diagnostics = globalThis.CapTransferDiagnostics?.snapshot(diagnostics) || null;
       if (diagnostics.error_code === "editor_has_draft") {
-        showFallbackModal(text, getPlatform(destinationId)?.name || "the destination", false, false, true);
+        showFallbackModal(text, getPlatform(destinationId)?.name || "the destination", false, false, true, { destinationCopy: true });
       }
       throw error;
     }
@@ -3396,7 +3396,7 @@
     } finally {
       if (pendingPasteRecheck === pending) {
         cancelPendingPasteRecheck();
-        if (needsCopy) showFallbackModal(text, destination.name, false, false, draftPresent);
+        if (needsCopy) showFallbackModal(text, destination.name, false, false, draftPresent, { destinationCopy: true });
       }
     }
   }
@@ -9527,7 +9527,7 @@
     hideHandoffReassurance();
   }
 
-  function showErrorOverlay(message) {
+  function showErrorOverlay(message, copiedContext = null) {
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
@@ -9611,6 +9611,7 @@
       textSpan.style.cssText = "position:relative;z-index:1;font-size:12.5px;font-weight:500;line-height:1.42;color:rgba(255,255,255,0.72)";
 
       const closeBtn = document.createElement("button");
+      closeBtn.id = "context-generator-error-dismiss";
       closeBtn.textContent = "Dismiss";
       closeBtn.style.cssText = [
         "position:relative",
@@ -9644,7 +9645,7 @@
 
     const title = document.getElementById("context-generator-error-title");
     if (title) {
-      title.textContent = isChatGptLoggedOutError
+      title.textContent = copiedContext ? "Copied" : isChatGptLoggedOutError
         ? CHATGPT_LOGGED_OUT_ERROR_TITLE
         : isNoConversationError
           ? NO_CONVERSATION_ERROR_TITLE
@@ -9655,7 +9656,7 @@
 
     const mark = document.getElementById("context-generator-error-mark");
     if (mark) {
-      mark.textContent = isNoConversationError || isSummaryRetryError ? "i" : "!";
+      mark.textContent = copiedContext ? "✓" : isNoConversationError || isSummaryRetryError ? "i" : "!";
     }
 
     const textSpan = document.getElementById("context-generator-error-text");
@@ -9664,6 +9665,47 @@
     }
 
     hideErrorOverlay(errorDiv, { immediate: true });
+    errorDiv.setAttribute("role", copiedContext ? "status" : "alert");
+    let copyAgain = document.getElementById("context-generator-error-copy-again");
+    if (copiedContext && !copyAgain) {
+      const dismiss = document.getElementById("context-generator-error-dismiss");
+      const actions = document.createElement("div");
+      actions.style.cssText = "position:relative;z-index:1;display:flex;justify-content:flex-end;gap:8px";
+      copyAgain = document.createElement("button");
+      copyAgain.id = "context-generator-error-copy-again";
+      copyAgain.type = "button";
+      copyAgain.style.cssText = dismiss.style.cssText;
+      actions.appendChild(copyAgain);
+      actions.appendChild(dismiss);
+      errorDiv.appendChild(actions);
+      protectOverlayPalette(copyAgain);
+    }
+    if (copyAgain) {
+      copyAgain.style.display = copiedContext ? "block" : "none";
+      copyAgain.textContent = "Copy again";
+      copyAgain.disabled = false;
+      if (copiedContext) {
+        const owner = errorDiv.contextGeneratorCopyNoticeOwner = {};
+        copyAgain.onclick = async () => {
+          copyAgain.disabled = true;
+          try {
+            if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
+            await navigator.clipboard.writeText(copiedContext.text);
+            if (errorDiv.contextGeneratorCopyNoticeOwner !== owner) return;
+            copyAgain.textContent = "Copied again!";
+            clearTimeout(errorDiv.contextGeneratorHideTimer);
+            errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), 8000);
+          } catch {
+            if (errorDiv.contextGeneratorCopyNoticeOwner !== owner) return;
+            hideErrorOverlay(errorDiv, { immediate: true });
+            showFallbackModal(copiedContext.text, copiedContext.destinationName, false, false,
+              copiedContext.draftPresent, { destinationCopy: true });
+          } finally {
+            if (errorDiv.contextGeneratorCopyNoticeOwner === owner) copyAgain.disabled = false;
+          }
+        };
+      }
+    }
     errorDiv.style.transition = reducedMotion ? "none" : "opacity 260ms ease,transform 260ms ease";
     errorDiv.style.transform = "translate3d(24px,0,0)";
     const reveal = () => {
@@ -9693,6 +9735,10 @@
 
   function hideErrorOverlay(errorDiv = document.getElementById("context-generator-error-overlay"), { immediate = false } = {}) {
     if (!errorDiv) return;
+    // Release the local carry when this notice expires or another notice wins.
+    errorDiv.contextGeneratorCopyNoticeOwner = null;
+    const copyAgain = document.getElementById("context-generator-error-copy-again");
+    if (copyAgain) copyAgain.onclick = null;
     clearTimeout(errorDiv.contextGeneratorEnterTimer);
     clearTimeout(errorDiv.contextGeneratorHideTimer);
     clearTimeout(errorDiv.contextGeneratorDisplayTimer);
@@ -9706,7 +9752,7 @@
     }, 280);
   }
 
-  function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false) {
+  function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false, { destinationCopy = false } = {}) {
     const variant = draftPresent ? "draft" : "default";
     const copyLabel = draftPresent ? "Copy conversation" : "Copy Context";
     const copyBackground = draftPresent ? "#e2daef" : "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
@@ -9916,6 +9962,7 @@
       };
 
       addOwnedEventListener(copyBtn, "click", async () => {
+        const copyOwner = modal.contextGeneratorCopyOwner;
         // A concise preview must never shorten the payload sent to the clipboard.
         const currentText = (draftPresent ? modal.contextGeneratorCopyText : textarea.value) || "";
         let copied = false;
@@ -9924,6 +9971,7 @@
           await navigator.clipboard.writeText(currentText);
           copied = true;
         } catch (_error) {
+          if (!modal.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
           modal.contextGeneratorSetExpanded?.(true);
           textarea.focus();
           textarea.select();
@@ -9934,6 +9982,7 @@
           }
         }
 
+        if (!modal.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
         if (!copied) {
           copyBtn.textContent = "Select text and copy manually";
           copyBtn.style.setProperty("background", "linear-gradient(180deg,#ffd980,#e8ad37)", "important");
@@ -9941,11 +9990,27 @@
           return;
         }
 
+        if (modal.contextGeneratorDestinationCopy) {
+          const copiedContext = { text: currentText, destinationName: modal.contextGeneratorDestinationName, draftPresent };
+          const finish = () => {
+            if (!modal.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
+            closeModal();
+            showErrorOverlay("Your conversation is copied. You can copy it again here if needed.", copiedContext);
+          };
+          if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) finish();
+          else {
+            modal.style.transition = `opacity ${HANDOFF_OVERLAY_EXIT_MS}ms ease`;
+            modal.style.opacity = "0";
+            modal.contextGeneratorCopyCloseTimer = setTimeout(finish, HANDOFF_OVERLAY_EXIT_MS);
+          }
+          return;
+        }
+
         copyBtn.textContent = "Copied!";
         copyBtn.style.setProperty("background", draftPresent ? "#cbebd8" : "linear-gradient(180deg,#69e6a2,#21b36b)", "important");
         copyBtn.style.setProperty("color", draftPresent ? "#173e27" : "#07150d", "important");
         setTimeout(() => {
-          if (!copyBtn.isConnected) return;
+          if (!copyBtn.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
           resetCopyLabel();
           copyBtn.style.setProperty("background", copyBackground, "important");
           copyBtn.style.setProperty("color", copyColor, "important");
@@ -9953,6 +10018,7 @@
       });
 
       const closeModal = () => {
+        clearTimeout(modal.contextGeneratorCopyCloseTimer);
         removeOwnedEventListener(document, "keydown", modal.contextGeneratorKeydownHandler);
         const previousFocus = modal.contextGeneratorPreviousFocus;
         modal.remove();
@@ -10023,6 +10089,12 @@
       }
     }
 
+    // Reusing a box cancels any older copy/closing animation for that box.
+    clearTimeout(modal.contextGeneratorCopyCloseTimer);
+    modal.contextGeneratorCopyOwner = {};
+    modal.contextGeneratorDestinationCopy = destinationCopy;
+    modal.contextGeneratorDestinationName = destinationName;
+    modal.style.opacity = "1";
     modal.contextGeneratorPreviousFocus = document.activeElement;
 
     const title = document.getElementById("context-generator-fallback-title");
