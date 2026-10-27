@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-27
 
+- **Audit the minimal website move before migration.** Verify the homepage with both finished MP4s, its poster and only required shared artwork/terms in isolated Brave. Preserve all Python/rendering sources here and keep extension permissions unchanged. Reproduce the missing privacy route and two test failures that a straight move would cause; verify existing analysis/privacy origins and the real extension bridge under simulated same-origin routing. Domain routing, link/test updates and actual new-host deployment remain migration gates. No website files, DNS or production behavior changed. See [the preflight findings](docs/website-migration-audit.md).
+
 - **Bump source version to 1.4.30.** Update the authoritative extension manifest and current-version documentation at the owner's request. Extension behavior and permissions are unchanged; Web Store publication remains separate.
 
 - **Combine ChatGPT capture fixes with current master.** Preserve the landed unreadable-file recovery, file re-upload notes and extended report lifetime alongside picker cancellation, immediate ChatGPT retry and local timing logs. Advance MAIN/bridge to v26 and content readiness to v186 so already-open pages replace either previous script. Verify the combined commit through focused capture/picker checks and the required Offline checks before promoting it to master.
