@@ -29,7 +29,7 @@ function getBrowserChecks(extended = false) {
   return regular.concat([
     check("paste-recovery", "Paste deadlines and delayed composer recovery", 120, { CAP_CONTEXT_PASTE_RECOVERY_SMOKE: "1" }),
     check("early-handoff", "Streaming summary reveals the destination early", 120, { CAP_CONTEXT_EARLY_HANDOFF_SMOKE: "stream" }),
-    check("chatgpt-paste-budget", "ChatGPT oversized paste length rejection", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_CHATGPT_FAILURE_SMOKE: "paste-oversize" }),
+    check("chatgpt-paste-budget", "ChatGPT oversized paste recovery and re-upload request", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_CHATGPT_FAILURE_SMOKE: "paste-oversize" }),
     check("chatgpt-declared-paste-budget", "ChatGPT declared paste exceeds the file budget", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_CHATGPT_FAILURE_SMOKE: "paste-declared-oversize" }),
     check("chatgpt-history-budget", "ChatGPT oversized history cancellation", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_CHATGPT_FAILURE_SMOKE: "history-oversize" }),
     check("claude-capture", "Claude complete CRLF pasted-card capture", 180, { CAP_CONTEXT_JSON_SMOKE: "1" }),
