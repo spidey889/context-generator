@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-27
 
+- **Verify the agreed website split through real Vercel routing.** Use a staging-only placeholder to test keeping privacy and analysis in this repository while the new website supplies the homepage. Explicitly handle all three analysis path forms after a wildcard preview missed the trailing slash. Verify the actual returned HTML/images, privacy-to-home navigation and real extension receipt display at desktop/mobile sizes with unchanged permissions. Simulate the small license-test adjustment after output removal. Preserve both live sites, DNS, all video sources and the production placeholder; record the tested configuration in [the audit](docs/website-migration-audit.md).
+
 - **Audit the minimal website move before migration.** Verify the homepage with both finished MP4s, its poster and only required shared artwork/terms in isolated Brave. Preserve all Python/rendering sources here and keep extension permissions unchanged. Reproduce the missing privacy route and two test failures that a straight move would cause; verify existing analysis/privacy origins and the real extension bridge under simulated same-origin routing. Domain routing, link/test updates and actual new-host deployment remain migration gates. No website files, DNS or production behavior changed. See [the preflight findings](docs/website-migration-audit.md).
 
 - **Bump source version to 1.4.30.** Update the authoritative extension manifest and current-version documentation at the owner's request. Extension behavior and permissions are unchanged; Web Store publication remains separate.

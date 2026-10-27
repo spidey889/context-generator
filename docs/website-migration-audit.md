@@ -2,9 +2,9 @@
 
 ## Result
 
-The homepage and finished videos can be separated from the extension/backend, but a straight move followed by a domain switch would break existing paths and tests. Do not remove the original files or switch `spreadz.in` until the routing and checks below are handled.
+Final checks passed for the agreed setup: the new website supplies the homepage and videos, while Vercel continues to show privacy and analysis from this repository at their existing `spreadz.in` addresses. The required page configuration was tested on an actual Vercel preview, and browser navigation plus the unchanged extension bridge passed. The move can proceed using that tested configuration and the file/test changes identified below.
 
-Audited source: `d65764facddc8d8fac93512d9438015a70817b1f`. This audit changed no website content, extension declarations, domains or DNS, and performed no manual deployment. The new repository and both new hosting URLs still contain only their setup placeholder. Committing these audit notes may trigger the existing repository's normal automated checks/deployments; that does not migrate the website.
+Initial audited source: `d65764facddc8d8fac93512d9438015a70817b1f`; final verification followed documentation commit `a9dd17438f3c1b617ebf660049d8a75f8ac518d0`. No website files, extension declarations, domains or DNS were changed. Final verification created staging-only Vercel previews containing a small placeholder and page configuration; the real homepage/videos were not uploaded. Both new production hosting URLs still show the setup placeholder, and the original live pages remain working. Committing audit notes may trigger this repository's normal automated checks/deployments; that does not migrate the website.
 
 ## Minimum content set
 
@@ -32,22 +32,38 @@ The renderer still writes new exports into this repository's `brag/` directory. 
 4. **License and social preview:** keep the footer's `LICENSE` target available with the existing terms. The social-preview poster currently uses the old repository's GitHub Pages URL; update it to a durable new poster URL or explicitly preserve its redirect before removing the old output.
 5. **CI after deletion:** both tests in `test/license.test.js` read root `index.html`. Simulating only its absence produced two `ENOENT` failures. Migrate website-specific checks to the website repository while retaining checks for this repository's license, privacy and analysis assets. `scripts/ci-scope.js` also still names the homepage; deletion correctly selects full checks, so do not weaken that gate to hide failures.
 
-## Routing decision still required
+## Agreed setup, verified on Vercel
 
 Privacy and analysis files stay in this repository, and their public URLs must remain `https://spreadz.in/privacy.html` and `https://spreadz.in/analysis/`.
 
-Two possible approaches remain proposals, not implemented architecture:
+The owner selected the setup where Vercel shows the new homepage and continues to show privacy/analysis from this repository. This was already one of the approaches in the initial audit. The earlier warnings described configuration that must be included during the move; they were not a claim that this setup is impossible or that privacy has to move.
 
-- Keep the existing domain/Pages attachment and retain a small root page that redirects only homepage traffic to the new website. This avoids a DNS switch but changes the address shown for the homepage and requires updating the root-page tests.
-- If the homepage must continue to display `spreadz.in`, use the new Vercel website as the domain's front end and explicitly preserve the analysis/privacy routes and their dependent artwork through same-origin rewrites. The existing backend host already serves the matching analysis/privacy HTML and assets. Test that real Vercel routing before any domain cutover. Keep GitHub Pages and its legacy redirects working while transitioning.
+The verified configuration for the future website's `vercel.json` is:
 
-[Vercel rewrites](https://vercel.com/docs/routing/rewrites) can serve another origin while retaining the browser URL. A redirect to a new analysis hostname would not preserve the extension's current content-script match. No routing choice or domain mutation was made during this audit.
+```json
+{
+  "rewrites": [
+    { "source": "/privacy.html", "destination": "https://context-generator-five.vercel.app/privacy.html" },
+    { "source": "/analysis", "destination": "https://context-generator-five.vercel.app/analysis/index.html" },
+    { "source": "/analysis/", "destination": "https://context-generator-five.vercel.app/analysis/index.html" },
+    { "source": "/analysis/index.html", "destination": "https://context-generator-five.vercel.app/analysis/index.html" },
+    { "source": "/extension/bubble-icon.png", "destination": "https://context-generator-five.vercel.app/extension/bubble-icon.png" },
+    { "source": "/extension/icon48.png", "destination": "https://context-generator-five.vercel.app/extension/icon48.png" }
+  ]
+}
+```
+
+Verified preview: `dpl_9DFdNsRNj2e8M7vxeh9UktRAaNXS`, [test deployment](https://context-generator-website-nkufs0cuu-vinits-projects-9bc84d4f.vercel.app), target `staging`, status `READY`. It is separate from the production alias and retains the team's existing preview protection.
+
+All seven privacy/analysis/image checks returned HTTP 200, with no redirect away from the preview and content matching the original files. Both `/` and `/index.html` served the test placeholder; an unknown path correctly returned 404. The query form `/analysis/?demo` also returned the correct page. The first experimental wildcard rule handled `/analysis` but missed `/analysis/`; the final explicit rules above fixed that in the test deployment. Reuse these tested forms rather than assuming a wildcard handles both.
+
+[Vercel rewrites](https://vercel.com/docs/routing/rewrites) retain the browser URL while serving the original page behind it. Keep GitHub Pages and its legacy redirects working during the later transition. No domain switch occurred in this check.
 
 ## Permissions are a release constraint
 
 Keep all extension API permissions, host permissions and content-script matches unchanged for the website move. In particular, retain `https://spreadz.in/analysis*`, the legacy GitHub analysis match, and the backend address `https://context-generator-five.vercel.app`. Do not add the new website or Vercel hostname to the extension manifest, including optional permissions or runtime prompts.
 
-The actual unpacked extension, loaded in a separate headless Brave profile with its unmodified manifest, delivered a synthetic local receipt on `/analysis`, `/analysis/` and `/analysis/index.html` under an intercepted `https://spreadz.in` origin. The homepage and privacy page received no bridge. This proves the existing match/bridge behavior under the simulated routing; it does not certify an undeployed Vercel rewrite or DNS cutover.
+The actual unpacked extension, loaded in a separate headless Brave profile with its unmodified manifest, delivered a synthetic local receipt on `/analysis`, `/analysis/`, `/analysis/index.html` and `/analysis/?demo` under an intercepted `https://spreadz.in` origin. Final browser checks used the actual page/image responses fetched through the Vercel preview, displayed `Connected` and rendered the receipt at desktop and mobile sizes. The homepage and privacy page received no bridge in the original checks. This verifies the existing extension behavior with the tested Vercel page content; the live DNS cutover still belongs to the later move.
 
 Chrome documents that new warning-triggering permissions can disable an installed extension until accepted: [permission warnings](https://developer.chrome.com/docs/extensions/develop/concepts/permission-warnings), [host and content-script declarations](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions). Before any extension release, compare the actual final package with the published package. An unpacked reload alone does not certify Chrome's packaged-update behavior.
 
@@ -60,9 +76,12 @@ Chrome documents that new warning-triggering permissions can disable an installe
 - **Video recreation sources:** the original composition loaded at 1920×1080 and sampled six times across Claude, handoff, ChatGPT and title scenes with no missing images or page exceptions. All five Python sources parsed, all four `.cjs` files passed syntax checks, and all three native-capture replacement anchors remain present. The saved capture's production-source hash is already older than the current extension, so follow the documented capture-first recreation sequence; do not expect the old verification record alone to validate today's extension. No full re-encode, native recapture or source rewrite was performed.
 - **Focused baseline:** all nine checks across `test/license.test.js`, `test/analysis.test.js` and `test/ci-scope.test.js` passed. The Git-range test initially hit sandbox denial when creating its temporary repository; its isolated rerun outside that filesystem sandbox passed.
 - **Integrity:** the manifest and all 26 retained video-support files kept their original SHA-256 values. No original website or video file was removed or moved.
+- **Final navigation:** on 1440×900 and 390×844, clicking the homepage's Privacy Policy link opened the original privacy content at `spreadz.in/privacy.html`; its Back to home link returned to the new-homepage simulation at `spreadz.in/index.html`. Privacy's canonical URL stayed unchanged. All four analysis URL forms displayed a synthetic extension receipt with no missing images or page exceptions, using the real preview-fetched responses.
+- **Removal/test plan:** with the four proposed moved outputs hidden by a filesystem overlay, both original-repository license/image tests passed after removing only the homepage's read/list entries in memory. The edits were not applied to the real tests; they are part of the later move. This preserves the checks for retained privacy/analysis assets and existing source terms.
+- **Live-site recheck:** after preview verification, the original homepage/privacy/analysis still returned 200. The new Vercel production and GitHub Pages roots still returned their original placeholder. The original Pages configuration still uses `master`, `/`, custom domain `spreadz.in` and enforced HTTPS.
 
-Local detailed evidence and disposable harnesses are under `.test-artifacts/website-migration-audit/`: `results.json`, `live-results.json`, `recreation-results.json`, screenshots and the scripts that produced them. They use synthetic extension storage, never the owner's browser profile or private transfer contents.
+Local detailed evidence and disposable harnesses are under `.test-artifacts/website-migration-audit/`: `results.json`, `live-results.json`, `recreation-results.json`, `final-results.json`, sanitized `preview-*.headers`, public response bodies, screenshots and the scripts that produced them. Vercel CLI handled protected-preview authentication; evidence headers exclude cookies and authentication values. Browser checks use synthetic extension storage, never the owner's browser profile or private transfer contents.
 
 ## Gate before moving or deleting
 
-Publish and verify the candidate on the new hosting URLs first, preserve privacy/analysis routing and dependent images, repair homepage links, and update the website-dependent tests. Then verify the actual HTTPS/redirect/bridge behavior at the intended public URLs before deleting old outputs. These deployment/cutover checks remain intentionally unperformed because this request authorized verification only.
+During the move, publish and verify the real homepage/videos at the new hosting URLs, include the tested configuration above, repair the homepage links and update the website-dependent tests. Switch the domain only after the new copy is working, then check actual HTTPS/legacy redirects/extension behavior at `spreadz.in` before deleting the old outputs. These are the remaining execution checks during the move, not an unresolved design decision. No pre-move check can verify files that have not yet been published or DNS that has not yet changed; keep the original copy available until those actual checks pass.
