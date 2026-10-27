@@ -40,7 +40,7 @@
 
 ## ZIP files
 
-- Now never make a zip without asking me.
+- Ask the owner before creating any ZIP archive.
 
 ## Commit and push
 
