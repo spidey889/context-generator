@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-28
+
+- **Keep short replies during page capture.** Include verified one- and two-character messages in initial and scrolling-window capture regardless of chat length. Continue excluding short control labels; leave JSON capture and the separate empty-chat and destination guards unchanged. Regressions cover all five platforms and overlapping windows.
+
 ## 2026-10-27
 
 - **Approve a Zen-inspired glass copy notice.** Keep the owner's approved compact layout, softer corners, explicit sans-serif typography and shorter copy. Replace the rejected flat green and default-looking blue palettes with the approved warm translucent taupe, amber/mauve light tints, amber check tile and champagne Copy again button. Adapt the backdrop-tinting approach in [Zen's theme source](https://github.com/zen-browser/desktop/blob/dev/src/zen/common/styles/zen-theme.css) to page CSS; OS-native acrylic is not available to this notice. Preserve the position, duration, animation and error palette restoration.

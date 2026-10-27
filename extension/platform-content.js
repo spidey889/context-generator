@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-verified-v199";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-scroll-short-replies-v200";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -130,7 +130,6 @@
   const MIN_BACKEND_CONVERSATION_CHARS = 10000;
   const MAX_BACKEND_CONVERSATION_CHARS = 1000000;
   const MAX_TRANSFER_CONVERSATION_CHARS = 1000000;
-  const TINY_DIRECT_PROFILE_MAX_CHARS = 1200;
   // Claude, ChatGPT, Gemini and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
   const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "gemini", "grok"]);
@@ -3673,7 +3672,7 @@
   }
 
   function scrapeConversationText() {
-    const messageTurns = getConversationTurns();
+    const messageTurns = getConversationTurns({ includeShort: true });
     return createConversationCaptureFromMessageTurns(messageTurns);
   }
 
@@ -3692,7 +3691,7 @@
   }
 
   async function scrapeConversationTextForTransfer() {
-    const initialMessageTurns = getConversationTurns();
+    const initialMessageTurns = getConversationTurns({ includeShort: true });
     const initialCapture = createConversationCaptureFromMessageTurns(initialMessageTurns);
     if (isSourceReplyInProgress()) return initialCapture;
     // Every chat enters the same capture loop. The loop itself decides when it is done from
@@ -3707,10 +3706,7 @@
       throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
     }
 
-    const includeShortExplicitTurns = fitsTinyDirectProfile(messageTurns);
-    const usefulTurns = messageTurns.filter((turn) => (
-      isUsefulConversationTurn(turn, includeShortExplicitTurns)
-    ));
+    const usefulTurns = messageTurns.filter(isUsefulConversationTurn);
     if (
       usefulTurns.length === 0 &&
       messageTurns.some(hasExplicitConversationRole) &&
@@ -3880,13 +3876,8 @@
       initialRenderedTurnCount: initialMetrics.messageTurnCount || null,
       initialRawCandidateChars: initialMetrics.rawCandidateChars || null
     };
-    const includeShortExplicitTurns = fitsTinyDirectProfile([...initialMessageTurns, ...sweptTurns]);
-    const initialTurns = getComparableConversationTurns(initialMessageTurns, includeShortExplicitTurns);
-    const preferredTurns = chooseMoreCompleteConversationTurns(
-      initialTurns,
-      sweptTurns,
-      includeShortExplicitTurns
-    );
+    const initialTurns = getComparableConversationTurns(initialMessageTurns);
+    const preferredTurns = chooseMoreCompleteConversationTurns(initialTurns, sweptTurns);
     if (areConversationTurnListsIdentical(preferredTurns, initialTurns)) {
       lastConversationCaptureMetrics = {
         ...initialMetrics,
@@ -3901,9 +3892,9 @@
     });
   }
 
-  function getComparableConversationTurns(messageTurns = [], includeShortExplicitTurns = false) {
+  function getComparableConversationTurns(messageTurns = []) {
     const usefulTurns = messageTurns
-      .filter((turn) => isUsefulConversationTurn(turn, includeShortExplicitTurns))
+      .filter(isUsefulConversationTurn)
       .map((turn) => {
         const comparable = { role: turn.role, text: cleanText(turn.text) };
         if (turn.sourceId) comparable.sourceId = turn.sourceId;
@@ -3912,13 +3903,13 @@
     return removeExactDuplicateConversationTurns(usefulTurns);
   }
 
-  function chooseMoreCompleteConversationTurns(initialTurns, sweptTurns, includeShortExplicitTurns = false) {
+  function chooseMoreCompleteConversationTurns(initialTurns, sweptTurns) {
     // Start with the exact turns used by the quick capture, then apply the existing sequence alignment.
     // Matched turns are only replaced when the swept text is longer, so the final choice cannot downgrade text.
     const preferredTurns = initialTurns.map((turn) => ({ ...turn }));
     collectRenderedConversationTurns(
       preferredTurns,
-      getComparableConversationTurns(sweptTurns, includeShortExplicitTurns)
+      getComparableConversationTurns(sweptTurns)
     );
     return preferredTurns;
   }
@@ -4169,8 +4160,8 @@
   }
 
   function getRenderedConversationSnapshot() {
-    const turns = getConversationTurns()
-      .filter((turn) => isDetectedConversationMessage(turn))
+    const turns = getConversationTurns({ includeShort: true })
+      .filter(isUsefulConversationTurn)
       .map((turn) => ({ ...turn, text: cleanText(turn.text) }));
 
     return {
@@ -4325,7 +4316,7 @@
     ].join(",");
   }
 
-  function getConversationTurns() {
+  function getConversationTurns({ includeShort = false } = {}) {
     const selectors = [...currentPlatform.conversationSelectors, ...GENERIC_CONVERSATION_SELECTORS];
     const candidates = [];
     const platformInput = findPlatformInput();
@@ -4335,7 +4326,9 @@
 
       const role = getConversationRole(element);
       const text = attachCapturedPastedContent(element, role, getCleanVisibleText(element));
-      if (!text || text.length < 2) return;
+      if (!text || (!includeShort && text.length < 2)) return;
+      // A button label can inherit the surrounding message role; it is not a turn.
+      if (includeShort && text.length < 3 && element.closest("button, [role='button'], select, input, textarea")) return;
 
       const candidate = {
         element,
@@ -4683,26 +4676,12 @@
     return turn?.role === "User" || turn?.role === currentPlatform.name;
   }
 
-  function fitsTinyDirectProfile(turns = []) {
-    const explicitTurns = removeExactDuplicateConversationTurns(
-      turns.filter((turn) => turn?.text && hasExplicitConversationRole(turn) && !isEmptyConversationText(turn.text))
-    );
-    const transcript = explicitTurns
-      .map((turn) => `${turn.role}: ${cleanText(turn.text)}`)
-      .join("\n\n")
-      .trim();
-    if (!transcript) return false;
-
-    // The provider-free tiny carry should not lose genuine one- or two-character replies such as "hi".
-    return `${currentPlatform.name} conversation:\n\n${transcript}`.length <= TINY_DIRECT_PROFILE_MAX_CHARS;
-  }
-
-  function isUsefulConversationTurn(turn, includeShortExplicitTurns = false) {
+  // Short verified turns matter even in long chats; keep this scoped to capture.
+  // The separate destination/empty-chat detection keeps its existing threshold.
+  function isUsefulConversationTurn(turn) {
     if (!turn?.text) return false;
-
     const text = cleanText(turn.text);
-    if (text.length < (includeShortExplicitTurns ? 1 : 3)) return false;
-    return hasExplicitConversationRole(turn) && !isEmptyConversationText(text);
+    return Boolean(text) && hasExplicitConversationRole(turn) && !isEmptyConversationText(text);
   }
 
   function isDetectedConversationMessage(turn) {

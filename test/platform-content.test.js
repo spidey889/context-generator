@@ -1017,6 +1017,38 @@ test("handoff finish keeps the two-frame cue for a visible source and cleans up"
   assert.deepEqual(hooks.getOwnedLifecycleResourceCounts(), before);
 });
 
+test("DOM capture keeps short verified messages in short and long conversations", () => {
+  for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    for (const length of [20, 1300]) {
+      const question = new FakeElement({ text: `Question: ${"x".repeat(length)}`, attrs: { "data-message-author-role": "assistant" } });
+      const no = new FakeElement({ text: "no", attrs: { "data-message-author-role": "user" } });
+      const one = new FakeElement({ text: "1", attrs: { "data-message-author-role": "user" } });
+      const suggestion = new FakeElement({ text: "go", attrs: { "data-message-author-role": "user", class: "prompt-suggestion" } });
+      const button = new FakeElement({ tag: "button", text: "OK", attrs: { "data-message-author-role": "user" } });
+      const buttonLabel = new FakeElement({ tag: "span", text: "OK" });
+      button.appendChild(buttonLabel);
+      const hooks = loadPlatformContent([question, no, one, suggestion, button, buttonLabel], hostname);
+      const transcript = hooks.scrapeConversationText();
+      assert.match(transcript, /User: no(?:\n|$)/, hostname);
+      assert.match(transcript, /User: 1(?:\n|$)/, hostname);
+      assert.doesNotMatch(transcript, /User: (?:go|OK)(?:\n|$)/, hostname);
+    }
+  }
+});
+
+test("active-reply page snapshot retains short messages without waiting for generation", async () => {
+  const question = new FakeElement({ text: `Long question ${"x".repeat(1300)}`, attrs: { "data-message-author-role": "assistant" } });
+  const answer = new FakeElement({ text: "no", attrs: { "data-message-author-role": "user" } });
+  const stop = new FakeElement({ tag: "button", attrs: { "data-testid": "stop-button" } });
+  const hooks = loadPlatformContent([question, answer, stop], "claude.ai");
+  await hooks.prepareSourceForCapture();
+  answer.innerText = "yes";
+  answer.textContent = "yes";
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+  assert.match(transcript, /User: no(?:\n|$)/);
+  assert.doesNotMatch(transcript, /User: yes/);
+});
+
 test("ChatGPT capture collapses duplicate DOM copies of the same conversation turn", () => {
   const elements = [
     new FakeElement({
@@ -1392,6 +1424,24 @@ clockTest("Grok fast capture waits for a delayed virtualized window instead of s
   assert.equal((transcript.match(/(?:User|Grok): Delayed Grok turn/g) || []).length, 40);
   assert.match(transcript, /User: Delayed Grok turn 1/);
   assert.match(transcript, /Grok: Delayed Grok turn 40/);
+});
+
+virtualSweepTest("scrolling retains short replies that appear in later windows", async () => {
+  await Promise.all(["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"].map(async (hostname) => {
+    const { elements } = createVirtualizedChatElements({
+      label: "short replies", totalTurns: 40, windowSize: 8, scrollStride: 4, scrollHeight: 3600,
+      makeTurn: (index) => new FakeElement({
+        text: index === 11 ? "no" : index === 13 ? "1" : `Detailed distinct message ${index} ${"x".repeat(180)}`,
+        attrs: { "data-testid": `conversation-turn-${index}`, "data-message-author-role": index % 2 ? "user" : "assistant" }
+      })
+    });
+    const hooks = loadPlatformContent(elements, hostname);
+    await hooks.prepareSourceForCapture();
+    const transcript = await hooks.scrapeConversationTextWhenReady();
+    assert.match(transcript, /User: no(?:\n|$)/, hostname);
+    assert.match(transcript, /User: 1(?:\n|$)/, hostname);
+    assert.equal((transcript.match(/User: no(?:\n|$)/g) || []).length, 1, hostname);
+  }));
 });
 
 // This full sweep checks role labels, distinct repeated turns and overlapping

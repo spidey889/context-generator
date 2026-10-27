@@ -400,7 +400,7 @@ Turn selection and deduplication:
 - Containment scoring keeps true message boundaries and rejects page/conversation wrappers. Claude message wrappers own their paragraph/code descendants as one turn.
 - ChatGPT's scroll root is the nearest structural-turn ancestor with computed `overflow-y: auto|scroll`, not a generic large/scrollable element. Structural `conversation-turn-*` / `data-message-id` identities collapse duplicate copies while preserving repeated text in separate turns.
 - Other DOM adapters deduplicate exact role+text. This avoids virtual-window inflation but can remove genuine repeated turns; a change needs paired repetition and overlap regressions.
-- Tiny local captures retain explicit one-/two-character replies. Generated captures normally ignore turns shorter than three characters. Empty-state copy and unverified page text fail closed.
+- DOM capture retains verified one- and two-character turns in both the initial snapshot and later scrolling windows, regardless of conversation length. Short control labels are excluded. Empty-state copy and unverified page text fail closed; the separate empty-chat and destination guards retain their existing detection threshold.
 - Claude/ChatGPT pasted-card readers open recognized cards, collect normal or virtualized `[data-index]` rows in order, close the panel and reattach full payload to its owning user turn after remounts. State resets each transfer.
 
 Long native ChatGPT DOM chats have historically under-captured. Simulated virtual windows verify the merge algorithm, not completeness of a currently rendered live chat.
