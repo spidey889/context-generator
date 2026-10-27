@@ -23,7 +23,7 @@ Four fresh synthetic conversations in [handoff-adaptation-cases.json](../evaluat
 
 The comparison alternates prompt order with identical input, selected provider, output allowance and runtime acceptance policy. It retains every full output, hash, usage and failure. Lexical flags are advisory: negated statements and faithful paraphrases can be false positives/omissions, while fluent unsupported implications can pass. Full source/output review decides whether continuation is safe.
 
-The initial experiments used temporary development credentials outside the repository. Future live tests use the owner's two encrypted testing-only credentials through [the capped local wrapper](handoff-quality.md). The configured free/private endpoint policy remains enforced. No customer conversation is used, and no production deployment or master merge is part of this experiment.
+The initial experiments used temporary development credentials outside the repository. Future live tests use the owner's two encrypted testing-only credentials through [the capped local wrapper](https://github.com/spidey889/context-generator/blob/25e856e/docs/handoff-quality.md). The configured free/private endpoint policy remains enforced. No customer conversation is used, and no production deployment or master merge is part of this experiment.
 
 ## Replaced candidates
 
@@ -71,6 +71,6 @@ The earlier merge-hold conclusion was too strong when grounded in shared halluci
 
 ## Dedicated-key follow-up
 
-The owner's testing keys enabled 17 complete Dots pairs: all seven original short cases, both 90k/280k histories, and two repeats of each adaptation case. Both Ling attempts returned 429 before generation and remain ungraded. Runtime prompt bytes were held fixed throughout. The [full-output review and all four reports](handoff-quality-test-key-comparison.md) retain the new evidence.
+The owner's testing keys enabled 17 complete Dots pairs: all seven original short cases, both 90k/280k histories, and two repeats of each adaptation case. Both Ling attempts returned 429 before generation and remain ungraded. Runtime prompt bytes were held fixed throughout. The [full-output review and all four reports](https://github.com/spidey889/context-generator/blob/25e856e/docs/handoff-quality-test-key-comparison.md) retain the new evidence.
 
 Master and candidate both invent budget arithmetic, upgrade accepted CSV inspection into implementation approval, and sometimes turn unreported testing into no testing. Those failures are not unique regressions. The candidate preserves the exact 90k-history paragraph that master drops and more often carries the latest request as pending. Candidate weaknesses remain: losing some exact scope wording, adding a no-deploy prohibition from reported inactivity, and broadening one welcome-card goal beyond the pending review. Retain the four adaptation principles; this small development-influenced comparison does not establish an overall winner or a cross-model quality guarantee. No further prompt edit, master merge or production deployment was made.
