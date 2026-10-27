@@ -833,6 +833,7 @@ test("a new transfer opens and delivers after Escape on every destination", asyn
     const harness = loadBackgroundForTransferTest({ sourceTab });
     const first = await harness.prepare(destination, sourceTab);
     assert.equal(first.ok, true, destination);
+    if (destination === "gemini") assert.equal(harness.operations.created[0].options.url, "https://gemini.google.com/app");
     await harness.cancel(sourceTab.id);
     const next = await harness.prepare(destination, sourceTab, null, "next-attempt");
     assert.equal(next.ok, true, `${destination}: cancellation cannot poison a later attempt`);
@@ -1397,12 +1398,6 @@ test("Claude, ChatGPT and Gemini focus and settle prepared and fresh composers b
       assert.ok(focusIndex >= 0 && settleIndex > focusIndex && pasteIndex > settleIndex, `${destination}: tab ${tabId}`);
     }
   }
-});
-
-test("Gemini opens its native new-chat app directly", async () => {
-  const harness = loadBackgroundForTransferTest();
-  assert.equal((await harness.prepare("gemini")).ok, true);
-  assert.equal(harness.operations.created[0].options.url, "https://gemini.google.com/app");
 });
 
 clockTest("Gemini activates before recovering a receiver that waits for visibility", { tickMs: 100, maxElapsedMs: 90000 }, async () => {

@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-28
 
+- **Remove a duplicate Gemini opening test.** Check its exact new-chat address in the existing all-destination preparation and cancellation test, preserving the same route guard without a second worker fixture.
+
 - **Consolidate duplicate summary-retry coverage.** The outbox/restart test already exercises two failed reads and verifies no third request; retain its attempt-number assertions there instead of repeating the same worker retry in a separate test.
 
 - **Remove an overlapping DeepSeek capture test.** Existing attachment tests already check untrusted download hosts and truncated files while also verifying healthy siblings and retries; keep those stronger checks.
