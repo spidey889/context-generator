@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v193";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-destination-copy-notice-v194";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -9713,11 +9713,11 @@
       errorDiv.contextGeneratorEnterTimer = null;
       errorDiv.style.display = "flex";
       errorDiv.setAttribute("aria-hidden", "false");
-      // Keep notifications anchored to the bottom-right, independent of transfer UI.
+      // Copy confirmation uses the upper corner; errors retain their placement.
       errorDiv.style.right = "20px";
-      errorDiv.style.bottom = "80px";
+      errorDiv.style.bottom = copiedContext ? "auto" : "80px";
       errorDiv.style.left = "auto";
-      errorDiv.style.top = "auto";
+      errorDiv.style.top = copiedContext ? "20px" : "auto";
       const settle = () => {
         errorDiv.contextGeneratorAnimationFrame = null;
         errorDiv.style.opacity = "1";
