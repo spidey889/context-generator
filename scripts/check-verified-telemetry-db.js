@@ -443,6 +443,8 @@ async function main() {
         checks += await require("./check-json-capture-diagnostics-db.js").checkAttachmentDecodeDiagnostics(db, sql);
       } else if (name.endsWith("_summary_response_failure_diagnostics.sql")) {
         checks += await require("./check-summary-response-diagnostics-db.js").checkSummaryResponseDiagnostics(db, sql);
+      } else if (name.endsWith("_json_capture_checkpoints.sql")) {
+        checks += await require("./check-json-checkpoints-db.js").checkJsonCheckpoints(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

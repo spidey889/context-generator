@@ -1385,3 +1385,23 @@ clockTest("the summary transport deadline also interrupts receipt storage withou
     await background.settled();
   }
 });
+
+test("JSON attempts survive stale source snapshots, durable compaction and worker restart",async()=>{
+  const background=worker(async()=>{throw new Error("offline");}); await background.settled();
+  const first={mode:"prefetch",outcome:"failed",step:"route",step_stage:"history",failure_check:"routing_unavailable",hook_ready:true,route_found:false,progress_seq:2};
+  const retry={mode:"retry",outcome:"started",step:"read",step_stage:"history",progress_seq:5};
+  const report=entries=>({version:1,json_attempts:entries});
+  await background.ack(event(1,{diagnostics:report([first,retry])}));
+  await background.ack(event(1,{diagnostics:report([{...retry,step:"hook",progress_seq:1}])}));
+  await background.settled();
+  const read=()=>background.shared.local[OUTBOX][0].payload.diagnostics.json_attempts;
+  assert.deepEqual(read(),[first,retry]);
+  const final={...retry,outcome:"failed",failure_check:"timeout",progress_seq:6};
+  await background.ack(event(1,{diagnostics:report([final])}));
+  await background.ack(event(1,{status:"failed",failureReason:"capture_failed",diagnostics:report([{...retry,progress_seq:99}])}));
+  await background.settled(); assert.deepEqual(read(),[first,final]);
+  const delivered=[];
+  const restarted=worker(async(_url,options)=>{delivered.push(JSON.parse(options.body));return success();},background.shared);
+  await restarted.settled(); await restarted.retry();
+  assert.deepEqual(delivered.at(-1).diagnostics.json_attempts,[first,final]);
+});

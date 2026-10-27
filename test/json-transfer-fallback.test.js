@@ -313,8 +313,9 @@ test("history changing during a pending picker read triggers one fresh capture",
   let history = "Old reply";
   context.getConversationTurns = () => [{ role: "assistant", text: history }];
   const started = deferred(), response = deferred();
-  context.window.__capCaptureChatGptJson = () => {
+  context.window.__capCaptureChatGptJson = (_path, _unused, onProgress) => {
     calls.json++;
+    onProgress?.({ mode: "fresh", outcome: "started", step: "read", step_stage: "history" });
     if (calls.json === 1) { started.resolve(); return response.promise; }
     return Promise.resolve({ text: history, messageTurnCount: 2 });
   };
@@ -327,6 +328,8 @@ test("history changing during a pending picker read triggers one fresh capture",
   assert.equal(calls.json, 2);
   assert.equal(calls.flows[0].text, "New reply");
   assert.equal(calls.notice, 0);
+  assert.deepEqual(Array.from(calls.flows[0].trace.diagnostics.json_attempts, attempt => attempt.mode), ["fresh"],
+    "Discarded picker progress cannot occupy one of the two accepted read slots.");
 });
 
 test("closed picker results are discarded and reopening never overlaps native reads", async () => {
@@ -1189,4 +1192,20 @@ test("rough progress reaches the owning DOM handoff before the final count and n
   final.resolve({ characterCount: 1000001 }); await new Promise(setImmediate);
   assert.equal(trace.deadlineAt, deadline, "Late progress cannot extend completed capture.");
   assert.equal(calls.errors.length, 0);
+});
+
+test("a failed JSON read is queued before retry can replace its diagnosis",async()=>{
+  const {context,calls}=harness("deepseek");const snapshots=[];
+  context.startTransferTelemetry=trace=>{trace.telemetryStarted=true;trace.telemetryLastStage="capture_started";};
+  context.sendTransferTelemetrySnapshot=trace=>snapshots.push(JSON.parse(JSON.stringify(trace.diagnostics)));
+  context.window.__capCaptureNetworkJson=async()=>{
+    calls.json++;
+    if(calls.json===1)throw Object.assign(transientError(),{jsonCapture:{outcome:"failed",step:"route",step_stage:"history",hook_ready:true,route_found:false,
+      route_reason:"no_matching_endpoint",failure_check:"routing_unavailable"}});
+    assert.equal(snapshots.find(d=>d.json_attempts?.length).json_attempts[0].failure_check,"routing_unavailable");
+    return{text:"JSON transcript",messageTurnCount:2,jsonCapture:{outcome:"succeeded",step:"complete",history_checked:true}};
+  };
+  await context.start("claude");assert.equal(calls.json,2);assert.equal(calls.dom,0);
+  assert.equal(calls.flows[0].trace.id,"same-attempt");
+  assert.deepEqual(Array.from(calls.flows[0].trace.diagnostics.json_attempts,d=>d.mode),["fresh","retry"]);
 });

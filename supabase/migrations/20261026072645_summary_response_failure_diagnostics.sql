@@ -47,7 +47,7 @@ begin
 
   -- A delayed same-stage progress snapshot must not discard the other failed
   -- read. The first observation for each HTTP attempt remains immutable.
-  original := pg_get_functiondef('public.protect_transfer_diagnostics()'::regprocedure);
+  original := replace(pg_get_functiondef('public.protect_transfer_diagnostics()'::regprocedure),chr(13),'');
   if original like '%summary_response_failures%' or position('begin' || chr(10) in original) = 0 then
     raise exception 'Unexpected diagnosis preservation trigger';
   end if;

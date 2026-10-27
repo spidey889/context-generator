@@ -4,7 +4,7 @@ const { checkDiagnosticsSamples } = require("./check-diagnostics-samples.js");
 
 async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
   const attemptRulesDeclaration = /attempt_rules constant jsonb := '([^']+)'::jsonb/;
-  const attemptRules = structuredClone(contract.jsonAttemptSchema);
+  const attemptRules = require("./check-json-checkpoints-db").beforeCheckpoints();
   // Historical validators predate file-download detail. The forward migration
   // below independently checks the complete current contract.
   for (const key of ["failure_phase", "failure_error_type", "failure_response_type", "failure_abort", "failure_online",
@@ -76,7 +76,7 @@ async function checkFileDiagnostics(db, sql) {
   assert.deepEqual(await snapshot(), before); checks++;
   const definition = (await rows("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) sql"))[0].sql;
   // At this historical boundary text files still have the 2.1 MB allowance.
-  const historicalAttemptSchema = structuredClone(contract.jsonAttemptSchema);
+  const historicalAttemptSchema = require("./check-json-checkpoints-db").beforeCheckpoints();
   for (const key of ["failure_file_extension", "failure_response_charset", "failure_body_hint", "failure_decode_stage"]) delete historicalAttemptSchema[key];
   historicalAttemptSchema.failure_file_bytes.max = 2100000;
   assert.deepEqual(JSON.parse(definition.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalAttemptSchema); checks++;
@@ -125,7 +125,7 @@ async function checkAttachmentDecodeDiagnostics(db, sql) {
   const historicalSchema = structuredClone(contract.schema);
   delete historicalSchema.summary_response_failures;
   assert.deepEqual(JSON.parse(updated.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema); checks++;
-  assert.deepEqual(JSON.parse(updated.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.jsonAttemptSchema); checks++;
+  assert.deepEqual(JSON.parse(updated.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), require("./check-json-checkpoints-db").beforeCheckpoints()); checks++;
   const withoutRules = value => value.replace(/\b(?:attempt_rules|rules) constant jsonb := '[^']+'::jsonb/g, "RULES");
   assert.equal(withoutRules(updated), withoutRules(original)); checks++;
   const samples = [{ label: "legacy diagnostics remain valid", value: { version: 1, capture_detail: "network_error" }, expected: true }];

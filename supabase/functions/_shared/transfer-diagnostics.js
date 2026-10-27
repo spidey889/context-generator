@@ -50,7 +50,11 @@
   // JSON measurements survive DOM recovery. A closed, flat record keeps this
   // useful on failures without allowing native responses or private file data.
   const jsonAttemptEnums = {
-    outcome: ["succeeded", "partial", "failed", "cancelled"],
+    outcome: ["succeeded", "partial", "failed", "cancelled", "started"],
+    step: ["queue", "hook", "route", "request", "response", "read", "parse", "check", "serialize", "complete"],
+    step_stage: enums.capture_request_stage,
+    route_reason: ["path_unrecognized", "no_matching_endpoint", "available"],
+    hook_status: ["no_reply", "version_mismatch", "runtime_missing", "install_rejected", "install_failed", "ready"],
     mode: ["prefetch", "fresh", "retry"],
     failure_check: ["raw_header_limit", "raw_total_stream_limit", "raw_response_stream_limit", "raw_remaining_files_limit", "supported_files_limit", "transcript_char_limit", "transcript_byte_limit",
       "auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "invalid_utf8", "non_json_response",
@@ -79,8 +83,10 @@
     "descriptor_bytes", "file_body_bytes", "requests", "pages", "history_items", "selected_turns", "files_supported", "files_ignored",
     "files_ignored_pdf", "files_ignored_image", "files_ignored_other", "files_declared_bytes", "files_downloaded_bytes", "files_limit_bytes",
     "transcript_chars", "transcript_bytes", "transcript_char_limit", "transcript_byte_limit", "hook_ms", "auth_ms", "download_ms",
-    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms"];
+    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms", "route_candidates", "route_resources", "progress_seq"];
   const jsonAttemptSchema = {
+    ...Object.fromEntries(["saved_chat", "hook_ready", "route_found", "history_request_sent", "history_response_read", "history_parsed", "history_checked"]
+      .map(key => [key, { type: "boolean" }])),
     ...Object.fromEntries(Object.entries(jsonAttemptEnums).map(([key, values]) => [key, { type: "string", values }])),
     ...Object.fromEntries(jsonAttemptNumbers.map(key => [key, { type: "number", max: 2147483647 }])),
     http_status: { type: "number", min: 100, max: 599 },
@@ -141,8 +147,21 @@
   }
   function jsonAttempt(target, input) {
     const safe = validateJsonAttempt(input);
-    if (!target || !safe || (target.json_attempts?.length || 0) >= 2) return;
-    (target.json_attempts || (target.json_attempts = [])).push(safe);
+    if (!target || !safe) return;
+    target.json_attempts = mergeJsonAttempts(target.json_attempts, [safe]);
+  }
+  function mergeJsonAttempts(first = [], second = []) {
+    // Mode identifies the existing read slot under the transfer attempt ID. A
+    // completed observation wins over progress, including stale outbox retries.
+    const records = new Map();
+    for (const input of [...first, ...second]) {
+      const safe = validateJsonAttempt(input);
+      if (!safe) continue;
+      const previous = records.get(safe.mode);
+      if (!previous || previous.outcome === "started" && (safe.outcome !== "started"
+        || (safe.progress_seq || 0) > (previous.progress_seq || 0))) records.set(safe.mode, safe);
+    }
+    return [...records.values()].sort((a, b) => (a.mode === "retry") - (b.mode === "retry")).slice(0, 2);
   }
   function validateSummaryResponseFailure(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)
@@ -309,7 +328,7 @@
     update(target, { ...details, error_code: code, error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
-  const api = { schema, jsonAttemptSchema, summaryResponseFailureSchema, validateJsonAttempt, validateSummaryResponseFailure, mergeSummaryResponseFailures, jsonAttempt,
+  const api = { schema, jsonAttemptSchema, summaryResponseFailureSchema, validateJsonAttempt, validateSummaryResponseFailure, mergeSummaryResponseFailures, mergeJsonAttempts, jsonAttempt,
     codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage, authPromptFromUrl };
   root.CapTransferDiagnostics = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

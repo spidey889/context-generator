@@ -1,5 +1,5 @@
 (() => {
-  const version = 22;
+  const version = 23;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -60,7 +60,9 @@
     if (active) { window.postMessage({ ...reply, error: "busy" }, location.origin); return; }
     const controller = new AbortController();
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxCaptureBytes,
-      raw_bytes: 0, requests: 0, auth_refreshes: 0 });
+      raw_bytes: 0, requests: 0, auth_refreshes: 0 }, progress => {
+      if (request.measureOnly !== true) window.postMessage({ ...reply, type: "capture_progress", jsonCapture: progress }, location.origin);
+    });
     active = controller;
     activeMeasurementId = request.measureOnly === true ? request.id : null;
     let navigated = false;
@@ -77,11 +79,13 @@
     const fetchJson = async (url, options = {}) => {
       delete reply.status;
       delete metrics.data.http_status;
+      const stage = reply.captureRequestStage || "history";
+      metrics.checkpoint("request", stage, stage === "history" ? { history_request_sent: true } : undefined);
       metrics.add("requests");
       const began = Date.now();
       try { const response = await Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
-      }]); metrics.set({ http_status: response.status }); return response;
+      }]); metrics.set({ http_status: response.status }); metrics.checkpoint("response", stage); return response;
       } finally { metrics.add("download_ms", Date.now() - began); }
     };
     // Discard owned responses before retry/fallback; cleanup must never replace
@@ -102,6 +106,7 @@
         const decoder = new TextDecoder("utf-8", { fatal: true });
         const parts = [];
         let responseBytes = 0;
+        metrics.checkpoint("read", stage);
         if (reader) while (true) {
           // Retry a rejected network read, not decoder/JSON/size failures.
           const { done, value } = await reader.read().catch(error => {
@@ -125,7 +130,10 @@
         // text; parse only a complete, strictly decoded response.
         try { parts.push(decoder.decode()); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
         observation.end();
-        return metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
+        metrics.checkpoint("parse", stage, stage === "history" ? { history_response_read: true } : undefined);
+        const data = metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
+        metrics.checkpoint("check", stage, stage === "history" ? { history_parsed: true } : undefined);
+        return data;
       } catch (error) {
         metrics.exception(error);
         if (error?.name === "SyntaxError") metrics.fail("invalid_json", stage);
@@ -158,6 +166,7 @@
         const bytes = new Uint8Array(expectedSize);
         reader = response.body?.getReader();
         let size = 0;
+        metrics.checkpoint("read", "attachment_body");
         if (reader) while (true) {
           const { done, value } = await reader.read();
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
@@ -232,6 +241,7 @@
     try {
       reply.captureRequestStage = "history";
       if (!chat || request.chat !== chat) throw new Error("changed");
+      metrics.checkpoint("route", "history", { saved_chat: true, route_found: true, route_reason: "available" });
       const url = `/backend-api/conversation/${encodeURIComponent(chat)}`;
       // Retry an expired bearer token once. Never retry a partial tree or guess
       // another workspace on 403; both must fail visibly.

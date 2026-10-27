@@ -263,3 +263,26 @@ test("Edge forwards diagnostics as the optional RPC argument without changing re
   assert.equal((await send(payload())).status, 204);
   assert.equal(calls[1].p_diagnostics, undefined);
 });
+
+test("JSON checkpoints are closed metadata through both relays and merge one record per read", async()=>{
+  const edge=await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  const {checkpointKeys}=require("../scripts/check-json-checkpoints-db");
+  const first={outcome:"failed",mode:"prefetch",step:"route",step_stage:"history",failure_check:"routing_unavailable",route_found:false};
+  const report=record=>({version:1,json_attempts:[record]});
+  for(const key of checkpointKeys) {
+    const rule=diagnostics.jsonAttemptSchema[key];
+    for(const value of [...(rule.values||(rule.type==="boolean"?[true,false]:[0,2147483647])),"PRIVATE",null]) {
+      const valid=typeof value===rule.type && (rule.values?rule.values.includes(value):true);
+      const input=payload({diagnostics:report({...first,[key]:value})});
+      assert.equal(Boolean(validateTelemetryPayload(input)),valid,key);
+      assert.equal(Boolean(edge.validateTelemetryPayload(input)),valid,key);
+    }
+  }
+  for(const key of ["title","filename","url","id","chat_id","raw_error","stack"])
+    assert.equal(validateTelemetryPayload(payload({diagnostics:report({...first,[key]:"PRIVATE"})})),null);
+  const progress={mode:"retry",outcome:"started",step:"read",progress_seq:5};
+  const failed={...progress,outcome:"failed",failure_check:"timeout",progress_seq:6};
+  assert.deepEqual(diagnostics.mergeJsonAttempts([first,progress],[{...progress,step:"hook",progress_seq:1}]),[first,progress]);
+  assert.deepEqual(diagnostics.mergeJsonAttempts([first,progress],[failed]),[first,failed]);
+  assert.deepEqual(diagnostics.mergeJsonAttempts([first,failed],[{...progress,progress_seq:99}]),[first,failed]);
+});

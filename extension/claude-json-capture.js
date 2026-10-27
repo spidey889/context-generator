@@ -197,7 +197,7 @@
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   }
 
-  function waitForHook(timeoutMs, install = false, signal) {
+  function waitForHook(timeoutMs, install = false, signal, metrics) {
     return new Promise(resolve => {
       if (signal?.aborted) return resolve(false);
       const id = crypto.randomUUID();
@@ -214,8 +214,10 @@
       const onAbort = () => finish(false);
       const receive = event => {
         const reply = event.data;
+        if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.type === "pong" && reply.id === id
+            && reply.version !== 17) metrics?.set({ hook_status: "version_mismatch" });
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 16) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 17) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -230,7 +232,7 @@
         // A cold worker can lag behind a working hook. A correlated versioned
         // pong proves readiness independently of the installation callback.
         Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_CLAUDE_JSON_HOOK" }))
-          .then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
+          .then(reply => { if (!reply?.ok) { metrics?.set({ hook_status: "install_rejected" }); finish(false); } }, () => { metrics?.set({ hook_status: "install_failed" }); finish(false); });
       }
     });
   }
@@ -238,7 +240,8 @@
   window.__capCaptureClaudeJson = async (expectedPath = location.pathname, metrics, measureOnly = false, signal) => {
     const hookStarted = Date.now();
     const chat = expectedPath.match(/^\/chat\/([^/]+)$/)?.[1];
-    if (!chat) throw new Error("Open a saved Claude conversation to use JSON capture.");
+    metrics.set({ saved_chat: Boolean(chat) });
+    if (!chat) { metrics.set({ route_reason: "path_unrecognized", route_found: false }); metrics.fail("routing_unavailable", "hook"); throw new Error("Open a saved Claude conversation to use JSON capture."); }
     let changed = location.pathname !== expectedPath;
     const navigated = event => {
       const destination = event?.destination ? new URL(event.destination.url) : location;
@@ -249,16 +252,18 @@
     window.addEventListener("popstate", navigated);
     try {
       if (changed) throw changedError("The Claude conversation changed during capture.");
-      if (!await waitForHook(250, false, signal)) {
+      metrics.set({ hook_ready: false, hook_status: "no_reply" });
+      if (!await waitForHook(250, false, signal, metrics)) {
         if (signal?.aborted) throw new Error("Size check cancelled.");
-        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal)) {
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) metrics.set({ hook_status: "runtime_missing" });
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal, metrics)) {
           throw captureError("Claude JSON hook is not ready. Refresh this chat and try again, or turn JSON capture off.", "unavailable", "hook_unavailable", "hook");
         }
       }
       if (signal?.aborted) throw new Error("Size check cancelled.");
-      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 16 });
+      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 17 });
       if (changed || location.pathname !== expectedPath) throw changedError("The Claude conversation changed during capture.");
-      metrics.stage("history");
+      metrics.checkpoint("route", "history");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         // Await the native cancellation reply before releasing the shared read
@@ -267,7 +272,11 @@
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); };
         const receive = event => {
           const reply = event.data;
-          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
+          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || !["response", "capture_progress"].includes(reply.type) || reply.id !== id) return;
+          if (reply.type === "capture_progress") {
+            if (!measureOnly && reply.chat === chat && !changed) metrics.adopt(reply.jsonCapture);
+            return;
+          }
           cleanup();
           if (signal?.aborted) return reject(new Error("Size check cancelled."));
           metrics.adopt(reply.jsonCapture);
@@ -305,11 +314,12 @@
     return { characterCount: capture.text.length, messageTurnCount: capture.messageTurnCount,
       ...(capture.estimatedCharacterCount !== undefined ? { estimatedCharacterCount: capture.estimatedCharacterCount } : {}) };
   };
-  window.__capCaptureClaudeJson = async expectedPath => {
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
+  window.__capCaptureClaudeJson = async (expectedPath, unused, onProgress) => {
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 }, onProgress);
     metrics.stage("hook");
     try {
       const capture = await readCapture(expectedPath, metrics);
+      metrics.checkpoint("complete", "serialize", { history_checked: true });
       metrics.set({ selected_turns: capture.messageTurnCount });
       if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });
       return { ...capture, jsonCapture: metrics.finish() };

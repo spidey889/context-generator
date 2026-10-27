@@ -1,5 +1,5 @@
 (() => {
-  const version = 16;
+  const version = 17;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Unused branches and site metadata need room beyond the selected text cap.
@@ -10,6 +10,7 @@
   const nativeFetch = window.fetch;
   const endpoints = new Map();
   let active = null, activeMeasurementId = null;
+  let routeResourceCount = 0;
   const channel = "cap-context-claude-json-v2";
   const remember = input => {
     try {
@@ -27,7 +28,9 @@
   // Late installation (including extension reload) recovers routing URLs only.
   // No response bodies, credentials, or cross-chat endpoint guessing.
   const recover = () => {
-    for (const entry of window.performance?.getEntriesByType("resource") || []) remember(entry.name);
+    const entries = window.performance?.getEntriesByType("resource") || [];
+    routeResourceCount = entries.length;
+    for (const entry of entries) remember(entry.name);
   };
   recover();
   const wrappedFetch = function (...args) {
@@ -57,7 +60,9 @@
       return;
     }
     const controller = new AbortController();
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxHistoryBytes, raw_bytes: 0, requests: 0 });
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxHistoryBytes, raw_bytes: 0, requests: 0 }, progress => {
+      if (request.measureOnly !== true) window.postMessage({ ...reply, type: "capture_progress", jsonCapture: progress }, location.origin);
+    });
     active = controller;
     activeMeasurementId = request.measureOnly === true ? request.id : null;
     const timer = setTimeout(() => controller.abort("capture_timeout"), 15000);
@@ -71,6 +76,7 @@
     window.addEventListener("popstate", changed);
     try {
       if (!chat || request.chat !== chat) throw new Error("changed");
+      metrics.checkpoint("route", "history", { saved_chat: Boolean(chat), route_found: false });
       // Give an in-flight initial/SPA load a bounded opportunity to expose routing.
       const deadline = Date.now() + 1500;
       const routingStarted = Date.now();
@@ -79,7 +85,8 @@
         if (endpoints.has(chat)) break;
         await new Promise(resolve => setTimeout(resolve, 50));
       }
-      metrics.set({ auth_ms: Date.now() - routingStarted });
+      metrics.set({ auth_ms: Date.now() - routingStarted, route_candidates: endpoints.size, route_resources: routeResourceCount,
+        route_found: endpoints.has(chat), route_reason: endpoints.has(chat) ? "available" : "no_matching_endpoint" });
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
       if (!endpoints.has(chat)) {
         captureFailureReason = "unavailable";
@@ -93,8 +100,10 @@
       captureUrl.searchParams.set("render_all_tools", "true");
       captureUrl.searchParams.set("include_inline_comparison", "true");
       captureUrl.searchParams.set("consistency", "strong");
+      metrics.checkpoint("request", "history", { history_request_sent: true });
       observation = metrics.response("history", maxHistoryBytes);
       const response = await Reflect.apply(nativeFetch, window, [captureUrl.href, { credentials: "same-origin", cache: "no-store", signal: controller.signal }]);
+      metrics.checkpoint("response", "history");
       reply.status = response.status;
       metrics.set({ http_status: response.status });
       observation.header(response.headers.get("content-length"));
@@ -119,6 +128,7 @@
         const decoder = new TextDecoder("utf-8", { fatal: true });
         const parts = [];
         let size = 0;
+        metrics.checkpoint("read", "history");
         if (reader) while (true) {
           // Only a rejected native read qualifies for the existing JSON retry.
           const { done, value } = await reader.read().catch(error => {
@@ -141,7 +151,9 @@
         // replacing corrupt bytes would silently change the captured text.
         try { parts.push(decoder.decode()); } catch (error) { metrics.fail("invalid_utf8", "history"); throw error; }
         observation.end();
+        metrics.checkpoint("parse", "history", { history_response_read: true });
         data = metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
+        metrics.checkpoint("check", "history", { history_parsed: true });
       } catch (error) {
         captureFailureReason = bodyReadFailed ? "request_failed" : "incomplete";
         if (reader) await reader.cancel().catch(() => {});

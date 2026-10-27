@@ -485,6 +485,8 @@ function mergeTransferTelemetryEvents(previous, next) {
     ...((previous.diagnostics || next.diagnostics) ? { diagnostics: {
       ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.lastStage) >= stages.indexOf(previous.lastStage)
         ? next.diagnostics || {} : {}),
+      ...((previous.diagnostics?.json_attempts || next.diagnostics?.json_attempts) ? { version: 1,
+        json_attempts: globalThis.CapTransferDiagnostics.mergeJsonAttempts(previous.diagnostics?.json_attempts, next.diagnostics?.json_attempts) } : {}),
       ...((previous.diagnostics?.summary_response_failures || next.diagnostics?.summary_response_failures) ? {
         version: 1,
         summary_response_failures: globalThis.CapTransferDiagnostics.mergeSummaryResponseFailures(
@@ -885,6 +887,8 @@ function mergeTelemetryPayloads(previous, next) {
     ...((previous.diagnostics || next.diagnostics) ? { diagnostics: terminal
       ? previous.diagnostics || (next.status === previous.status && next.last_stage === previous.last_stage && next.failure_reason === previous.failure_reason ? next.diagnostics : undefined)
       : { ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.last_stage) >= stages.indexOf(previous.last_stage) ? next.diagnostics || {} : {}),
+        ...((previous.diagnostics?.json_attempts || next.diagnostics?.json_attempts) ? { version: 1,
+          json_attempts: globalThis.CapTransferDiagnostics.mergeJsonAttempts(previous.diagnostics?.json_attempts, next.diagnostics?.json_attempts) } : {}),
         ...((previous.diagnostics?.summary_response_failures || next.diagnostics?.summary_response_failures) ? {
           version: 1,
           summary_response_failures: globalThis.CapTransferDiagnostics.mergeSummaryResponseFailures(

@@ -51,7 +51,11 @@
   // JSON measurements survive DOM recovery. A closed, flat record keeps this
   // useful on failures without allowing native responses or private file data.
   const jsonAttemptEnums = {
-    outcome: ["succeeded", "partial", "failed", "cancelled"],
+    outcome: ["succeeded", "partial", "failed", "cancelled", "started"],
+    step: ["queue", "hook", "route", "request", "response", "read", "parse", "check", "serialize", "complete"],
+    step_stage: enums.capture_request_stage,
+    route_reason: ["path_unrecognized", "no_matching_endpoint", "available"],
+    hook_status: ["no_reply", "version_mismatch", "runtime_missing", "install_rejected", "install_failed", "ready"],
     mode: ["prefetch", "fresh", "retry"],
     failure_check: ["raw_header_limit", "raw_total_stream_limit", "raw_response_stream_limit", "raw_remaining_files_limit", "supported_files_limit", "transcript_char_limit", "transcript_byte_limit",
       "auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "invalid_utf8", "non_json_response",
@@ -80,8 +84,10 @@
     "descriptor_bytes", "file_body_bytes", "requests", "pages", "history_items", "selected_turns", "files_supported", "files_ignored",
     "files_ignored_pdf", "files_ignored_image", "files_ignored_other", "files_declared_bytes", "files_downloaded_bytes", "files_limit_bytes",
     "transcript_chars", "transcript_bytes", "transcript_char_limit", "transcript_byte_limit", "hook_ms", "auth_ms", "download_ms",
-    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms"];
+    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms", "route_candidates", "route_resources", "progress_seq"];
   const jsonAttemptSchema = {
+    ...Object.fromEntries(["saved_chat", "hook_ready", "route_found", "history_request_sent", "history_response_read", "history_parsed", "history_checked"]
+      .map(key => [key, { type: "boolean" }])),
     ...Object.fromEntries(Object.entries(jsonAttemptEnums).map(([key, values]) => [key, { type: "string", values }])),
     ...Object.fromEntries(jsonAttemptNumbers.map(key => [key, { type: "number", max: 2147483647 }])),
     http_status: { type: "number", min: 100, max: 599 },
@@ -142,8 +148,21 @@
   }
   function jsonAttempt(target, input) {
     const safe = validateJsonAttempt(input);
-    if (!target || !safe || (target.json_attempts?.length || 0) >= 2) return;
-    (target.json_attempts || (target.json_attempts = [])).push(safe);
+    if (!target || !safe) return;
+    target.json_attempts = mergeJsonAttempts(target.json_attempts, [safe]);
+  }
+  function mergeJsonAttempts(first = [], second = []) {
+    // Mode identifies the existing read slot under the transfer attempt ID. A
+    // completed observation wins over progress, including stale outbox retries.
+    const records = new Map();
+    for (const input of [...first, ...second]) {
+      const safe = validateJsonAttempt(input);
+      if (!safe) continue;
+      const previous = records.get(safe.mode);
+      if (!previous || previous.outcome === "started" && (safe.outcome !== "started"
+        || (safe.progress_seq || 0) > (previous.progress_seq || 0))) records.set(safe.mode, safe);
+    }
+    return [...records.values()].sort((a, b) => (a.mode === "retry") - (b.mode === "retry")).slice(0, 2);
   }
   function validateSummaryResponseFailure(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)
@@ -310,7 +329,7 @@
     update(target, { ...details, error_code: code, error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
-  const api = { schema, jsonAttemptSchema, summaryResponseFailureSchema, validateJsonAttempt, validateSummaryResponseFailure, mergeSummaryResponseFailures, jsonAttempt,
+  const api = { schema, jsonAttemptSchema, summaryResponseFailureSchema, validateJsonAttempt, validateSummaryResponseFailure, mergeSummaryResponseFailures, mergeJsonAttempts, jsonAttempt,
     codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage, authPromptFromUrl };
   root.CapTransferDiagnostics = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
@@ -321,21 +340,31 @@
 (function (root) {
   const contract = root.CapTransferDiagnostics;
   const clock = () => Date.now();
-  function create(initial = {}) {
+  function create(initial = {}, onProgress) {
     const started = clock();
-    const data = { outcome: "succeeded", mode: "fresh" };
+    const data = { outcome: "succeeded", mode: "fresh", history_request_sent: false, history_response_read: false, history_parsed: false, history_checked: false };
     let currentStage;
-    const stage = value => { if (contract.jsonAttemptSchema.failure_stage.values.includes(value)) currentStage = value; };
+    const stage = value => {
+      if (!contract.jsonAttemptSchema.failure_stage.values.includes(value)) return;
+      currentStage = value;
+      if (["hook", "serialize"].includes(value)) checkpoint(value, value);
+    };
     const set = changes => {
       for (const [key, value] of Object.entries(changes || {})) {
         const rule = contract.jsonAttemptSchema[key];
         if (rule?.type === "number" && Number.isFinite(value) && value >= (rule.min || 0)) {
           if (value > rule.max) data.numeric_saturated = "lower_bound";
           data[key] = Math.min(rule.max, Math.round(value));
-        } else if (rule?.values?.includes(value)) data[key] = value;
+        } else if (rule?.values?.includes(value) || rule?.type === "boolean" && typeof value === "boolean") data[key] = value;
       }
     };
     const add = (key, value = 1) => set({ [key]: (data[key] || 0) + value });
+    function checkpoint(step, requestStage = currentStage, facts) {
+      if (data.failure_check) return; // Sibling cleanup cannot move the first failure.
+      set({ step, step_stage: requestStage, total_ms: clock() - started, ...facts });
+      if (contract.jsonAttemptSchema.failure_stage.values.includes(requestStage)) currentStage = requestStage;
+      try { onProgress?.(contract.validateJsonAttempt({ ...data, outcome: "started" })); } catch {}
+    }
     const fail = (check, stage, source, value, limit, status, details) => {
       // Concurrent files may fail together. Retain the first actual guard,
       // rather than replacing it with a sibling's abort after cancellation.
@@ -393,6 +422,7 @@
     const finish = error => {
       set({ total_ms: clock() - started });
       if (error) {
+        if (data.step === "hook") set({ hook_ms: clock() - started });
         const detail = error.diagnostics?.capture_detail || error.captureDetail;
         const site = error.diagnostics?.failure_site;
         const failedStage = error.diagnostics?.capture_request_stage || error.captureRequestStage
@@ -406,8 +436,8 @@
       return contract.validateJsonAttempt(data);
     };
     set(initial);
-    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception,
-      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) set(safe); } };
+    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception, checkpoint,
+      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) { set(safe); checkpoint(safe.step, safe.step_stage); } } };
   }
   root.CapJsonCaptureMetrics = { create };
 })(globalThis);

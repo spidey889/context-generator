@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-26-json-failure-evidence-v182";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-json-checkpoints-v183";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1656,8 +1656,10 @@
     if (!trace || !safe) return;
     // Each component's timeline has its own elapsed clock, never guessed wall time.
     const sourceEvents = trace.diagnostics?.events;
+    const jsonAttempts = globalThis.CapTransferDiagnostics?.mergeJsonAttempts(trace.diagnostics?.json_attempts, safe.json_attempts);
     Object.assign(trace.diagnostics ||= { version: 1 }, safe);
     if (sourceEvents) trace.diagnostics.events = sourceEvents;
+    if (jsonAttempts?.length) trace.diagnostics.json_attempts = jsonAttempts;
   }
 
   function recordTransferFailureDiagnostics(trace, error) {
@@ -7869,7 +7871,8 @@
     state.controller.abort();
   }
 
-  function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false, omitLargeFiles = false) {
+  function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false, omitLargeFiles = false, onProgress) {
+    try { onProgress?.({ outcome: "started", mode: "fresh", step: "queue", step_stage: "hook" }); } catch {}
     // Native bridges allow one read at a time. A dismissed read may still be
     // finishing; queue its replacement rather than provoking a busy fallback.
     const transferTrace = isRunning ? activeTransferTrace : null;
@@ -7883,7 +7886,7 @@
           : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
       if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
       return captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal : omitLargeFiles || undefined,
-        measureOnly ? transferTrace?.domSizeCheck?.onEstimate : undefined);
+        measureOnly ? transferTrace?.domSizeCheck?.onEstimate : onProgress);
     });
     // Keep only completion in the queue; unused transcripts/errors are not retained.
     pendingJsonCapture = pending.then(() => {}, () => {});
@@ -7907,6 +7910,10 @@
     entry.promise = captureSourceJson(path, () => {
       checkTransferDeadline(entry.trace);
       return entry.selected || pickerJsonCapture === entry;
+    }, false, false, progress => {
+      if (entry.discarded || !instanceActive) return;
+      entry.jsonProgress = progress;
+      if (entry.selected && entry.trace) recordJsonCaptureProgress(entry.trace, progress, "prefetch");
     })
       .then(capture => entry.discarded ? {} : { capture }, error => entry.discarded ? {} : { error });
   }
@@ -7965,6 +7972,16 @@
       || ["network_error", "busy", "hook_unavailable", "auth_missing", "routing_unavailable"].includes(detail));
   }
 
+  function recordJsonCaptureProgress(trace, progress, mode) {
+    if (!trace || trace.completed || trace.telemetryFinished) return;
+    const safe = globalThis.CapTransferDiagnostics?.validateJsonAttempt({ ...progress, mode });
+    if (!safe) return;
+    const previous = trace.diagnostics?.json_attempts?.find(entry => entry.mode === mode);
+    globalThis.CapTransferDiagnostics.jsonAttempt(trace.diagnostics, {
+      ...previous, ...safe, mode, progress_seq: (previous?.progress_seq || 0) + 1
+    });
+  }
+
   async function takePickerJsonCapture(expectedPath, omitLargeFiles = false) {
     const entry = pickerJsonCapture;
     const trace = activeTransferTrace;
@@ -7974,16 +7991,21 @@
     const record = (value, mode) => {
       const observations = value?.jsonCapture || (typeof value?.text === "string" ? { outcome: "succeeded" }
         : { outcome: value?.diagnosticCode === "conversation_changed" ? "cancelled" : "failed",
+          step_stage: "hook",
+          ...(value?.diagnosticCode === "capture_json_unavailable" ? { step: "hook", hook_ready: false } : {}),
           failure_check: value?.diagnosticCode === "capture_json_unavailable" ? "hook_unavailable"
             : value?.diagnosticCode === "conversation_changed" ? "conversation_changed" : "unknown" });
-      globalThis.CapTransferDiagnostics?.jsonAttempt?.(trace?.diagnostics, { ...observations, mode });
+      recordJsonCaptureProgress(trace, observations, mode);
+      // Persist failed reads before retry/DOM recovery or a lost final source
+      // callback. This uses the same attempt, durable outbox and Supabase JSONB.
+      if (observations.outcome !== "succeeded") reportCaptureProgress(trace, `${currentPlatform.id}-json`, true);
     };
     const read = async (mode = "fresh") => {
       try {
         const capture = await captureSourceJson(expectedPath, () => {
           checkTransferDeadline(trace);
           return true;
-        }, false, omitLargeFiles);
+        }, false, omitLargeFiles, progress => recordJsonCaptureProgress(trace, progress, mode));
         record(capture, mode);
         return capture;
       } catch (error) { record(error, mode); throw error; }
@@ -7994,12 +8016,18 @@
           if (isPickerJsonCaptureCurrent(entry)) {
             entry.trace = trace;
             entry.selected = true;
+            if (entry.jsonProgress) recordJsonCaptureProgress(trace, entry.jsonProgress, "prefetch");
             const result = await entry.promise;
             if (isPickerJsonCaptureCurrent(entry)) {
               record(result.error || result.capture, "prefetch");
               if (result.error) throw result.error;
               return result.capture;
             }
+            // Hydration/branch changes can invalidate a selected pending read.
+            // Its progress belongs to the discarded snapshot, not the fresh read.
+            entry.discarded = true;
+            if (trace?.diagnostics?.json_attempts) trace.diagnostics.json_attempts = trace.diagnostics.json_attempts
+              .filter(attempt => attempt.mode !== "prefetch" || attempt.outcome !== "started");
           }
         } finally { entry.guard.dispose(); }
       }

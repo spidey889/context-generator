@@ -976,7 +976,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 32);
+  assert.equal(h.window.__capNetworkFetchState.version, 33);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -1057,7 +1057,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 27 : platform === "gemini" ? 16 : 19;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 33 : platform === "grok" ? 23 : 20);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -1671,4 +1671,14 @@ test("DeepSeek publishes a rough estimate before file downloads finish without r
   const final = await pending;
   assert.ok(final.characterCount > estimate.estimatedCharacterCount, "The final guard includes downloaded supported text.");
   assert.equal(final.messageTurnCount, 4);
+});
+
+for (const platform of ["gemini","grok","deepseek"]) test(platform+": checkpoints preserve native read progress and successful validation",async()=>{
+  const h=setup(platform); await h.observe(); const progress=[];
+  const c=await h.window.__capCaptureNetworkJson(undefined,false,d=>progress.push(d));
+  assert.equal(c.jsonCapture.step,"complete"); assert.equal(c.jsonCapture.hook_ready,true);
+  assert.equal(c.jsonCapture.route_found,true); assert.equal(c.jsonCapture.history_request_sent,true);
+  assert.equal(c.jsonCapture.history_response_read,true); assert.equal(c.jsonCapture.history_parsed,true); assert.equal(c.jsonCapture.history_checked,true);
+  for (const step of ["hook","route","request","response","read","parse","check","serialize","complete"]) assert.ok(progress.some(d=>d.step===step),step);
+  assert.doesNotMatch(JSON.stringify(progress),/AUTH_SENTINEL|SIGNED_SENTINEL|PRIVATE|https/);
 });

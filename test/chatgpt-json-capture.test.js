@@ -821,7 +821,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 22);
+  assert.equal(harness.window.__capChatGptFetchState.version, 23);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
@@ -1372,4 +1372,22 @@ test("ChatGPT publishes the rough estimate while original pasted-file reads are 
   assert.equal(finished, false);
   releaseFile(new Response("A pasted source body", { headers: { "content-type": "text/plain" } }));
   assert.ok((await pending).characterCount > 0);
+});
+
+test("ChatGPT checkpoints separate session failure from history transport, parsing and checks",async()=>{
+  for (const [options,step,reason] of [[{fetchImpl:async()=>{throw new TypeError("PRIVATE");}},"request","network_error"],
+    [{body:"PRIVATE invalid JSON"},"parse","invalid_json"],[{status:503},"response","http_error"],[{},"complete",undefined]]) {
+    const h=setup(fixture(),options.status||200,options); await discover(h).catch(()=>{});
+    if (!reason) { const c=await h.window.__capCaptureChatGptJson(); assert.equal(c.jsonCapture.step,step); assert.equal(c.jsonCapture.history_checked,true); continue; }
+    await assert.rejects(h.window.__capCaptureChatGptJson(),error=>{
+      assert.equal(error.jsonCapture.step,step); assert.equal(error.jsonCapture.failure_check,reason);
+      assert.equal(error.jsonCapture.hook_ready,true); assert.equal(error.jsonCapture.route_found,true);
+      assert.doesNotMatch(JSON.stringify(error.jsonCapture),/PRIVATE|https|test-chat/); return true;
+    });
+  }
+  const h=setup(); h.location.pathname="/new-chat";
+  await assert.rejects(h.window.__capCaptureChatGptJson(),error=>{
+    assert.equal(error.jsonCapture.route_reason,"path_unrecognized"); assert.equal(error.jsonCapture.saved_chat,false);
+    assert.equal(error.jsonCapture.history_request_sent,false); assert.equal(h.requests.length,0); return true;
+  });
 });

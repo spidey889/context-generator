@@ -3,21 +3,31 @@
 (function (root) {
   const contract = root.CapTransferDiagnostics;
   const clock = () => Date.now();
-  function create(initial = {}) {
+  function create(initial = {}, onProgress) {
     const started = clock();
-    const data = { outcome: "succeeded", mode: "fresh" };
+    const data = { outcome: "succeeded", mode: "fresh", history_request_sent: false, history_response_read: false, history_parsed: false, history_checked: false };
     let currentStage;
-    const stage = value => { if (contract.jsonAttemptSchema.failure_stage.values.includes(value)) currentStage = value; };
+    const stage = value => {
+      if (!contract.jsonAttemptSchema.failure_stage.values.includes(value)) return;
+      currentStage = value;
+      if (["hook", "serialize"].includes(value)) checkpoint(value, value);
+    };
     const set = changes => {
       for (const [key, value] of Object.entries(changes || {})) {
         const rule = contract.jsonAttemptSchema[key];
         if (rule?.type === "number" && Number.isFinite(value) && value >= (rule.min || 0)) {
           if (value > rule.max) data.numeric_saturated = "lower_bound";
           data[key] = Math.min(rule.max, Math.round(value));
-        } else if (rule?.values?.includes(value)) data[key] = value;
+        } else if (rule?.values?.includes(value) || rule?.type === "boolean" && typeof value === "boolean") data[key] = value;
       }
     };
     const add = (key, value = 1) => set({ [key]: (data[key] || 0) + value });
+    function checkpoint(step, requestStage = currentStage, facts) {
+      if (data.failure_check) return; // Sibling cleanup cannot move the first failure.
+      set({ step, step_stage: requestStage, total_ms: clock() - started, ...facts });
+      if (contract.jsonAttemptSchema.failure_stage.values.includes(requestStage)) currentStage = requestStage;
+      try { onProgress?.(contract.validateJsonAttempt({ ...data, outcome: "started" })); } catch {}
+    }
     const fail = (check, stage, source, value, limit, status, details) => {
       // Concurrent files may fail together. Retain the first actual guard,
       // rather than replacing it with a sibling's abort after cancellation.
@@ -75,6 +85,7 @@
     const finish = error => {
       set({ total_ms: clock() - started });
       if (error) {
+        if (data.step === "hook") set({ hook_ms: clock() - started });
         const detail = error.diagnostics?.capture_detail || error.captureDetail;
         const site = error.diagnostics?.failure_site;
         const failedStage = error.diagnostics?.capture_request_stage || error.captureRequestStage
@@ -88,8 +99,8 @@
       return contract.validateJsonAttempt(data);
     };
     set(initial);
-    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception,
-      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) set(safe); } };
+    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception, checkpoint,
+      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) { set(safe); checkpoint(safe.step, safe.step_stage); } } };
   }
   root.CapJsonCaptureMetrics = { create };
 })(globalThis);

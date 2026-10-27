@@ -24,7 +24,7 @@
     const pattern = platform === "gemini" ? /\/app\/([^/]+)\/?$/ : platform === "grok" ? /\/c\/([^/]+)\/?$/ : /\/a\/chat\/s\/([^/]+)\/?$/;
     return { chat: pathname.match(pattern)?.[1], selected };
   };
-  const waitForHook = (timeout, install = false, signal) => new Promise(resolve => {
+  const waitForHook = (timeout, install = false, signal, metrics) => new Promise(resolve => {
     if (signal?.aborted) return resolve(false);
     const id = crypto.randomUUID();
     let poll, settled = false;
@@ -32,20 +32,23 @@
     const onAbort = () => finish(false);
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id
+          && reply.version !== (platform === "deepseek" ? 33 : platform === "grok" ? 23 : 20)) metrics?.set({ hook_status: "version_mismatch" });
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 33 : platform === "grok" ? 23 : 20)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
     signal?.addEventListener("abort", onAbort, { once: true });
     window.addEventListener("message", receive); ping();
-    if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
+    if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!reply?.ok) { metrics?.set({ hook_status: "install_rejected" }); finish(false); } }, () => { metrics?.set({ hook_status: "install_failed" }); finish(false); });
   });
   window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false, signal, onEstimate, omitLargeFiles = false) => {
     const hookStarted = Date.now();
     // Grok branch selection lives in the query string; pin it with the clicked chat.
     const expectedUrl = platform === "grok" ? new URL(expectedPath, location.origin) : null;
     const before = expectedUrl ? current(expectedUrl.pathname, expectedUrl.searchParams.get("rid")) : current(expectedPath);
-    if (!before.chat) throw new Error("Open a saved conversation to use fast capture.");
+    metrics.set({ saved_chat: Boolean(before.chat) });
+    if (!before.chat) { metrics.set({ route_reason: "path_unrecognized", route_found: false }); metrics.fail("routing_unavailable", "hook"); throw new Error("Open a saved conversation to use fast capture."); }
     let changed = false;
     const navigated = event => {
       const target = event?.destination ? new URL(event.destination.url) : location;
@@ -59,14 +62,16 @@
     }
     try {
       if (pinChat && (expectedUrl && expectedUrl.origin !== location.origin || JSON.stringify(current()) !== JSON.stringify(before))) throw changedError("The conversation changed during capture.");
-      if (!await waitForHook(250, false, signal)) {
+      metrics.set({ hook_ready: false, hook_status: "no_reply" });
+      if (!await waitForHook(250, false, signal, metrics)) {
         if (signal?.aborted) throw new Error("Size check cancelled.");
-        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal)) throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) metrics.set({ hook_status: "runtime_missing" });
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal, metrics)) throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
       }
       if (signal?.aborted) throw new Error("Size check cancelled.");
-      metrics.set({ hook_ms: Date.now() - hookStarted });
+      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted });
       if (changed || JSON.stringify(current()) !== JSON.stringify(before)) throw changedError("The conversation changed during capture.");
-      metrics.stage("history");
+      metrics.checkpoint("route", "history");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         // Await the native cancellation reply before releasing the shared read
@@ -75,13 +80,17 @@
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); };
         const receive = event => {
           const reply = event.data;
-          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.platform !== platform || !["response", "measurement_progress"].includes(reply.type) || reply.id !== id) return;
+          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.platform !== platform || !["response", "measurement_progress", "capture_progress"].includes(reply.type) || reply.id !== id) return;
           if (reply.type === "measurement_progress") {
             if (measureOnly && !signal?.aborted && !changed && reply.chat === before.chat && reply.selected === before.selected
                 && JSON.stringify(current()) === JSON.stringify(before) && Number.isSafeInteger(reply.messageTurnCount)
                 && reply.messageTurnCount > 0 && Number.isSafeInteger(reply.estimatedCharacterCount) && reply.estimatedCharacterCount >= 0) {
               try { onEstimate?.({ messageTurnCount: reply.messageTurnCount, estimatedCharacterCount: reply.estimatedCharacterCount }); } catch {}
             }
+            return;
+          }
+          if (reply.type === "capture_progress") {
+            if (!measureOnly && reply.chat === before.chat && reply.selected === before.selected && !changed) metrics.adopt(reply.jsonCapture);
             return;
           }
           cleanup();
@@ -129,11 +138,12 @@
   const readCapture = window.__capCaptureNetworkJson;
   window.__capMeasureNetworkJson = (expectedPath, signal, onEstimate) => readCapture(expectedPath,
     globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }), true, signal, onEstimate);
-  window.__capCaptureNetworkJson = async (expectedPath, omitLargeFiles = false) => {
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 });
+  window.__capCaptureNetworkJson = async (expectedPath, omitLargeFiles = false, onProgress) => {
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }, onProgress);
     metrics.stage("hook");
     try {
       const capture = await readCapture(expectedPath, metrics, false, undefined, undefined, omitLargeFiles);
+      metrics.checkpoint("complete", "serialize", { history_checked: true });
       metrics.set({ selected_turns: capture.messageTurnCount });
       if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });
       return { ...capture, jsonCapture: metrics.finish() };

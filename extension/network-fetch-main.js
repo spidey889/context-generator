@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 33 : platform === "grok" ? 23 : 20, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the final transcript has its own limits.
@@ -135,7 +135,9 @@
     if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable", captureDetail: "busy", captureRequestStage: "history" }, location.origin); return; }
     const controller = new AbortController();
     let storedAuth = null;
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: maxCaptureBytes, raw_bytes: 0, requests: 0 });
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: maxCaptureBytes, raw_bytes: 0, requests: 0 }, progress => {
+      if (request.measureOnly !== true) window.postMessage({ ...reply, type: "capture_progress", jsonCapture: progress }, location.origin);
+    });
     metrics.stage("history");
     const measureOnly = request.measureOnly === true;
     const omitLargeFiles = platform === "deepseek" && !measureOnly && request.omitLargeFiles === true;
@@ -244,10 +246,12 @@
         // validated signed GETs may do so: never send login cookies or a chat
         // referrer, and keep authenticated history requests redirect-strict.
         const fileDownload = platform === "deepseek" && type === "file";
+        metrics.checkpoint("request", stage, stage === "history" ? { history_request_sent: true } : undefined);
         response = await Reflect.apply(nativeFetch, window, [url, { ...options,
           credentials: fileDownload ? "omit" : options.credentials || "same-origin",
           redirect: fileDownload ? "follow" : "error",
           ...(fileDownload ? { referrerPolicy: "no-referrer" } : {}), signal: controller.signal }]);
+        metrics.checkpoint("response", stage);
         phase = "headers";
         check();
         if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed", response.status === 206 || response.headers.get("content-range") ? "partial_response" : "http_error");
@@ -270,6 +274,7 @@
         // split UTF-8/BOM state; the final flush rejects an incomplete codepoint.
         const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" });
         const parts = [];
+        metrics.checkpoint("read", stage);
         if (reader) while (true) {
           phase = "body";
           const { done, value } = await reader.read().catch(error => { failRead(controller.signal.reason === "capture_timeout" ? "timeout" : controller.signal.aborted ? "conversation_changed" : "network_error", error); throw error; });
@@ -299,7 +304,11 @@
         observation.end();
         const text = parts.join("");
         phase = "parse";
-        return type === "json" ? metrics.timed("parse_ms", () => JSON.parse(text)) : { text, size };
+        metrics.checkpoint("parse", stage, stage === "history" ? { history_response_read: true } : undefined);
+        const data = type === "json" ? metrics.timed("parse_ms", () => JSON.parse(text)) : { text, size };
+        // RPC framing is parsed by geminiPage, after this bounded text read.
+        if (type === "json") metrics.checkpoint("check", stage, stage === "history" ? { history_parsed: true } : undefined);
+        return data;
       } catch (error) {
         failRead(error?.captureDetail || (error?.name === "SyntaxError" ? "invalid_json" : "network_error"), error);
         // Per-read metadata stays on the error: overlapping attachment reads
@@ -318,6 +327,7 @@
     };
     try {
       check();
+      metrics.checkpoint("route", "history", { saved_chat: Boolean(chat), route_found: true, route_reason: "available" });
       if (platform === "gemini") {
         // Resource timing recovers routing after a late extension install. The
         // native bootstrap exposes the same CSRF value sent as the RPC's `at`.
@@ -347,6 +357,7 @@
           const body = new URLSearchParams({ at, "f.req": JSON.stringify([[["hNvQHb", JSON.stringify(args), null, "generic"]]]) });
           const response = await read(url.href, { method: "POST", body }, "rpc");
           const page = metrics.timed("parse_ms", () => api.geminiPage(response.text));
+          metrics.checkpoint("check", "history", { history_parsed: true });
           metrics.add("pages"); metrics.add("history_items", page.turns.length);
           pages.push(page);
           if (measureOnly) publishEstimate(api.roughSize(platform, pages, null, chat));
