@@ -742,7 +742,8 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   const validation = validateContextCarrySummary(rawSummary, profile);
   const qualityFlags = getSummaryQualityFlags(rawSummary, profile, finishReason);
   // Structure, length, and token limits remain advisory. Useful partial text is
-  // preferable to another provider call; only empty/refusal-only content fails.
+  // preferable to another provider call; only empty/refusal-only content or a
+  // recognizable reply about the model's own thinking fails.
   const summary = validation.ok
     ? normalizeContextCarrySummary(rawSummary)
     : appendDestinationConfirmation(rawSummary);
@@ -1583,6 +1584,17 @@ function getSummaryQualityFlags(text, profile, finishReason) {
 }
 
 function getSummaryContentRejectionReason(text, profile) {
+  // A model can answer a transcript's request for its private reasoning, then
+  // offer its own thought-process summary. Those bullets made the old
+  // refusal-only gate accept the wrong task. Match only this opening response,
+  // not attributed/quoted refusals or reasoning discussed inside a handoff.
+  const opening = stripWrappingCodeFence(String(text || "")).trim()
+    .split(/\n\s*\n/, 2).join(" ").replace(/’/g, "'").replace(/\s+/g, " ");
+  const declinesReasoning = /^(?:(?:I'm|I am) sorry[,!.\s]*(?:but\s+)?|Sorry[,!.\s]*(?:but\s+)?)?I (?:(?:don't have|do not have)[^.!?]*\b(?:copy|record|transcript)\b|(?:can't|cannot|won't|will not|am unable to) (?:provide|share|reproduce|reveal|show|disclose|give|quote)\b)/i.test(opening)
+    && /\b(?:reasoning|chain[- ]of[- ]thought|internal thoughts?|private thoughts?|thought process)\b/i.test(opening);
+  const offersOwnThinking = /\b(?:summary|overview|explanation) of (?:my (?:reasoning|thought process|thinking)|what I (?:was |am )?thinking)\b/i.test(opening);
+  if (declinesReasoning && offersOwnThinking) return "self-reasoning response";
+
   // Scan every line rather than parsed section maps: duplicate or unfamiliar
   // headings must not hide useful content or turn formatting into rejection.
   const placeholders = new Set(Object.values(profile?.templateHints || {})

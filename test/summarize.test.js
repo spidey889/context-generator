@@ -515,7 +515,8 @@ test("refusal and substantively empty Mistral output fall through to the complet
     }));
   };
   try {
-    for (const output of ["I cannot summarize this conversation.", getContextCarryTemplate(getSummaryProfile(conversation))]) {
+    for (const output of ["I cannot summarize this conversation.", SELF_REASONING_RESPONSE,
+      getContextCarryTemplate(getSummaryProfile(conversation))]) {
       rejectedSummary = output;
       requests.length = 0;
       const res = createMockResponse();
@@ -557,6 +558,72 @@ test("content rejection ignores structure and keeps short, cut-off, code, and mi
     "I can’t assist with this request.", "I cannot summarize this conversation. Please try again.",
     "WHO I AM\nI am unable to summarize this conversation.\nKEY CONTEXT\nI cannot provide a summary."]
     .forEach(text => assert.equal(getSummaryContentRejectionReason(text, profile), "refusal-like output", text));
+});
+
+// Synthetic version of an observed response: the model answered a transcript's
+// request for its thinking instead of producing a handoff. No customer facts.
+const SELF_REASONING_RESPONSE = [
+  "I don't have a verbatim copy of the earlier reasoning to reproduce, so I won't fabricate one. Here's a faithful summary of what I was thinking:",
+  "- The user asked me to review a patch series read-only.",
+  "- I wanted the reviewers to assess it independently.",
+  "- I considered adding a focus list, then decided to keep the prompt broad.",
+  "If you'd like, I can re-send that prompt now."
+].join("\n\n");
+
+test("self-reasoning replies are rejected while attributed reasoning and real handoffs remain deliverable", () => {
+  const { getSummaryContentRejectionReason: reject } = summarizeHandler.__test;
+  const profile = getSummaryProfile("x".repeat(4000));
+  for (const text of [SELF_REASONING_RESPONSE,
+    "I can't provide my private chain-of-thought. However, here is a summary of my reasoning:\n\n- I considered several options.",
+    "I can’t provide my private chain-of-thought.\n\nHere is a summary of what I was thinking:\n- I considered several options.",
+    "I'm sorry, I cannot share internal reasoning, but I can offer a brief overview of my thought process:\n\nI weighed the options."]) {
+    assert.equal(reject(text, profile), "self-reasoning response", text);
+  }
+  for (const text of [
+    `User quoted this bad answer:\n\n${SELF_REASONING_RESPONSE}`,
+    `> ${SELF_REASONING_RESPONSE.replace(/\n/g, "\n> ")}`,
+    `KEY CONTEXT\nThe source assistant replied: ${SELF_REASONING_RESPONSE}`,
+    "I cannot reproduce the crash. Here is a summary of the evidence: the build passed.",
+    "I can't connect to the reasoning service. Here is a summary of my reasoning about the outage: the logs show HTTP 503.",
+    "I cannot share internal reasoning.\n\nDecision: use SQLite. Deployment remains pending.",
+    "The user asked for reasoning; the assistant provided a high-level explanation. The pending task is a read-only patch review."
+  ]) assert.equal(reject(text, profile), null, text);
+});
+
+test("a self-reasoning Dots reply advances once to TokenHarbor with the complete large transcript", async () => {
+  const originalFetch = global.fetch;
+  const restores = [setTemporaryEnv("OPENROUTER_ENABLED", "true"),
+    setTemporaryEnv("OPENROUTER_DOTS_ENABLED", "true")];
+  const messages = [{ role: "user", text: "Preserve the active review restrictions. " + "x".repeat(979000) },
+    { role: "assistant", text: "The patch review remains pending; no edits are authorized." }];
+  const conversation = messages.map(message => `${message.role}: ${message.text}`).join("\n\n");
+  const calls = [], failures = [];
+  const good = "The user requested a read-only patch review. No edits are authorized; the review remains pending.";
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    calls.push(body.model);
+    assert.deepEqual(JSON.parse(body.messages[1].content).messages, messages);
+    return new Response(JSON.stringify({ choices: [{ message: {
+      content: calls.length === 1 ? SELF_REASONING_RESPONSE : good
+    }, finish_reason: "stop" }] }), { headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await createSummaryWithFallback({ conversation, messages, platform: "ChatGPT",
+      profile: getSummaryProfile(conversation), openrouterApiKey: "test-openrouter",
+      tokenharborApiKey: "test-tokenharbor", tokenharborEnabled: true,
+      requestContext: { onProviderFailure: failure => failures.push(failure) } });
+    assert.deepEqual(calls, ["dots-studio/dots-3-note-preview:free", "deepseek-v4.1-flash:free"]);
+    assert.equal(result.provider, "tokenharbor");
+    assert.equal(result.fallback.used, true);
+    assert.ok(result.summary.includes(good));
+    assert.doesNotMatch(result.summary, /what I was thinking|verbatim copy/);
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].failure_reason, "provider_output_rejected");
+    assert.doesNotMatch(JSON.stringify(failures), /verbatim copy|Preserve the active review|test-openrouter|test-tokenharbor/);
+  } finally {
+    restores.forEach(restore => restore());
+    global.fetch = originalFetch;
+  }
 });
 
 test("useful token-limited output is delivered without calling a fallback", async () => {
