@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-logged-out-notice-v189";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-logged-out-audit-v190";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -4908,7 +4908,10 @@
 
   function findChatGptInlineToolbar(input) {
     if (!input?.isConnected || !isVisible(input)) return null;
-    if (input.hasAttribute("data-mobile-composer-prompt")) return findLoggedOutChatGptInlineToolbar(input);
+    // An editor marker alone must not redirect a signed-in composer.
+    if (input.hasAttribute("data-mobile-composer-prompt") && input.closest("form")?.hasAttribute("data-logged-out")) {
+      return findLoggedOutChatGptInlineToolbar(input);
+    }
     const body = input.closest("[data-composer-body]");
     const editor = input.closest("[data-composer-input]");
     if (!body || isComposerPopupControl(body, input)) return null;

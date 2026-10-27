@@ -3683,6 +3683,11 @@ test("logged-out ChatGPT mounts inside its native trailing slot without changing
   assert.equal(hooks.findChatGptInlineToolbar(f.input), null, "the new path requires explicit logged-out ownership");
   const signedIn = inlineChatGptFixture();
   assert.equal(hooks.findChatGptInlineToolbar(signedIn.input).footer, signedIn.footer);
+  const signedInForm = new FakeElement({ tag: "form" });
+  signedInForm.appendChild(signedIn.body);
+  signedIn.input.setAttribute("data-mobile-composer-prompt", "");
+  assert.equal(hooks.findChatGptInlineToolbar(signedIn.input)?.footer, signedIn.footer,
+    "an editor marker must not divert a signed-in composer from its existing inline adapter");
 });
 
 clockTest("ChatGPT empty-chat notice explains login only for the active logged-out composer", () => {

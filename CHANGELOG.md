@@ -4,9 +4,9 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-27
 
-- **Explain the login requirement on logged-out ChatGPT.** Remap only the existing empty-chat notice when the active native composer's form explicitly marks the user logged out. Show “You are not logged into ChatGPT” and ask them to log in; preserve signed-in empty-chat notices, other platforms and unrelated errors. Add one regression covering landing and guest-chat routes plus those unchanged cases. Verified with focused regressions; live verification of this second fix was deferred at the owner's request.
+- **Explain the login requirement on logged-out ChatGPT.** Remap only the existing empty-chat notice when the active native composer's form explicitly marks the user logged out. Show “You are not logged into ChatGPT” and ask them to log in; preserve signed-in empty-chat notices, other platforms and unrelated errors. Add one regression covering landing and guest-chat routes plus those unchanged cases. Focused regressions passed and the owner subsequently confirmed both fixes live.
 
-- **Keep the orb inside logged-out ChatGPT.** Add an adapter for the observed unauthenticated mobile composer, mounting in its named trailing group and accepting the native Voice link. Preserve the form's grid tracks and require explicit logged-out ownership, leaving signed-in placement unchanged. The new regression fails before the fix; existing composer tests and the real logged-out landing page verify placement.
+- **Keep the orb inside logged-out ChatGPT.** Add an adapter for the observed unauthenticated mobile composer, mounting in its named trailing group and accepting the native Voice link. Preserve the form's grid tracks and require explicit logged-out ownership, leaving signed-in placement unchanged. A pre-merge audit tightened adapter selection so an editor marker alone cannot divert a signed-in composer; its regression fails before that guard. Existing composer tests and the real logged-out landing page verify placement.
 
 - **Refresh summary validation documentation.** Update current size boundaries, response retry and local recovery; retain telemetry audit and remove two superseded audits, with historical evidence available in Git. Runtime behavior is unchanged.
 
