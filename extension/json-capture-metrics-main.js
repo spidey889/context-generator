@@ -448,7 +448,7 @@
     };
     set(initial);
     return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception, checkpoint, recoverFile,
-      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) { set(safe); recoveredFileFailure = safe.outcome === "partial" && Boolean(safe.skipped_file_check); checkpoint(safe.step, safe.step_stage); } } };
+      adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) { set(safe); recoveredFileFailure = ["partial", "started"].includes(safe.outcome) && Boolean(safe.skipped_file_check); checkpoint(safe.step, safe.step_stage); } } };
   }
   root.CapJsonCaptureMetrics = { create };
 })(globalThis);

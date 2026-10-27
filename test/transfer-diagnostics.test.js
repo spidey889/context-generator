@@ -301,3 +301,13 @@ test("skipped files retain their cause while later validation owns the terminal 
   assert.equal(d.failure_check,"transcript_char_limit");assert.equal(d.failure_value,1000001);assert.equal(d.failure_stage,"serialize");
   assert.equal(d.failure_decode_stage,undefined);assert.equal(d.skipped_file_check,"invalid_utf8");assert.equal(d.files_skipped,1);
 });
+
+test("recovered MAIN progress preserves a later bridge timeout when its final reply is lost",()=>{
+  const vm=require("node:vm");const context=vm.createContext({CapTransferDiagnostics:diagnostics,Date,TextEncoder});
+  new vm.Script(fs.readFileSync(path.join(__dirname,"../extension/json-capture-metrics.js"),"utf8")).runInContext(context);
+  let progress;const native=context.CapJsonCaptureMetrics.create({},d=>{progress=d;});
+  native.checkpoint("read","attachment_body");native.fail("invalid_utf8","attachment_body");native.recoverFile();native.checkpoint("serialize","serialize");
+  assert.equal(progress.outcome,"started");const bridge=context.CapJsonCaptureMetrics.create();bridge.adopt(progress);
+  const d=bridge.finish({captureDetail:"timeout",captureRequestStage:"history"});
+  assert.equal(d.failure_check,"timeout");assert.equal(d.failure_stage,"history");assert.equal(d.skipped_file_check,"invalid_utf8");assert.equal(d.files_skipped,1);
+});
