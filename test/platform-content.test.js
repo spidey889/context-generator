@@ -1426,12 +1426,12 @@ clockTest("Grok fast capture waits for a delayed virtualized window instead of s
   assert.match(transcript, /Grok: Delayed Grok turn 40/);
 });
 
-virtualSweepTest("scrolling retains short replies that appear in later windows", async () => {
+virtualSweepTest("scrolling retains short replies in the final window and stops at the end", async () => {
   await Promise.all(["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"].map(async (hostname) => {
     const { elements } = createVirtualizedChatElements({
       label: "short replies", totalTurns: 40, windowSize: 8, scrollStride: 4, scrollHeight: 3600,
       makeTurn: (index) => new FakeElement({
-        text: index === 11 ? "no" : index === 13 ? "1" : `Detailed distinct message ${index} ${"x".repeat(180)}`,
+        text: index === 37 ? "no" : index === 39 ? "1" : `Detailed distinct message ${index} ${"x".repeat(180)}`,
         attrs: { "data-testid": `conversation-turn-${index}`, "data-message-author-role": index % 2 ? "user" : "assistant" }
       })
     });
@@ -1441,6 +1441,8 @@ virtualSweepTest("scrolling retains short replies that appear in later windows",
     assert.match(transcript, /User: no(?:\n|$)/, hostname);
     assert.match(transcript, /User: 1(?:\n|$)/, hostname);
     assert.equal((transcript.match(/User: no(?:\n|$)/g) || []).length, 1, hostname);
+    const boundaryScrolls = elements.reduce((total, element) => total + element.scrollIntoViewCalls.length, 0);
+    assert.ok(boundaryScrolls < 100, `${hostname}: capture must stop instead of repeatedly scrolling the final window`);
   }));
 });
 

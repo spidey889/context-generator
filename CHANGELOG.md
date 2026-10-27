@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-28
 
+- **Align short-reply capture with scrolling completion.** Static review found that capture included short replies while its post-scroll snapshots still omitted them. At the bottom of a chat, that mismatch could look like repeated window changes and prevent the quiet stop. Use capture's turn set for sweep settling while retaining the separate admission/destination thresholds. Move the existing five-platform regression's short replies into the final window and bound repeated boundary scrolling. Advance content readiness to v201. Tests were not run at the owner's request; this is a local source correction.
+
 - **Keep short replies during page capture.** Include verified one- and two-character messages in initial and scrolling-window capture regardless of chat length. Continue excluding short control labels; leave JSON capture and the separate empty-chat and destination guards unchanged. Regressions cover all five platforms and overlapping windows.
 
 ## 2026-10-27

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-scroll-short-replies-v200";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-scroll-short-replies-v201";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1791,8 +1791,9 @@
       : SOURCE_SCROLL_STABLE_SAMPLE_COUNT;
   }
 
-  function getConversationReadinessSnapshot() {
-    const messageTurns = getConversationTurns().filter((turn) => isDetectedConversationMessage(turn));
+  function getConversationReadinessSnapshot({ includeShort = false } = {}) {
+    const messageTurns = getConversationTurns({ includeShort })
+      .filter(includeShort ? isUsefulConversationTurn : isDetectedConversationMessage);
     const scrollState = getSourceScrollState();
     return {
       turns: messageTurns,
@@ -1953,7 +1954,9 @@
     stableSampleCount = getVirtualSweepStableSampleCount()
   ) {
     const startedAt = Date.now();
-    let lastSnapshot = getConversationReadinessSnapshot();
+    // Sweep signatures must include the same turns as capture. Otherwise a
+    // short reply at the bottom looks like perpetual window changes.
+    let lastSnapshot = getConversationReadinessSnapshot({ includeShort: true });
     let latestSnapshot = lastSnapshot;
     let stableSamples = 0;
 
@@ -1961,7 +1964,7 @@
       const remainingMs = timeoutMs - (Date.now() - startedAt);
       await delay(Math.min(getSourceScrollStableInterval(), Math.max(0, remainingMs)));
 
-      const nextSnapshot = getConversationReadinessSnapshot();
+      const nextSnapshot = getConversationReadinessSnapshot({ includeShort: true });
       latestSnapshot = nextSnapshot;
       if (isConversationWindowStable(lastSnapshot, nextSnapshot)) {
         stableSamples += 1;
