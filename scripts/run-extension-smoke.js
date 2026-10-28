@@ -3355,7 +3355,7 @@ async function run() {
         assert.doesNotMatch(JSON.stringify(terminal), /We couldn’t read this chat completely/);
       }
       if (CHATGPT_FAILURE_SMOKE === "access-denied") {
-        assert.equal(failedCapture.error, "We couldn’t access this chat. Open it in ChatGPT, check that you’re signed in, then try again.");
+        assert.equal(failedCapture.error, "We couldn’t access this chat. Check that you’re signed in to ChatGPT, then refresh and try again.");
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the original access rejection behind its notice");
         assert.equal(terminal.diagnostics.error_code, "capture_json_failed");
         assert.equal(terminal.diagnostics.capture_detail, "http_error");

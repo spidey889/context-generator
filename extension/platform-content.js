@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-error-guidance-v203";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-error-guidance-v204";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1743,23 +1743,23 @@
         return "Cap Context isn’t ready on this page yet. Refresh the page and try again.";
       }
       if (detail === "missing_text") {
-        return "We couldn’t find readable conversation text in this chat. Try another chat.";
+        return "We couldn’t find readable messages. Refresh the page and try again.";
       }
       if (detail === "network_error") {
         // Only the browser's explicit offline signal gets offline guidance.
         return navigator.onLine === false
           ? "You appear to be offline. Reconnect to the internet, then try again."
-          : `We couldn’t connect to ${currentPlatform.name}. Check your internet connection, then try again.`;
+          : `We couldn’t connect to ${currentPlatform.name}. Check your connection, then refresh and try again.`;
       }
       if (detail === "timeout") return "Reading this chat took too long. Refresh the page and try again.";
       if (detail === "http_error") {
         const status = details.capture_http_status;
         if ([401, 403].includes(status)) {
-          return `We couldn’t access this chat. Open it in ${currentPlatform.name}, check that you’re signed in, then try again.`;
+          return `We couldn’t access this chat. Check that you’re signed in to ${currentPlatform.name}, then refresh and try again.`;
         }
-        if (status === 429) return "The AI website asked us to slow down. Wait a little, then try again.";
+        if (status === 429) return "The AI website asked us to slow down. Wait a little, then refresh and try again.";
         if ([408, 500, 502, 503, 504, 529].includes(status)) {
-          return `${currentPlatform.name} couldn’t load this chat right now. Wait a moment, then try again.`;
+          return `${currentPlatform.name} couldn’t load this chat. Refresh the page and try again.`;
         }
       }
       if (["http_error", "non_json_response", "invalid_json"].includes(detail)) {
