@@ -45,6 +45,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled, summaryMod
         // PGlite has no cron scheduler. Replay the unchanged stored job command
         // against its local catalog shim; hosted scheduling is verified separately.
         await database.exec(fs.readFileSync(path.join(directory, name), "utf8")
+          .replace(/\r\n/g, "\n") // Match SQL function-text guards on Windows checkouts.
           .replace("create extension if not exists pg_cron with schema pg_catalog;", "-- Local cron catalog shim."));
       }
     } catch (error) { await database.close(); throw error; }

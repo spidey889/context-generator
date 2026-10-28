@@ -3481,7 +3481,8 @@ async function run() {
       }
       if (TELEMETRY_DATABASE_SMOKE) {
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the installed worker's failed capture telemetry");
-        await telemetryFixture.verifyFailureOutcome(terminal, SIZE_CAPTURE_SMOKE);
+        // Receiving the HTTP report precedes its asynchronous relay/SQL commit.
+        await waitFor(() => telemetryFixture.verifyFailureOutcome(terminal, SIZE_CAPTURE_SMOKE).then(() => true), "the saved capture failure");
         if (LIVE_TELEMETRY_SMOKE) process.stdout.write(`✓ LIVE transfer record: ${terminal.attempt_id}; JSON checks: ${JSON.stringify(terminal.diagnostics.json_attempts)}\n`);
         assert.equal(terminal.diagnostics.failure_site, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE || CHATGPT_FAILURE_SMOKE === "partial" ? "capture_serialize" : "capture_history");
         if (CHATGPT_FAILURE_SMOKE === "ranged") assert.equal(terminal.diagnostics.capture_http_status, 206);
