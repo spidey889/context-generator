@@ -3081,10 +3081,26 @@
     const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "paste_start", summary_chars: text?.length || 0,
       document_ready_state: document.readyState,
       visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown" };
+    const sentCheckpoints = new Set();
+    const reportCheckpoint = checkpoint => {
+      if (!transferId || !instanceActive || sentCheckpoints.has(checkpoint)) return;
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt });
+      const snapshot = globalThis.CapTransferDiagnostics?.snapshot(diagnostics);
+      if (!snapshot) return;
+      sentCheckpoints.add(checkpoint);
+      // A blocked insert or lost final reply must not erase earlier progress.
+      // Send only four metadata snapshots; optional telemetry never gates paste.
+      try {
+        Promise.resolve(extensionRuntime.sendMessage({ type: "RECORD_PASTE_CHECKPOINT", transferId,
+          destination: destinationId, checkpoint, diagnostics: snapshot })).catch(() => {});
+      } catch {}
+    };
+    reportCheckpoint("received");
     try {
-      const timing = await pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, startedAt);
+      const timing = await pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, startedAt, reportCheckpoint);
       globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt, last_operation: "paste_complete" });
       globalThis.CapTransferDiagnostics?.event(diagnostics, "paste_complete", Date.now() - startedAt, "paste_events");
+      if (diagnostics.paste_populated === true) reportCheckpoint("verified");
       return { ...timing, diagnostics: globalThis.CapTransferDiagnostics?.snapshot(diagnostics) || null };
     } catch (error) {
       globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt });
@@ -3097,7 +3113,7 @@
     }
   }
 
-  async function pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, diagnosticStartedAt) {
+  async function pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, diagnosticStartedAt, reportCheckpoint) {
     if (cancelledTransferIds.has(transferId)) throw createTransferCancelledError();
     checkTransferDeadline({ deadlineAt });
     cancelPendingPasteRecheck();
@@ -3120,6 +3136,7 @@
     const guard = createPasteRecoveryGuard(trimmedText, destination, routeGuard, transferId, sourceTabId, deadlineAt);
     guard.diagnostics = diagnostics;
     guard.diagnosticStartedAt = diagnosticStartedAt;
+    guard.reportCheckpoint = reportCheckpoint;
     let retainedGuard = false;
     try {
       const platformMatches = destination.id === currentPlatform.id;
@@ -3273,6 +3290,7 @@
         observe({ composer_wait_ms: composerWaitMs, editor_connected: input.isConnected,
           editor_kind: input instanceof HTMLTextAreaElement ? "textarea" : input instanceof HTMLInputElement ? "input" : input.isContentEditable ? "contenteditable" : "other",
           editor_text_chars: getElementText(input).length });
+        guard?.reportCheckpoint?.("editor_found");
         const alreadyPasted = editorContainsText(input, text);
         guard?.observe(input);
         // A partial paste and a user draft can look alike. Let destination
@@ -3286,6 +3304,8 @@
           if (!alreadyPasted) guard.insert(input);
 
           observe({ last_operation: "paste_verify" }, "paste_verify");
+          observe({ editor_connected: input.isConnected, editor_text_chars: getElementText(input).length });
+          guard?.reportCheckpoint?.("inserted");
           const populated = await waitForEditorText(input, text, verifyTimeoutMs);
           observe({ paste_populated: populated, editor_connected: input.isConnected, editor_text_chars: getElementText(input).length });
           checkTransferDeadline({ deadlineAt });

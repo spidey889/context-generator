@@ -6,6 +6,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-28
 
+- **Preserve destination paste progress when its final reply is lost.** A DeepSeek-to-Gemini attempt prepared a 457,957-character full-chat fallback, then timed out waiting for the paste reply; its saved record had no destination paste observations.
+  - Destination diagnostics previously travelled only with the final paste acknowledgement, so an unresponsive tab or lost reply also hid any earlier editor and insertion progress.
+  - Send four bounded metadata checkpoints through the existing worker/outbox: request received, ready composer found, native insertion returned and full paste verification completed. Never save chat text or wait for logging before delivery.
+  - Bind reports to the exact dispatched destination tab and active source identity, reject invalid/private fields and deduplicate milestones. Preserve cumulative paste events through stale/final reports without manufacturing a successful outcome.
+  - Keep the existing Supabase diagnostics schema, extension permissions, provider time limits and paste behavior. Regression checks cover large carries, draft protection, unavailable telemetry, lost final replies and report ownership/merging.
+  - The historical Gemini failure remains unexplained: missing acknowledgement does not prove whether text appeared, and a passing isolated fixture does not establish native Gemini behavior. Updated client code must reach the installed extension before future transfers emit these checkpoints.
+
 - **Add optional uninstall feedback without more permissions.** Publish a basic Google Form with five reasons and an optional comment, no email collection or required sign-in, and a short thank-you. Register its fixed public URL on worker initialization/install/update/startup without identifiers, new host access or content scripts. Keep feedback separate from transfer telemetry and leave normal startup working if registration fails. The published form and source change do not imply a Chrome Web Store update.
 - **Prepare source 1.4.34.** Bump the extension version with the merged capture and handoff animation fixes. Backend deployment and Chrome Web Store publication remain separate.
 - **Keep handoff bars moving and finish smoothly.** Replace the summary line's fixed transition, which stopped at its estimate, with continuous bounded activity. On real completion, glide from the visible position to the end without a next-stage update cancelling the animation. Preserve the existing design, capture/summary work, local sweeps, reduced motion and destination timing.

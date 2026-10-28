@@ -2280,6 +2280,47 @@ clockTest("textarea paste uses the live value rather than stale default text", a
   assert.equal(hooks.editorContainsText(editor, summary), false, "default text cannot verify an empty composer");
 });
 
+clockTest("paste checkpoints expose large insertion progress without waiting for telemetry replies", async () => {
+  const text = "PRIVATE synthetic carry ".repeat(20000).slice(0, 457957);
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const checkpoints = [];
+  const hooks = loadPlatformContent([editor], "gemini.google.com", {
+    runtimeSendMessage: message => {
+      if (message.type !== "RECORD_PASTE_CHECKPOINT") return Promise.resolve({ ok: true });
+      checkpoints.push({ message, editorChars: editor.value.length });
+      return new Promise(() => {}); // Optional reporting cannot hold delivery open.
+    }
+  });
+  await hooks.pasteIntoPlatform(text, "gemini", "checkpoint-transfer", Date.now() + 60000);
+  assert.deepEqual(checkpoints.map(({ message }) => message.checkpoint), ["received", "editor_found", "inserted", "verified"]);
+  assert.deepEqual(checkpoints.map(({ editorChars }) => editorChars), [0, 0, text.length, text.length]);
+  assert.equal(checkpoints.at(-1).message.diagnostics.paste_populated, true);
+  assert.equal(checkpoints.at(-1).message.diagnostics.editor_text_chars, text.length);
+  assert.equal(editor.value, text);
+  assert.doesNotMatch(JSON.stringify(checkpoints), /PRIVATE|synthetic carry|https?:/);
+});
+
+clockTest("paste checkpoints stop before insertion when a destination draft is present", async () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  editor.value = "PRIVATE owner draft";
+  const checkpoints = [];
+  const hooks = loadPlatformContent([editor], "gemini.google.com", {
+    runtimeSendMessage: message => {
+      if (message.type === "RECORD_PASTE_CHECKPOINT") {
+        checkpoints.push(message);
+        throw new Error("Optional reporting unavailable");
+      }
+      return Promise.resolve({ ok: true });
+    }
+  });
+  hooks.registerElementId("context-generator-fallback-modal", new FakeElement());
+  await assert.rejects(hooks.pasteIntoPlatform("PRIVATE carry", "gemini", "draft-checkpoint-transfer", Date.now() + 60000),
+    error => error.diagnostics.error_code === "editor_has_draft");
+  assert.deepEqual(checkpoints.map(message => message.checkpoint), ["received", "editor_found"]);
+  assert.equal(editor.value, "PRIVATE owner draft");
+  assert.doesNotMatch(JSON.stringify(checkpoints), /PRIVATE/);
+});
+
 clockTest("initial paste never overwrites a nonempty draft on any destination", async () => {
   const draft = "My unfinished question belongs to me.";
   for (const [hostname, destination] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {

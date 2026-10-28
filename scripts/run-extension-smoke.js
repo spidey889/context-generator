@@ -20,7 +20,7 @@ const CHATGPT_EXACT_CODE = '  OWN_CODE_SENTINEL\n  print("a\u00a0b")  \nCODE_END
 const CHATGPT_PYTHON_RESULT = "  Test code Item  Value\n0  JV3XLMSP    A   6791\n1  JV3XLMSP    B   3197\n2  JV3XLMSP    C   7083";
 const CLAUDE_PASTED_TEXT = `CLAUDE_PASTE_START\n${"Full pasted-card line, absent from the DOM.\n".repeat(1000)}CLAUDE_PASTE_END`;
 const CLAUDE_JSON_USER_TEXT = `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.\r\n\r\n${CLAUDE_PASTED_TEXT}\r\n\r\nCLAUDE_INLINE_SUFFIX`;
-const SUMMARY_TEXT = [
+let SUMMARY_TEXT = [
   "CONTEXT CARRY — READY TO PASTE",
   "",
   "WHAT WE WERE DOING",
@@ -62,7 +62,26 @@ const JSON_HANDOFF_SMOKE = JSON_SOURCE === "chatgpt" && ["1", "cancel"].includes
 const JSON_HANDOFF_CANCEL_SMOKE = JSON_HANDOFF_SMOKE && process.env.CAP_CONTEXT_JSON_HANDOFF_SMOKE === "cancel";
 const DOM_ESTIMATE_SMOKE = process.env.CAP_CONTEXT_DOM_ESTIMATE_SMOKE === "1";
 if (DOM_ESTIMATE_SMOKE) assert.equal(JSON_SOURCE, "deepseek", "DOM estimate smoke uses native DeepSeek count recovery.");
-const GEMINI_DESTINATION_SMOKE = process.env.CAP_CONTEXT_GEMINI_DESTINATION_SMOKE === "1";
+const GEMINI_LARGE_PASTE_SMOKE = ["1", "timeout"].includes(process.env.CAP_CONTEXT_GEMINI_LARGE_PASTE_SMOKE);
+const GEMINI_LOST_REPLY_SMOKE = process.env.CAP_CONTEXT_GEMINI_LARGE_PASTE_SMOKE === "timeout";
+const GEMINI_DESTINATION_SMOKE = process.env.CAP_CONTEXT_GEMINI_DESTINATION_SMOKE === "1" || GEMINI_LARGE_PASTE_SMOKE;
+if (GEMINI_LARGE_PASTE_SMOKE) {
+  // Match the failed transfer's prepared-carry size, not merely its captured
+  // input size. Synthetic text stays on the fixture server; no provider is used.
+  const prefix = `${SUMMARY_TEXT}\n\nConversation history:\n\n`;
+  const suffix = "\n\nNext step:\n\nReply only: Context loaded. Then wait for the user.";
+  const remaining = 457957 - prefix.length - suffix.length;
+  const turns = Array.from({ length: 146 }, (_, index) => {
+    const length = Math.floor(remaining / 146) + (index < remaining % 146 ? 1 : 0);
+    const heading = `${index % 2 ? "Assistant" : "User"} ${index + 1}: `;
+    const text = heading + "Synthetic fallback history for complete paste verification. ".repeat(Math.ceil(length / 50));
+    return text.slice(0, length - 1) + (index === 145 ? "." : "\n");
+  }).join("");
+  SUMMARY_TEXT = prefix + turns + suffix;
+  assert.equal(SUMMARY_TEXT.length, 457957);
+  assert.equal(JSON_CAPTURE_SMOKE, false, "The focused Gemini paste fixture uses the ordinary DOM source.");
+  assert.notEqual(process.env.CAP_CONTEXT_LIVE_TELEMETRY_SMOKE, "1", "Large-paste checkpoints must remain local.");
+}
 const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
 const CHATGPT_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-oversize";
 // Opt-in native capture/worker/backend-admission/paste coverage at the new
@@ -356,6 +375,19 @@ async function createSmokeExtension(tempRoot, origin) {
 
   const backgroundPath = path.join(extensionRoot, "background.js");
   let backgroundSource = (await fs.promises.readFile(backgroundPath, "utf8")).replace(/\r\n/g, "\n");
+  if (GEMINI_LARGE_PASTE_SMOKE) {
+    // Optional attribution has a one-second production cap. This paste-only
+    // fixture requires identity and does not test that independent timing race.
+    backgroundSource = replaceOnce(backgroundSource, "const SUMMARY_TELEMETRY_WAIT_MS = 1000;",
+      "const SUMMARY_TELEMETRY_WAIT_MS = 10000;", "focused fixture telemetry initialization allowance");
+  }
+  if (GEMINI_LOST_REPLY_SMOKE) {
+    // Lose only the final paste acknowledgement in the disposable worker. The
+    // destination still runs its real insertion and independent checkpoint path.
+    backgroundSource = replaceOnce(backgroundSource, "  return chrome.tabs.sendMessage(tabId, message);",
+      '  const response = chrome.tabs.sendMessage(tabId, message);\n  return message.type === "PASTE_CONTEXT" ? response.then(() => new Promise(() => {})) : response;',
+      "lost Gemini paste acknowledgement");
+  }
   backgroundSource = translateLandingPaths(backgroundSource);
   backgroundSource = replaceOnce(
     backgroundSource,
@@ -1612,6 +1644,73 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
   process.stdout.write("✓ Polishing → real paste → verified ready; exact text, one summary, one destination, no Send click.\n");
 }
 
+async function verifyGeminiLargePaste({ sourceSession, devToolsPort, origin, state, destinationSessions }) {
+  // This focused mode skips the normal placement checks that give the cold
+  // worker time to initialize optional telemetry storage. Establish that real
+  // local identity first so the fixture can require attributable checkpoints.
+  const worker = await waitFor(async () => (await getTargets(devToolsPort)).find(target => target.type === "service_worker" && target.url.endsWith("/background.js")), "the initialized transfer worker");
+  const workerSession = await CdpSession.connect(worker.webSocketDebuggerUrl);
+  try {
+    await workerSession.evaluate("(async () => { await getOrCreateTelemetryInstallId(); await telemetryWorkChain; return true; })()");
+  } finally { workerSession.close(); }
+  await sourceSession.call("Emulation.setFocusEmulationEnabled", { enabled: false });
+  await sourceSession.call("Page.bringToFront");
+  assert.equal(await sourceSession.evaluate(`(() => {
+    // Selection does not depend on the optional opening animation completing;
+    // occluded Windows fixtures can suspend that frame before the native switch.
+    document.getElementById("context-generator-bubble").click();
+    const tile = [...document.querySelectorAll(".context-generator-destination-tile")].find(node => node.textContent.includes("Gemini"));
+    if (!tile) return false;
+    tile.click(); return true;
+  })()`), true);
+  await waitFor(() => state.summaryRequests.length === 1, "the local prepared-carry request");
+  const attemptId = state.summaryRequests[0].telemetry.attempt_id;
+  const destination = await waitFor(async () => {
+    const target = (await getTargets(devToolsPort)).find(item => item.type === "page" && item.url.startsWith(`${origin}/destination`));
+    if (!target) return null;
+    let session = destinationSessions.get(target.id);
+    if (!session) {
+      session = await CdpSession.connect(target.webSocketDebuggerUrl);
+      destinationSessions.set(target.id, session);
+      await session.call("Runtime.enable");
+    }
+    const text = await session.evaluate('document.getElementById("gemini-editor")?.innerText.replace(/\\r\\n?/g, "\\n").replace(/\\n{3,}/g, "\\n\\n").trimEnd() || ""');
+    return text === SUMMARY_TEXT ? { session, text } : null;
+  }, "the complete 457,957-character Gemini paste");
+  assert.equal(destination.text.length, 457957);
+  assert.equal(await destination.session.evaluate("window.__capGeminiComposerReady"), true);
+  assert.equal(await destination.session.evaluate("window.__capGeminiPasteWasFocused"), true);
+  const terminal = await waitFor(() => state.telemetryRequests.findLast(payload => payload.attempt_id === attemptId
+    && payload.status === (GEMINI_LOST_REPLY_SMOKE ? "failed" : "succeeded")), "the large-paste terminal report");
+  const checkpoint = await waitFor(() => state.telemetryRequests.findLast(payload => payload.attempt_id === attemptId
+    && ["paste_start", "editor_wait", "paste_verify", "paste_complete"].every(event => payload.diagnostics?.paste_events?.some(item => item.event === event))),
+  "independent received/editor/inserted/verified paste checkpoints");
+  assert.equal(checkpoint.diagnostics.editor_seen, true);
+  assert.equal(checkpoint.diagnostics.paste_populated, true);
+  assert.equal(await destination.session.evaluate("window.__capContextSmokeSendClicks"), 0);
+  assert.equal(state.summaryRequests.length, 1);
+  assert.equal(state.destinationRequests, 1, "Lost acknowledgement must not create another destination or insert again.");
+  assert.doesNotMatch(JSON.stringify(checkpoint.diagnostics), /Synthetic fallback history|Conversation history|SMOKE_USER_SENTINEL|READY TO PASTE/,
+    "Paste checkpoints must contain no prepared-carry or captured text.");
+  if (GEMINI_LOST_REPLY_SMOKE) {
+    assert.equal(terminal.failure_reason, "paste_failed");
+    assert.equal(terminal.diagnostics.error_code, "message_timeout");
+    assert.equal(terminal.diagnostics.message_reply, "timeout");
+    assert.equal(state.telemetryRequests.some(payload => payload.attempt_id === attemptId && payload.status === "succeeded"), false,
+      "A verified checkpoint cannot manufacture a successful transfer when its reply is lost.");
+  } else {
+    assert.equal(terminal.diagnostics.message_reply, "ack_success");
+    assert.equal(terminal.diagnostics.paste_populated, true);
+  }
+  await waitFor(async () => {
+    const stored = await sourceSession.evaluate('chrome.storage.local.get("context-generator-telemetry-outbox-v1")', sourceSession.getExtensionContextId());
+    return stored?.["context-generator-telemetry-outbox-v1"]?.length === 0;
+  }, "the drained large-paste telemetry outbox");
+  assert.equal(await destination.session.evaluate('document.getElementById("gemini-editor").innerText.replace(/\\r\\n?/g, "\\n").replace(/\\n{3,}/g, "\\n\\n").trimEnd()'), SUMMARY_TEXT,
+    "The whole carry must remain in the Gemini editor after telemetry and timeout handling.");
+  process.stdout.write(`✓ Gemini retained all 457,957 characters; verified paste ${checkpoint.diagnostics.paste_ms} ms; ${GEMINI_LOST_REPLY_SMOKE ? "lost final reply preserved checkpoints without invented success" : "all four checkpoints reached local telemetry"}; one destination, no Send.\n`);
+}
+
 async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state, destinationSessions, telemetryFixture }) {
   await sourceSession.evaluate(`(() => {
     document.getElementById("context-generator-bubble").click();
@@ -2397,6 +2496,10 @@ async function run() {
     assert.deepEqual([state.summaryRequests.length, state.jsonRequests], preloadRequests,
       "Preparing UI before the first click must not start conversation work.");
     process.stdout.write("✓ Picker, logos and title font ready before window.load and the first click; no capture or summary request.\n");
+    if (GEMINI_LARGE_PASTE_SMOKE) {
+      await verifyGeminiLargePaste({ sourceSession, devToolsPort, origin, state, destinationSessions });
+      return;
+    }
     if (DOM_ESTIMATE_SMOKE) {
       const contextId = sourceSession.getExtensionContextId();
       const before = state.jsonRequests;

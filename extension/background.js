@@ -480,6 +480,15 @@ function sameTransferIdentity(first, second) {
     && first.sourcePlatform === second.sourcePlatform && first.destinationPlatform === second.destinationPlatform;
 }
 
+function mergePasteCheckpointEvents(first = [], second = []) {
+  if (!first.length && !second.length) return {};
+  const records = new Map();
+  for (const entry of [...first, ...second]) records.set(`${entry.event}:${entry.at_ms}:${entry.code || ""}`, entry);
+  const ordered = [...records.values()].sort((a, b) => a.at_ms - b.at_ms);
+  return { paste_events: ordered.length > 32 ? [...ordered.slice(0, 16), ...ordered.slice(-16)] : ordered,
+    ...(ordered.length > 32 ? { events_truncated: true } : {}) };
+}
+
 function mergeTransferTelemetryEvents(previous, next) {
   if (!previous) return next;
   // First terminal outcome wins as a unit: never produce failed + completed.
@@ -499,6 +508,7 @@ function mergeTransferTelemetryEvents(previous, next) {
     ...((previous.diagnostics || next.diagnostics) ? { diagnostics: {
       ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.lastStage) >= stages.indexOf(previous.lastStage)
         ? next.diagnostics || {} : {}),
+      ...mergePasteCheckpointEvents(previous.diagnostics?.paste_events, next.diagnostics?.paste_events),
       ...((previous.diagnostics?.json_attempts || next.diagnostics?.json_attempts) ? { version: 1,
         json_attempts: globalThis.CapTransferDiagnostics.mergeJsonAttempts(previous.diagnostics?.json_attempts, next.diagnostics?.json_attempts) } : {}),
       ...((previous.diagnostics?.summary_response_failures || next.diagnostics?.summary_response_failures) ? {
@@ -694,6 +704,46 @@ function recordDeliveryDiagnostics(attemptId, destinationId, sourceTab, diagnost
       || activeTransferSourceTabs.get(attemptId) !== sourceTab.id) return null;
     return { ...active, lastStage: "paste_started", diagnostics: { ...(active.diagnostics || {}), ...snapshot } };
   }).then(event => event && recordTransferTelemetry(event, sourceTab.id)).catch(() => {});
+}
+
+function recordPasteCheckpoint(message, sender) {
+  const steps = ["received", "editor_found", "inserted", "verified"];
+  const index = steps.indexOf(message.checkpoint);
+  const operation = transferOperations.get(message.transferId);
+  const target = operation?.pasteCheckpoint;
+  const active = activeTransferTelemetry.get(message.transferId);
+  if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)
+      || index < 0 || !target || target.tabId !== sender.tab.id || sender.tab.id === operation.sourceTabId
+      || target.destinationId !== message.destination || getPlatformFromUrl(sender.url || sender.tab.url) !== message.destination
+      || operation.controller.signal.aborted || operation.expiresAt <= Date.now()
+      || active?.status !== "started" || active.destinationPlatform !== message.destination
+      || activeTransferSourceTabs.get(message.transferId) !== operation.sourceTabId
+      || Object.keys(message).some(key => !["type", "transferId", "destination", "checkpoint", "diagnostics"].includes(key))) return false;
+  const safe = globalThis.CapTransferDiagnostics?.validate(message.diagnostics);
+  if (!safe || (index === 1 || index === 2) && safe.editor_seen !== true || index === 3 && safe.paste_populated !== true) return false;
+  // Each dispatched paste has four fixed observations. Duplicates and delayed
+  // earlier milestones cannot overwrite newer progress or flood the outbox.
+  if (target.seen.has(index) || index < target.lastIndex) return false;
+  target.seen.add(index);
+  target.lastIndex = index;
+  const snapshot = { version: 1, diagnostics_revision: 3, summary_chars: target.textChars };
+  const keys = ["document_ready_state", "visibility", "editor_seen", "editor_connected", "editor_kind", "editor_text_chars",
+    "composer_wait_ms", "paste_retry_limit_ms", "paste_verify_limit_ms", "paste_stability_ms", "paste_attempts", "editor_remounts",
+    "insertion_method", "paste_populated", "paste_stable", "draft_present", "user_handled", "page_load_ms", "destination_message_count",
+    "destination_auth_prompt", "paste_ms"];
+  for (const key of keys) if (safe[key] !== undefined) snapshot[key] = safe[key];
+  snapshot.last_operation = ["paste_start", "editor_wait", "paste_verify", "paste_complete"][index];
+  target.events.push({ event: snapshot.last_operation,
+    at_ms: safe.paste_ms ?? Math.max(0, Date.now() - target.startedAt) });
+  snapshot.paste_events = target.events.slice();
+  // Keep these observations in the delivery trace before queuing storage, so a
+  // lost final paste reply still carries them into the worker's failure report.
+  Object.assign(target.trace.diagnostics, snapshot,
+    mergePasteCheckpointEvents(target.trace.diagnostics?.paste_events, snapshot.paste_events));
+  return recordTransferTelemetry({ ...active, lastStage: "paste_started", diagnostics: {
+    ...(active.diagnostics || {}), ...snapshot,
+    ...mergePasteCheckpointEvents(active.diagnostics?.paste_events, snapshot.paste_events)
+  } }, operation.sourceTabId);
 }
 
 function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
@@ -901,6 +951,7 @@ function mergeTelemetryPayloads(previous, next) {
     ...((previous.diagnostics || next.diagnostics) ? { diagnostics: terminal
       ? previous.diagnostics || (next.status === previous.status && next.last_stage === previous.last_stage && next.failure_reason === previous.failure_reason ? next.diagnostics : undefined)
       : { ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.last_stage) >= stages.indexOf(previous.last_stage) ? next.diagnostics || {} : {}),
+        ...mergePasteCheckpointEvents(previous.diagnostics?.paste_events, next.diagnostics?.paste_events),
         ...((previous.diagnostics?.json_attempts || next.diagnostics?.json_attempts) ? { version: 1,
           json_attempts: globalThis.CapTransferDiagnostics.mergeJsonAttempts(previous.diagnostics?.json_attempts, next.diagnostics?.json_attempts) } : {}),
         ...((previous.diagnostics?.summary_response_failures || next.diagnostics?.summary_response_failures) ? {
@@ -1166,6 +1217,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "RECORD_TRANSFER_TELEMETRY") {
     recordTransferTelemetry(message.event, sender?.tab?.id)
+      .then(accepted => sendResponse({ ok: accepted === true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message?.type === "RECORD_PASTE_CHECKPOINT") {
+    Promise.resolve(recordPasteCheckpoint(message, sender))
       .then(accepted => sendResponse({ ok: accepted === true }))
       .catch(() => sendResponse({ ok: false }));
     return true;
@@ -2269,6 +2327,9 @@ async function pasteIntoDestinationTab(
   transferId = null,
   trace = null
 ) {
+  if (trace?.operation) trace.operation.pasteCheckpoint = {
+    tabId, destinationId, trace, textChars: text.length, startedAt: Date.now(), seen: new Set(), lastIndex: -1, events: []
+  };
   try {
     return await sendMessageWhenReady(
       tabId,
