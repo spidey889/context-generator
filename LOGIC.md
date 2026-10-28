@@ -883,3 +883,7 @@ Preserve these scenario distinctions:
 | Local checks pass, live evaluation fails | Exact subcommand, deployment commit/alias/environment and provider output | All validation modes check the same artifact or failure category |
 
 Current limits worth preserving in assessments: JSON checks cannot prove absence of unmarked server omissions; DOM role+text can lose real repetitions; summary validation cannot establish semantic grounding; paste verification allows 5% missing normalized words; telemetry can drop bounded old/capacity reports; automated browser evidence is Brave/fixture based. Report those practical boundaries when they affect a conclusion, rather than promoting a test pass into a broader product guarantee.
+
+### Local protected preview testing
+
+For a temporary unpacked-extension test, set a short-lived VERCEL_OIDC_TOKEN in the current process environment, then run `node scripts/set-local-preview-backend.js https://<exact-preview-host>.vercel.app` and reload the canonical extension. The helper grants only that host, routes summary and telemetry together, and stores the origin-bound token in ignored `extension/local-preview-auth.js`. Run `node scripts/set-local-preview-backend.js production` and reload afterward; this removes the local token and restores production. Firefox packaging refuses a preview configuration.

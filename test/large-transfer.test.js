@@ -80,12 +80,13 @@ test("large cancellation, malformed part receipts and expired work never reach f
 
 function backgroundFixture(fetchImpl) {
   const source = fs.readFileSync(path.join(__dirname, "../extension/background.js"), "utf8");
-  const code = source.slice(source.indexOf("async function summarizeLargeWithBackend("), source.indexOf("async function fetchSummaryFromBackend("));
+  const code = source.slice(source.indexOf("function localPreviewAuthHeaders("), source.indexOf("// Opening a page after removal")) +
+    source.slice(source.indexOf("async function summarizeLargeWithBackend("), source.indexOf("async function fetchSummaryFromBackend("));
   const active = { attemptId: transferId, status: "started", lastStage: "summary_request_started" };
   const telemetry = { attempt_id: transferId, character_count: 1000001, status: "started", last_stage: "summary_request_started" };
   const queued = [], proofs = new Map(), progress = [];
   const operation = { sourceTabId: 42, controller: new AbortController() };
-  const sandbox = { AbortController, TextEncoder, Date, setTimeout, clearTimeout,
+  const sandbox = { AbortController, TextEncoder, Date, URL, setTimeout, clearTimeout,
     CapLargeTransfer: large, SUMMARY_BACKEND_URL: "https://context-generator-five.vercel.app/api/summarize", SUMMARY_CLIENT_HEADER: "cap-context-extension/1",
     isUuid: value => value === transferId, nowMs: Date.now, startSummaryServiceWorkerKeepAlive: () => () => {},
     getPreparedSummaryTelemetry: () => telemetry, getOrCreateTelemetryInstallId: async () => "install",

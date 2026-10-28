@@ -2,7 +2,18 @@ if (!globalThis.CapTransferDiagnostics && typeof importScripts === "function") i
 // MV3 must discover worker dependencies during startup, before an event tries
 // to use them. Importing a new script lazily from a transfer event can fail.
 if (!globalThis.CapLargeTransfer && typeof importScripts === "function") importScripts("large-transfer.js");
+// This optional, ignored file exists only during an owner-run preview test.
+if (typeof importScripts === "function") { try { importScripts("local-preview-auth.js"); } catch {} }
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
+function localPreviewAuthHeaders(url) {
+  const auth = globalThis.CapLocalPreviewAuth;
+  try {
+    if (auth && new URL(url).origin === auth.origin && auth.origin !== "https://context-generator-five.vercel.app" &&
+        Number.isFinite(auth.expiresAt) && Date.now() < auth.expiresAt && typeof auth.token === "string" && auth.token)
+      return { "x-vercel-trusted-oidc-idp-token": auth.token };
+  } catch {}
+  return {};
+}
 // Opening a page after removal needs no host access. Keep this URL fixed and
 // anonymous; never add the form to manifest permissions or content-script matches.
 const UNINSTALL_FEEDBACK_URL = "https://docs.google.com/forms/d/e/1FAIpQLSdrKf4ajWa1BVa8Hs3yna2_qafP_RJoOPPytdWQ3HYDXh3aGw/viewform";
@@ -1112,6 +1123,7 @@ async function deliverTelemetryPayload(payload) {
       credentials: "omit",
       redirect: "error",
       headers: {
+        ...localPreviewAuthHeaders(TELEMETRY_ENDPOINT_URL),
         "Content-Type": "application/json",
         "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
       },
@@ -1688,7 +1700,7 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
           requestCount++;
           const response = await fetch(SUMMARY_BACKEND_URL.replace(/\/summarize$/, "/large-summary"), {
             method: "POST", credentials: "omit", redirect: "error", signal: controller.signal,
-            headers: { "Content-Type": "application/json", "Accept": "application/x-ndjson",
+            headers: { ...localPreviewAuthHeaders(SUMMARY_BACKEND_URL.replace(/\/summarize$/, "/large-summary")), "Content-Type": "application/json", "Accept": "application/x-ndjson",
               "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER }, body
           });
           fetchMs += nowMs() - fetchedAt;
@@ -1807,6 +1819,7 @@ async function fetchSummaryFromBackendOnce(conversationText, transferId = null, 
       credentials: "omit",
       redirect: "error", // Never forward conversation text to another origin on a redirect.
       headers: {
+        ...localPreviewAuthHeaders(SUMMARY_BACKEND_URL),
         "Content-Type": "application/json",
         "Accept": "application/x-ndjson",
         "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
