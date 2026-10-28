@@ -2,9 +2,12 @@ const { applyCorsHeaders, isValidPreflightRequest, isTrustedExtensionRequest, ac
 const { getHeader } = require("./request-validation");
 const protocol = require("./large-summary-protocol");
 const { createProviderFailureLog } = require("./provider-failure-log");
-const { createSummaryWithFallback, getSummaryProfile, getSummarySystemPrompt, createLongSummaryResponse } = require("./summarize").__test;
+const { createSummaryWithProvider, getInitialSummaryMessages, getProviderRequestBody,
+  getSummaryProfile, createLongSummaryResponse } = require("./summarize").__test;
 
-const MODEL = "deepseek-v4.1-flash:free";
+const MODEL = "nvidia/nemotron-3.5-super-vl:free";
+const PROVIDER = Object.freeze({ id: "openrouter", label: "OpenRouter",
+  url: "https://openrouter.ai/api/v1/chat/completions", allowNvidiaDataCollection: true });
 const REQUEST_TIMEOUT_MS = 75000;
 const LIMIT_KEY = Symbol.for("cap-context.large-summary-rate-limit.v1");
 
@@ -33,11 +36,8 @@ function finalConversation(parts) {
 }
 
 function providerBodyBytes(conversation, profile) {
-  // Match the existing provider envelope exactly, including its nested JSON
-  // escaping. A wire-size check alone does not bound this second encoding.
-  return Buffer.byteLength(JSON.stringify({ model: MODEL, temperature: 0.1, max_tokens: profile.maxTokens + 8192,
-    messages: [{ role: "system", content: getSummarySystemPrompt(profile) }, { role: "user", content: JSON.stringify({
-      schema: "cap-context-conversation-v1", dataType: "untrusted-conversation-transcript", conversation }) }], stream: true }), "utf8");
+  const body = getProviderRequestBody(PROVIDER, getInitialSummaryMessages(conversation, profile), profile, MODEL);
+  return Buffer.byteLength(JSON.stringify({ ...body, stream: true }), "utf8");
 }
 
 async function handler(req, res) {
@@ -51,8 +51,8 @@ async function handler(req, res) {
   const validation = protocol.validateRequest(req);
   if (!validation.ok) return res.status(validation.status).json({ code: validation.code, error: validation.error });
   const secret = process.env.TELEMETRY_SIGNING_KEY;
-  const apiKey = process.env.TOKENHARBOR_API_KEY?.trim() || process.env.TOKENHARBOR_BACKUP_API_KEY?.trim();
-  if (process.env.LARGE_SUMMARY_ENABLED === "false" || process.env.TOKENHARBOR_ENABLED === "false"
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (process.env.LARGE_SUMMARY_ENABLED === "false" || process.env.OPENROUTER_ENABLED === "false"
     || !apiKey || !protocol.validSecret(secret)) return res.status(503).json({ code: "summary_unavailable", error: "Large summary service is unavailable" });
   if (!consumeRateLimit(req)) { res.setHeader("Retry-After", "60"); return res.status(429).json({ code: "rate_limited", error: "Please retry later" }); }
   const part = validation.large.phase === "part";
@@ -77,18 +77,21 @@ async function handler(req, res) {
   const failures = createProviderFailureLog({ attemptId: validation.telemetry?.attempt_id, telemetry: validation.telemetry });
   try {
     controller.signal.throwIfAborted();
-    const result = await createSummaryWithFallback({ conversation, profile, tokenharborApiKey: apiKey, tokenharborEnabled: true,
+    const result = await createSummaryWithProvider({ provider: PROVIDER, model: MODEL, apiKey, profile,
+      initialMessages: getInitialSummaryMessages(conversation, profile), requestBudgetMs: REQUEST_TIMEOUT_MS,
       requestContext: { signal: controller.signal, maxAttempts: 1, firstAnswerTimeoutMs: REQUEST_TIMEOUT_MS,
+        inputChars: conversation.length, routeIndex: 1,
         // Upstream streams for its answer watchdog, but partial summaries never
         // leak into the destination or manufacture a completed transfer.
         onDelta() {}, onStart() {}, onProviderFailure: observation => failures.record(observation) } });
     controller.signal.throwIfAborted();
-    if (Date.now() - startedAt >= REQUEST_TIMEOUT_MS || result.model !== MODEL || result.provider !== "tokenharbor"
+    if (Date.now() - startedAt >= REQUEST_TIMEOUT_MS || result.model !== MODEL || result.provider !== "openrouter"
       || ["length", "max_tokens", "MAX_TOKENS"].includes(result.finishReason)
       || !result.summary?.trim() || result.summary.length > protocol.MAX_SUMMARY_CHARS) {
       return channel.send(502, { code: "summary_failed", error: "Conversation part could not be summarized" });
     }
-    const timing = { ...result, summary: undefined, totalMs: Date.now() - startedAt,
+    const timing = { ...result, summary: undefined, modelsTried: [MODEL], openrouterModelsTried: [MODEL],
+      openrouterMs: result.providerMs, totalMs: Date.now() - startedAt,
       inputChars: part ? conversation.length : validation.large.totalChars, outputChars: result.summary.length,
       parts: validation.large.total, phase: validation.large.phase };
     const response = { summary: result.summary, timing };

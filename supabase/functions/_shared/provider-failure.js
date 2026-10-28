@@ -3,7 +3,7 @@
 (function (root) {
   const models = {
     tokenharbor: ["deepseek-v4.1-flash:free"],
-    openrouter: ["dots-studio/dots-3-note-preview:free", "qwen/qwen3.8-27b:free", "google/gemma-4-26b-a4b-it:free"],
+    openrouter: ["dots-studio/dots-3-note-preview:free", "qwen/qwen3.8-27b:free", "google/gemma-4-26b-a4b-it:free", "nvidia/nemotron-3.5-super-vl:free"],
     gemini: ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
     mistral: ["ministral-14b-2512"]
   };

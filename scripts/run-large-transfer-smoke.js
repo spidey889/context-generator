@@ -28,14 +28,14 @@ async function scenario(failPart) {
   const requests = [], reports = [];
   let providerCalls = 0;
   const env = { ...process.env }, nativeFetch = global.fetch;
-  process.env.TOKENHARBOR_API_KEY = "synthetic-smoke-key";
+  process.env.OPENROUTER_API_KEY = "synthetic-smoke-key";
   process.env.TELEMETRY_SIGNING_KEY = "synthetic-large-transfer-smoke-signing-key-only";
-  process.env.TOKENHARBOR_ENABLED = "true";
+  process.env.OPENROUTER_ENABLED = "true";
   delete process.env.LARGE_SUMMARY_ENABLED;
   delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
   largeHandler.__test.resetRateLimit();
   global.fetch = async (input, options) => {
-    if (String(input).includes("tokenharbor")) {
+    if (String(input) === "https://openrouter.ai/api/v1/chat/completions") {
       providerCalls++;
       if (failPart) return new Response("synthetic provider rejection", { status: 503 });
       return new Response(JSON.stringify({ choices: [{ message: { content: finalSummary }, finish_reason: "stop" }] }), { status: 200 });
@@ -65,7 +65,10 @@ async function scenario(failPart) {
       res.end(url.pathname === "/destination"
         ? `<html><body><main><h1>ChatGPT transfer fixture</h1><form><textarea id="prompt-textarea" aria-label="Ask ChatGPT" style="width:90vw;height:60vh"></textarea><button type="button" id="send">Send</button></form></main><script>window.sendClicks=0;document.getElementById('send').onclick=()=>window.sendClicks++;</script></body></html>`
         : `<html><body><main><textarea placeholder="Message DeepSeek"></textarea></main><script>localStorage.setItem('userToken',JSON.stringify({value:'SYNTHETIC_TOKEN'}));</script></body></html>`);
-    } catch (error) { res.statusCode = 500; res.end("Synthetic fixture error"); console.error(error); }
+    } catch (error) {
+      if (req.aborted || res.destroyed) return; // Failed parts cancel sibling uploads.
+      res.statusCode = 500; res.end("Synthetic fixture error"); console.error(error);
+    }
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -86,7 +89,7 @@ async function scenario(failPart) {
     const context = await waitFor(() => source.getExtensionContextId(), "4M source extension");
     await waitFor(() => source.evaluate('typeof window.__capSmokeStartDomTransfer === "function"', context), "transfer helper");
     await source.evaluate("window.__capSmokeStartDomTransfer()", context);
-    const terminal = await waitFor(() => reports.find(r => ["failed", "succeeded"].includes(r.status)), "4M terminal report", 30000);
+    const terminal = await waitFor(() => reports.find(r => ["failed", "succeeded"].includes(r.status)), "4M terminal report", 60000);
     assert.equal(terminal.status, failPart ? "failed" : "succeeded", `Unexpected transfer outcome: ${terminal.failure_reason}`);
     assert.equal(terminal.character_count, transcript.length);
     assert.ok(requests.length >= 1);

@@ -10,6 +10,7 @@ async function checkProviderFailures(db, sql, migrations) {
   // This replay boundary predates the million-character admission migration.
   const historicalSchema = structuredClone(contract.schema);
   historicalSchema.input_chars.max = 350000;
+  historicalSchema.model.values = historicalSchema.model.values.filter(model => model !== "nvidia/nemotron-3.5-super-vl:free");
   equal(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);
   equal((await rows("select relrowsecurity from pg_class where oid='public.provider_failures'::regclass"))[0].relrowsecurity, true);
   for (const role of ["anon", "authenticated"]) {

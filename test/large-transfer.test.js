@@ -15,7 +15,7 @@ test("large partitions cover exact Unicode/CRLF input once and stay below both J
     for (const part of parts) {
       assert.equal(part.offset, offset);
       offset += part.conversation.length;
-      assert.ok(part.conversation.length <= 750000);
+      assert.ok(part.conversation.length <= 500000);
       assert.ok(Buffer.byteLength(JSON.stringify({ conversation: part.conversation })) <= 2700000);
       assert.ok(Buffer.byteLength(JSON.stringify(JSON.stringify({ conversation: part.conversation }))) <= 3500000);
       assert.doesNotMatch(part.conversation, /[\uD800-\uDBFF]$/);
@@ -40,15 +40,15 @@ test("large summaries wait for every bounded part and finalize in source order",
         return { summary: `Part ${payload.large.index}`, receipt: `proof-${payload.large.index}` };
       }
       assert.equal(active, 0);
-      assert.deepEqual(payload.parts, Array.from({ length: 6 }, (_, index) => ({ summary: `Part ${index}`, receipt: `proof-${index}` })));
+      assert.deepEqual(payload.parts, Array.from({ length: 8 }, (_, index) => ({ summary: `Part ${index}`, receipt: `proof-${index}` })));
       return { summary: "Complete handoff", summaryProofV3: "a".repeat(64) };
     } });
-  assert.equal(result.partCount, 6);
+  assert.equal(result.partCount, 8);
   assert.equal(result.summary, "Complete handoff");
   assert.ok(peak <= 3 && peak > 1);
   assert.equal(calls.filter(call => call.large.phase === "final").length, 1);
   assert.equal(calls.filter(call => call.large.phase === "part").map(call => call.conversation).join(""), input);
-  assert.deepEqual(progress.at(-1), { completed: 6, total: 6, phase: "final" });
+  assert.deepEqual(progress.at(-1), { completed: 8, total: 8, phase: "final" });
 });
 
 test("a failed part cancels siblings and cannot finalize a partial handoff", async () => {
@@ -119,10 +119,10 @@ test("background uses only the separate endpoint and persists only a complete fi
     }
     assert.equal(state.queued.length, 0);
     return { ok: true, json: async () => ({ summary: "final handoff", summaryProofV3: "a".repeat(64),
-      summaryConfirmedAt: "2026-10-29T12:00:00Z", summaryModel: "deepseek-v4.1-flash:free", timing: { model: "deepseek-v4.1-flash:free" } }) };
+      summaryConfirmedAt: "2026-10-29T12:00:00Z", summaryModel: "nvidia/nemotron-3.5-super-vl:free", timing: { model: "nvidia/nemotron-3.5-super-vl:free" } }) };
   });
   const result = await state.run();
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 4);
   assert.equal(result.summary, "final handoff");
   assert.equal(state.queued.length, 1);
   assert.equal(state.queued[0].last_stage, "summary_completed");

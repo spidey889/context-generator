@@ -31,7 +31,7 @@ const TELEMETRY_MAX_REQUEST_BYTES = 24576;
 // Reports are diagnostics, not HMAC-authenticated model attribution. Keep this
 // bounded catalog aligned with the worker, Edge and configured summary routes.
 const REPORTED_MODELS = new Set(["local-direct", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512",
-  "inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free", "claude-haiku-5.5:free", "deepseek-v4.1-flash:free"]);
+  "inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free", "claude-haiku-5.5:free", "deepseek-v4.1-flash:free", "nvidia/nemotron-3.5-super-vl:free"]);
 const { getHeader, invalid, parseBoundedJsonBody } = require("./request-validation");
 const TELEMETRY_KEYS = new Set([
   "attempt_id",

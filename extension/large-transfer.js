@@ -2,7 +2,9 @@
 // Text/part receipts live only for this attempt; none enter persistent telemetry.
 (function (root) {
   const encoder = new TextEncoder();
-  const MAX_CHARS = 4000000, MAX_BYTES = 16000000, PART_CHARS = 750000, MAX_PARTS = 16;
+  // Super VL completed the 500k synthetic case; larger pieces leave less time
+  // for completion on the free endpoint. The server retains its hard 750k cap.
+  const MAX_CHARS = 4000000, MAX_BYTES = 16000000, PART_CHARS = 500000, MAX_PARTS = 16;
   const failure = code => Object.assign(new Error("Large-chat summarization could not finish. The full conversation is available to copy."),
     { code, diagnosticCode: code });
   const wireBytes = value => encoder.encode(JSON.stringify(value)).length;

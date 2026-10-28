@@ -132,10 +132,10 @@ async function checkStoreModelReceipts(db) {
     return response;
   };
   const counts = async () => (await db.query("select lifetime_summaries::int as total,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id=$1", [install])).rows[0];
-  for (const [index, model] of ["local-direct", "inclusionai/ling-3.1-flash", "gemini-3.5-flash-lite", "dots-studio/dots-3-note-preview:free"].entries()) {
+  for (const [index, model] of ["local-direct", "inclusionai/ling-3.1-flash", "gemini-3.5-flash-lite", "dots-studio/dots-3-note-preview:free", "nvidia/nemotron-3.5-super-vl:free"].entries()) {
     const event = { attempt_id: `c0de5706-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       install_id: install, attempted_at: attempted, source_platform: "chatgpt", destination_platform: "claude",
-      character_count: 5000, status: "started", last_stage: "summary_completed", failure_reason: null,
+      character_count: model.startsWith("nvidia/") ? 4000000 : 5000, status: "started", last_stage: "summary_completed", failure_reason: null,
       extension_version: "1.4.8", summary_confirmed_at: attempted };
     const summary_proof = await createSummaryProof({ ...event, model }, secret);
     const oldWorker = { ...event, summary_proof }; // No model field survives the old worker.

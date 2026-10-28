@@ -30,10 +30,10 @@ function response() {
 function setup(t, fetchImpl) {
   const env = { ...process.env }, originalFetch = global.fetch;
   process.env.TELEMETRY_SIGNING_KEY = secret;
-  process.env.TOKENHARBOR_API_KEY = "test-primary";
-  process.env.TOKENHARBOR_BACKUP_API_KEY = "test-backup";
+  process.env.OPENROUTER_API_KEY = "test-primary";
+  process.env.TOKENHARBOR_API_KEY = "test-other-provider-must-not-run";
   delete process.env.LARGE_SUMMARY_ENABLED;
-  delete process.env.TOKENHARBOR_ENABLED;
+  delete process.env.OPENROUTER_ENABLED;
   delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
   global.fetch = fetchImpl || (async () => new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }), { status: 200 }));
   handler.__test.resetRateLimit(); resetRequestSecurityForTests();
@@ -93,7 +93,7 @@ test("part receipts reject forgery, changed summaries, reordered, gapped, missin
     "ordinary progress does not change original identity");
 });
 
-test("parts use only one TokenHarbor request and return no completed-summary proof", async t => {
+test("parts use only one NVIDIA OpenRouter request and return no completed-summary proof", async t => {
   const calls = [];
   setup(t, async (url, options) => {
     calls.push({ url, options });
@@ -103,10 +103,15 @@ test("parts use only one TokenHarbor request and return no completed-summary pro
   await handler(request({ conversation: "a".repeat(600000), large: metadata, telemetry }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "https://tokenharbor.ai/v1/chat/completions");
+  assert.equal(calls[0].url, "https://openrouter.ai/api/v1/chat/completions");
   const provider = JSON.parse(calls[0].options.body);
-  assert.equal(provider.model, "deepseek-v4.1-flash:free");
+  assert.equal(provider.model, "nvidia/nemotron-3.5-super-vl:free");
   assert.equal(provider.stream, true);
+  assert.equal(provider.temperature, 1);
+  assert.equal(provider.top_p, 0.95);
+  assert.deepEqual(provider.reasoning, { enabled: false, exclude: true });
+  assert.deepEqual(provider.plugins, [{ id: "context-compression", enabled: false }]);
+  assert.deepEqual(provider.provider, { require_parameters: true, data_collection: "allow", max_price: { prompt: 0, completion: 0, request: 0 } });
   assert.equal(calls[0].options.headers.Authorization, "Bearer test-primary");
   assert.ok(Buffer.byteLength(calls[0].options.body) <= 3800000);
   assert.ok(res.body.receipt);
@@ -128,7 +133,7 @@ test("only a verified complete final consolidation receives one original-transfe
   assert.match(calls[0].messages[1].content, /Conversation part 2 of 2/);
   assert.equal(res.body.receipt, undefined);
   assert.match(res.body.summaryProofV3, /^[0-9a-f]{64}$/);
-  assert.equal(res.body.summaryModel, "deepseek-v4.1-flash:free");
+  assert.equal(res.body.summaryModel, "nvidia/nemotron-3.5-super-vl:free");
   const { verifySummaryReceipt } = await import("../supabase/functions/_shared/summary-proof.mjs");
   assert.deepEqual(await verifySummaryReceipt({ ...telemetry, summary_proof: res.body.summaryProofV3,
     summary_confirmed_at: res.body.summaryConfirmedAt, model: res.body.summaryModel }, secret), { model: res.body.summaryModel });
@@ -143,19 +148,18 @@ test("forged final receipts stop before any provider work", async t => {
   assert.equal(res.statusCode, 400); assert.equal(res.body.code, "invalid_parts"); assert.equal(calls, 0);
 });
 
-test("disabled, unconfigured and backup-only routes fail closed or use the single permitted key", async t => {
-  let calls = 0; setup(t, async (_url, options) => {
-    calls++; assert.equal(options.headers.Authorization, "Bearer test-backup");
-    return new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }), { status: 200 });
-  });
+test("large beta disablement and missing OpenRouter credentials cannot route elsewhere", async t => {
+  let calls = 0; setup(t, async () => { calls++; throw new Error("No provider work allowed"); });
   const body = { conversation: "a".repeat(600000), large: metadata };
   process.env.LARGE_SUMMARY_ENABLED = "false";
   const disabled = response(); await handler(request(body), disabled); assert.equal(disabled.statusCode, 503);
   delete process.env.LARGE_SUMMARY_ENABLED;
-  delete process.env.TOKENHARBOR_API_KEY; delete process.env.TOKENHARBOR_BACKUP_API_KEY;
+  process.env.OPENROUTER_ENABLED = "false";
+  const gatewayDisabled = response(); await handler(request(body), gatewayDisabled); assert.equal(gatewayDisabled.statusCode, 503);
+  delete process.env.OPENROUTER_ENABLED;
+  delete process.env.OPENROUTER_API_KEY;
   const missing = response(); await handler(request(body), missing); assert.equal(missing.statusCode, 503);
-  process.env.TOKENHARBOR_BACKUP_API_KEY = "test-backup";
-  const backup = response(); await handler(request(body), backup); assert.equal(backup.statusCode, 200); assert.equal(calls, 1);
+  assert.equal(calls, 0, "Configured TokenHarbor credentials cannot substitute for NVIDIA.");
 });
 
 test("provider failure and refusal never become signed partial summaries or retries", async t => {
@@ -244,6 +248,22 @@ test("short last parts and compact final handoffs retain a remote answer allowan
   await handler(request(finalBody()), final);
   assert.equal(final.statusCode, 200);
   assert.equal(requests.length, 2);
-  assert.equal(requests[0].max_tokens, 1900 + 8192, "A short tail still gets answer tokens.");
-  assert.equal(requests[1].max_tokens, 10000 + 8192, "Compact part summaries must not shrink the original large chat's final answer allowance.");
+  assert.equal(requests[0].max_tokens, 1900, "A short tail still gets answer tokens.");
+  assert.equal(requests[1].max_tokens, 10000, "Compact part summaries must not shrink the original large chat's final answer allowance.");
+});
+
+test("the NVIDIA beta exception does not change ordinary OpenRouter routing or its data policy", () => {
+  const shared = require("../api/summarize").__test;
+  const profile = shared.getSummaryProfile("x".repeat(1000000));
+  const messages = shared.getInitialSummaryMessages("ordinary chat", profile);
+  const model = "nvidia/nemotron-3.5-super-vl:free";
+  const ordinary = shared.getProviderRequestBody({ id: "openrouter" }, messages, profile, model);
+  assert.equal(ordinary.provider.data_collection, "deny", "The model ID alone cannot opt into collection.");
+  assert.equal(ordinary.temperature, 0.1);
+  assert.equal(ordinary.top_p, undefined);
+  const unrelated = shared.getProviderRequestBody({ id: "openrouter", allowNvidiaDataCollection: true }, messages, profile,
+    "dots-studio/dots-3-note-preview:free");
+  assert.equal(unrelated.provider.data_collection, "deny");
+  assert.equal(unrelated.temperature, 0.1);
+  assert.ok(shared.getConfiguredSummaryRoutes({ openrouterApiKey: "test", largeInput: true }).every(route => route.model !== model));
 });
