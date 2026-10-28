@@ -6,6 +6,7 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-28
 
+- **Prepare source 1.4.34.** Bump the extension version with the merged capture and handoff animation fixes. Backend deployment and Chrome Web Store publication remain separate.
 - **Keep handoff bars moving and finish smoothly.** Replace the summary line's fixed transition, which stopped at its estimate, with continuous bounded activity. On real completion, glide from the visible position to the end without a next-stage update cancelling the animation. Preserve the existing design, capture/summary work, local sweeps, reduced motion and destination timing.
 - **Show capture in the handoff instead of the picker.** Destination selection now opens the existing handoff while native JSON is still loading. Its capture line moves gently below completion, then continues into summarizing after capture succeeds. Preserve prefetched reads, reduced motion, short local carries and cancellation; DOM recovery keeps its normal interpolation without moving backwards.
 - **Reject replies about the summarizer's own thinking.** An observed large-chat summary refused to reproduce reasoning, then described its thought process; the existing content check accepted its bullets. Reject this recognizable opening, try the next configured provider with the complete transcript and retain exact local recovery if routes fail. Keep quoted refusals and useful short/mixed context deliverable; no prompt, model, limit or schema changes.
