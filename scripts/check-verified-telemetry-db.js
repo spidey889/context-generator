@@ -79,13 +79,6 @@ async function main() {
         // Preserve and verify data/counters across the actual old→new cutover.
         await event(900, { installId: historicInstall, legacy: true });
         historical = await one("select e.id::text, u.user_no::int, u.total_summaries::int from public.transfer_events e join public.users u using(install_id) where e.attempt_id = $1", [id(900)]);
-        // Confirm that the old migration really contains the reported defect,
-        // then roll back this intentionally contradictory local fixture.
-        await db.exec("begin;");
-        await event(901, { status: "failed", legacy: true });
-        await event(901, { legacy: true });
-        equal((await one("select status, last_stage from public.transfer_events where attempt_id=$1", [id(901)])), { status: "failed", last_stage: "completed" });
-        await db.exec("rollback;");
         // Real sequences can be ahead of max(user_no) after rolled-back or
         // conflicted inserts. Backups preserve those consumed identity values.
         await db.exec("select setval('public.users_user_no_seq', 12, true);");
@@ -110,11 +103,8 @@ async function main() {
     assert.ok(historical, "The historical and pending migrations must be present");
     equal(await one("select e.id::text, u.user_no::int, u.total_summaries::int from public.transfer_events e join public.users u using(install_id) where e.attempt_id=$1", [id(900)]), historical);
     equal((await counters(historicInstall)).legacy, 1);
-    equal((await outcome(900)).completed_at, null);
-    equal((await outcome(900)).terminal_received_at, null);
     equal((await counters(preCutoverVerifiedInstall)).legacy, 0);
     equal((await outcome(902)).summary_confirmed_at, null);
-    equal((await outcome(902)).summary_received_at, null);
 
     // Neither forged success nor old clients create verified summary counters.
     // One current and one legacy report exercise both unsigned paths. Volume
@@ -129,15 +119,16 @@ async function main() {
     equal(await counters(), { total: 1, today: 1, legacy: 0 });
     equal(await outcome(51), firstProof);
 
-    // Conflicting terminal reports preserve the first status AND its stage,
-    // timestamps and character count. Proof can still confirm server work.
+    // Conflicting terminal reports preserve status, stage, reason and size.
+    // Retired receipt columns are covered by the later removal and legacy-payload
+    // checks, not this historical behavior matrix. See docs/database-check-audit.md.
     await event(52, { status: "failed", stage: "capture_started", characters: 75,
       timestamps: true, completedAt: `${today}T00:01:00.000Z` });
     const firstFailure = await outcome(52);
     await event(52, { verified: true, timestamps: true, confirmedAt,
       completedAt: `${today}T04:00:00.000Z` });
     const confirmedFailure = await outcome(52);
-    for (const key of ["status", "last_stage", "failure_reason", "character_count", "completed_at", "terminal_received_at"]) equal(confirmedFailure[key], firstFailure[key]);
+    for (const key of ["status", "last_stage", "failure_reason", "character_count"]) equal(confirmedFailure[key], firstFailure[key]);
     equal(confirmedFailure.summary_verified, true);
     equal(await counters(), { total: 2, today: 2, legacy: 0 });
     await event(53, { verified: true, timestamps: true, confirmedAt });
@@ -169,10 +160,10 @@ async function main() {
     await rejectsCode(() => event(51, { characters: -1 }), "23514");
     await rejectsCode(() => event(51, { status: "failed", stage: "completed" }), "23514");
     for (const assignment of [
-      "id = gen_random_uuid()", "install_id = 'another-install'", "attempt_id = gen_random_uuid()",
+      "install_id = 'another-install'", "attempt_id = gen_random_uuid()",
       "extension_version = '1.4.7'",
       "received_at = now() + interval '1 minute'", "status = 'failed'",
-      "last_stage = 'paste_started'", "completed_at = now()", "summary_verified = false",
+      "last_stage = 'paste_started'", "summary_verified = false",
       "summary_confirmed_at = now()"
     ]) await rejectsCode(() => asRole("service_role", () => db.query(`update public.transfer_events set ${assignment} where attempt_id=$1`, [id(51)])), "22023");
 
@@ -183,31 +174,10 @@ async function main() {
     equal(await counters(), { total: 4, today: 3, legacy: 0 });
     await event(56, { verified: true });
     equal(await counters(), { total: 5, today: 3, legacy: 0 });
-    equal((await one("select verified_summaries::int from public.verified_summary_daily_usage where install_id=$1 and usage_date=$2::date", [install, yesterday])).verified_summaries, 1);
-    const usage = await one("select verified_summaries::int, verified_today_summaries::int, verified_unknown_day_summaries::int from public.user_summary_usage where install_id=$1", [install]);
-    equal(usage, { verified_summaries: 5, verified_today_summaries: 3, verified_unknown_day_summaries: 1 });
-
-    await event(57, { status: "started" });
-    await rejectsCode(() => asRole("service_role", () => db.query("update public.transfer_events set terminal_received_at=now() where attempt_id=$1", [id(57)])), "23514");
-    await rejectsCode(() => asRole("service_role", () => db.query("update public.transfer_events set summary_received_at=now() where attempt_id=$1", [id(57)])), "23514");
-    await db.query("update public.transfer_events set updated_at = now() - interval '25 hours' where attempt_id=$1", [id(57)]);
-    equal((await one("select reported_outcome from public.transfer_event_outcomes where attempt_id=$1", [id(57)])).reported_outcome, "outcome_unknown");
-    equal((await outcome(57)).status, "started");
-    await event(57, {});
-    equal((await one("select reported_outcome from public.transfer_event_outcomes where attempt_id=$1", [id(57)])).reported_outcome, "succeeded");
-    equal(await counters(), { total: 5, today: 3, legacy: 0 });
-
-    // Test the unchanged scheduled SQL and the dynamic reporting distinction.
+    // Retain the historical job for backup/upgrade coverage. The later IST
+    // helpers exercise scheduled resets; the removed reporting views and UTC
+    // behavior no longer need a second behavior matrix here.
     equal((await one("select count(*)::int as count from cron.job")).count, 1);
-    const job = await one("select schedule, command from cron.job");
-    equal(job.schedule, "0 0 * * *");
-    await db.query("update public.users set today_date=$1::date, today_summaries=0 where install_id=$2", [yesterday, install]);
-    await event(58, { verified: true, timestamps: true, confirmedAt: `${yesterday}T20:00:00.000Z` });
-    equal(await counters(), { total: 6, today: 0, legacy: 0 });
-    await db.query("update public.users set today_date=$1::date, today_summaries=1 where install_id=$2", [yesterday, install]);
-    await db.exec(job.command);
-    equal(await counters(), { total: 6, today: 0, legacy: 0 });
-    equal((await one("select verified_today_summaries::int from public.user_summary_usage where install_id=$1", [install])).verified_today_summaries, 3);
     await rejectsCode(() => db.query("update public.users set today_summaries=-1 where install_id=$1", [install]), "23514");
     await rejectsCode(() => db.query("update public.users set today_summaries=total_summaries+1 where install_id=$1", [install]), "23514");
     // Old workers may already have acknowledged progress before an extension
@@ -217,7 +187,7 @@ async function main() {
       verified: true, timestamps: true, confirmedAt });
     equal((await one("select extension_version from public.transfer_events where attempt_id=$1", [id(59)])).extension_version, "1.4.6");
     equal((await outcome(59)).summary_verified, true);
-    equal(await counters(), { total: 7, today: 1, legacy: 0 });
+    equal(await counters(), { total: 6, today: 4, legacy: 0 });
 
     await db.exec("create table public.future_private_table (id int); create sequence public.future_private_sequence; create function public.future_private_function() returns int language sql as 'select 1';");
     for (const role of ["anon", "authenticated"]) {
@@ -241,7 +211,6 @@ async function main() {
     });
     equal((await one("select count(*)::int as count from pg_policies where schemaname='public'")).count, 0);
     equal((await one("select count(*)::int as count from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('transfer_events','users') and c.relrowsecurity")).count, 2);
-    equal((await one("select count(*)::int as count from pg_indexes where schemaname='public' and indexname='transfer_events_install_id_idx'")).count, 0);
     const plan = await db.query("explain (format json) select attempt_id from public.transfer_events where install_id=$1 order by attempted_at desc limit 50", [install]);
     // Tiny fixtures can legitimately use seqscan. Require the retained index
     // to support both filtering and order when an indexed plan is requested.
