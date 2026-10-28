@@ -3443,8 +3443,89 @@ test("handoff copy starts clipboard access on click, waits for revocation and ig
   assert.equal(trace.completed, true);
   assert.equal(button.style.display, "none");
   assert.equal(button.onclick, null, "Hidden action must release its prepared carry closure.");
+  const recovery = messages.filter(message => message.type === "RECORD_RECOVERY_CHECKPOINT");
+  assert.deepEqual(recovery.map(message => [message.checkpoint, message.surface, message.method, message.stopConfirmed]),
+    [["copy_started", "handoff_copy", "clipboard", undefined], ["copy_succeeded", "handoff_copy", "clipboard", true]]);
+  assert.equal(recovery[0].transferId, trace.id);
+  assert.equal(recovery[0].destination, "grok");
+  assert.doesNotMatch(JSON.stringify(recovery), /Complete prepared carry|Keep whitespace/);
   assert.ok(hooks.beginTransferAttempt("grok", "after copy"));
   hooks.resetRunningFlag();
+});
+
+clockTest("a still-pending handoff clipboard call is logged as unconfirmed, never failed", async () => {
+  const messages = [];
+  const hooks = loadPlatformContent([], "claude.ai", {
+    clipboardWrite: () => new Promise(() => {}),
+    runtimeSendMessage: message => { messages.push(message); return Promise.resolve({ ok: true }); }
+  });
+  const button = new FakeElement({ tag: "button" });
+  hooks.registerElementId("context-generator-handoff-copy", button);
+  hooks.registerElementId("context-generator-fallback-modal", new FakeElement());
+  const trace = hooks.beginTransferAttempt("gemini", "test");
+  hooks.startPasteHandoff(trace, "PRIVATE carry");
+  await button.onclick();
+  const recovery = messages.filter(message => message.type === "RECORD_RECOVERY_CHECKPOINT");
+  assert.deepEqual(recovery.map(message => message.checkpoint), ["copy_started", "copy_unconfirmed", "box_shown"]);
+  assert.equal(recovery[1].stopConfirmed, true);
+  assert.equal(recovery.some(message => message.checkpoint === "copy_failed"), false);
+  assert.doesNotMatch(JSON.stringify(recovery), /PRIVATE/);
+});
+
+function installRecoveryDialogDom(hooks) {
+  const create = tag => {
+    const node = new FakeElement({ tag });
+    const listeners = new Map();
+    let id = "";
+    Object.defineProperty(node, "id", { get: () => id, set: value => { id = value; hooks.registerElementId(id, node); } });
+    node.style.getPropertyValue = () => "";
+    node.style.setProperty = (key, value) => { node.style[key] = value; };
+    node.addEventListener = (type, handler) => { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(handler); };
+    node.removeEventListener = (type, handler) => listeners.get(type)?.delete(handler);
+    node.click = () => listeners.get("click")?.forEach(handler => handler({ target: node, stopPropagation() {} }));
+    node.remove = () => { node.isConnected = false; if (id) hooks.registerElementId(id, null); };
+    node.select = () => { node.selected = true; };
+    return node;
+  };
+  hooks.document.head = create("head");
+  hooks.document.createElement = create;
+  hooks.document.createElementNS = (_namespace, tag) => create(tag);
+}
+
+clockTest("copy recovery reports actual clipboard or native outcomes after the transfer has finished", async () => {
+  for (const [clipboardWorks, nativeWorks, checkpoint, method] of [
+    [true, false, "copy_succeeded", "clipboard"],
+    [false, true, "copy_succeeded", "native"],
+    [false, false, "copy_failed", "manual_selection"]
+  ]) {
+    const messages = [], clipboard = [];
+    const hooks = loadPlatformContent([], "claude.ai", {
+      clipboardWrite: text => { clipboard.push(text); return clipboardWorks ? Promise.resolve() : Promise.reject(new Error("PRIVATE clipboard error")); },
+      runtimeSendMessage: message => {
+        messages.push(message);
+        return message.type === "RECORD_RECOVERY_CHECKPOINT" ? new Promise(() => {}) : Promise.resolve({ ok: true });
+      }
+    });
+    installRecoveryDialogDom(hooks);
+    hooks.document.execCommand = command => command === "copy" && nativeWorks;
+    const trace = hooks.beginTransferAttempt("gemini", "test");
+    hooks.finishTransferTrace(trace, "paste_failed");
+    hooks.showContextTransferFailure({ code: "paste_unconfirmed" }, {
+      stage: "paste", destinationId: "gemini", transferId: trace.id, summary: "PRIVATE complete carry"
+    });
+    hooks.document.getElementById("context-generator-fallback-copy").click();
+    await new Promise(setImmediate);
+    const recovery = messages.filter(message => message.type === "RECORD_RECOVERY_CHECKPOINT");
+    assert.deepEqual(recovery.map(message => message.checkpoint), ["box_shown", "copy_started", ...(!clipboardWorks ? ["copy_started"] : []), checkpoint]);
+    assert.equal(recovery.at(-1).method, method);
+    assert.equal(recovery.at(-1).transferId, trace.id);
+    assert.deepEqual(clipboard, ["PRIVATE complete carry"]);
+    assert.equal(hooks.document.getElementById("context-generator-fallback-copy").textContent,
+      nativeWorks || clipboardWorks ? "Copied!" : "Select text and copy manually");
+    assert.doesNotMatch(JSON.stringify(recovery), /PRIVATE|complete carry/);
+    assert.equal(trace.completed, true, "Copy feedback never reopens or changes the terminal transfer.");
+    hooks.resetRunningFlag();
+  }
 });
 
 test("pending manual copy cannot show stale feedback after source navigation", async () => {

@@ -20,6 +20,7 @@ async function checkTokenHarbor(db, sql, model = "claude-haiku-5.5:free") {
   historicalSchema.capture_detail.values = historicalSchema.capture_detail.values.filter(value => value !== "invalid_utf8");
   delete historicalSchema.destination_auth_prompt;
   delete historicalSchema.summary_response_failures;
+  delete historicalSchema.recovery_events;
   equal(JSON.parse(definition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);
   equal(await rows(`select public.is_valid_transfer_diagnostics('{"version":1,"summary_failed_provider":"tokenharbor"}') as valid,
     public.is_valid_transfer_diagnostics('{"version":1,"summary_failed_provider":"PRIVATE"}') as invalid`), [{ valid: true, invalid: false }]);

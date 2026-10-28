@@ -13,11 +13,16 @@ const SUMMARY = "CONTEXT CARRY — READY TO PASTE\n\nWHAT WE WERE DOING\nTesting
 
 async function run() {
   let destinations = 0, summaryRequests = 0;
+  const telemetryRequests = [];
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "POST") {
-      for await (const _chunk of req) { /* Drain synthetic requests. */ }
-      if (url.pathname === "/api/telemetry") { res.writeHead(204); res.end(); return; }
+      const chunks = [];
+      for await (const chunk of req) if (url.pathname === "/api/telemetry") chunks.push(chunk);
+      if (url.pathname === "/api/telemetry") {
+        telemetryRequests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        res.writeHead(204); res.end(); return;
+      }
       summaryRequests++;
       res.setHeader("Content-Type", "application/json");
       setTimeout(() => res.end(JSON.stringify({ summary: SUMMARY })), 250);
@@ -85,6 +90,7 @@ async function run() {
       await source.evaluate("document.getElementById('context-generator-fallback-dismiss')?.click()");
       const before = destinations;
       const summariesBefore = summaryRequests;
+      const telemetryBefore = telemetryRequests.length;
       await source.evaluate(`window.__handoffStart(${JSON.stringify(scenario)})`, context);
       if (scenario === "copy") assert.equal(await source.evaluate("document.getElementById('context-generator-handoff-copy').style.display"), "none", "Copy must stay unavailable during the pending summary.");
       await waitFor(() => source.evaluate("document.getElementById('context-generator-handoff-copy')?.style.display === 'inline-flex'"), "ready handoff copy action");
@@ -173,6 +179,18 @@ async function run() {
       assert.equal(await destination.evaluate("window.sendClicks"), 0);
       assert.equal(destinations, before + 1, "No second destination or retry after manual takeover.");
       if (scenario.startsWith("clipboard-failure")) assert.equal(summaryRequests, summariesBefore, "A local carry never requests a summary.");
+      if (["copy", "clipboard-failure", "clipboard-failure-after-insert", "stop-unconfirmed"].includes(scenario)) {
+        const expectedEvent = scenario.startsWith("clipboard-failure") ? "copy_failed" : "copy_succeeded";
+        const report = await waitFor(() => telemetryRequests.slice(telemetryBefore).findLast(payload =>
+          payload.diagnostics?.recovery_events?.some(entry => entry.event === expectedEvent && entry.surface === "handoff_copy")),
+        "the independent manual-copy recovery report");
+        const observed = report.diagnostics.recovery_events.find(entry => entry.event === expectedEvent && entry.surface === "handoff_copy");
+        assert.equal(observed.side, "source");
+        assert.equal(observed.method, "clipboard");
+        if (scenario === "copy") assert.equal(observed.stop_confirmed, true);
+        if (scenario === "stop-unconfirmed") assert.equal(observed.stop_confirmed, undefined);
+        assert.doesNotMatch(JSON.stringify(report.diagnostics), /Verified synthetic conversation|Testing a manual handoff|Preserve this exact short conversation/);
+      }
       console.log(`PASS handoff ${scenario}: complete text, preserved destination, no late paste, no Send.`);
     }
     assert.equal(summaryRequests, 1, "The existing summary cache is reused by later attempts.");

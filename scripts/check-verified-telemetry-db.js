@@ -95,6 +95,7 @@ async function main() {
         await event(902, { installId: preCutoverVerifiedInstall, verified: true });
       }
       const sql = fs.readFileSync(path.join(directory, name), "utf8")
+        .replace(/\r\n/g, "\n")
         .replace("create extension if not exists pg_cron with schema pg_catalog;", "-- Local cron catalog shim.");
       await db.exec(sql);
       appliedMigrations.push({ version: name.slice(0, 14), name: name.slice(15, -4),
@@ -239,7 +240,9 @@ async function main() {
     equal(restoredBackup.capturedCronJobsRestored, false);
     const { checkMinimalUsers } = require("./check-minimal-users-db.js");
     for (const name of names.filter(name => name.slice(0, 14) > "20261002073711")) {
-      const sql = fs.readFileSync(path.join(directory, name), "utf8");
+      // Historical patches compare function-body fragments with LF newlines.
+      // Normalize the replay input, never the recorded migration files.
+      const sql = fs.readFileSync(path.join(directory, name), "utf8").replace(/\r\n/g, "\n");
       appliedMigrations.push({ version: name.slice(0, 14), name: name.slice(15, -4), statements: [sql] });
       if (name.endsWith("_minimal_users_and_reset.sql")) checks += await checkMinimalUsers(db, sql, appliedMigrations);
       else if (name.endsWith("_format_users_and_famous_names.sql")) {
@@ -399,6 +402,7 @@ async function main() {
         equal(JSON.parse(updated.match(pattern)[1]), { ...JSON.parse(original.match(pattern)[1]), destination_auth_prompt: { type: "boolean" } });
         const historicalSchema = structuredClone(require("../extension/transfer-diagnostics.js").schema);
         delete historicalSchema.summary_response_failures;
+        delete historicalSchema.recovery_events;
         historicalSchema.capture_detail.values = historicalSchema.capture_detail.values.filter(value => value !== "invalid_utf8");
         equal(JSON.parse(updated.match(pattern)[1]), historicalSchema);
         checks += await require("./check-diagnostics-samples.js").checkDiagnosticsSamples(db,
@@ -412,6 +416,8 @@ async function main() {
         checks += await require("./check-summary-response-diagnostics-db.js").checkSummaryResponseDiagnostics(db, sql);
       } else if (name.endsWith("_json_capture_checkpoints.sql")) {
         checks += await require("./check-json-checkpoints-db.js").checkJsonCheckpoints(db, sql);
+      } else if (name.endsWith("_transfer_flow_diagnostics.sql")) {
+        checks += await require("./check-transfer-flow-diagnostics-db.js").checkTransferFlowDiagnostics(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

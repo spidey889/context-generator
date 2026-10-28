@@ -623,13 +623,46 @@ for (const kind of ["json", "utf8", "content", "http", "fetch"]) test(`summary r
   });
   const result = await sendSummary("Reject without retry: " + kind);
   assert.equal(result.ok, false);
-  if (kind === "fetch") assert.equal(result.diagnostics.summary_response_failures, undefined, "This checkpoint starts at response headers.");
+  if (kind === "fetch") {
+    const failure = result.diagnostics.summary_response_failures[0];
+    assert.equal(failure.phase, "request");
+    assert.equal(failure.reason, "fetch_failed");
+    assert.equal(failure.error_type, "TypeError");
+    assert.equal(failure.http_status, undefined, "A failed connection has no observed HTTP status.");
+    assert.equal(failure.bytes_received, undefined);
+    assert.ok(Number.isInteger(failure.elapsed_ms));
+    assert.doesNotMatch(JSON.stringify(failure), /network error before response headers|https?:/);
+  }
   else {
     const failure = result.diagnostics.summary_response_failures[0];
     assert.equal(failure.reason, { json: "json_parse_failed", utf8: "utf8_decode_failed", content: "summary_invalid", http: "http_rejected" }[kind]);
     if (kind === "utf8") assert.equal(failure.bytes_received, 1);
   }
   assert.equal(fetches, 1);
+});
+
+test("summary request diagnosis preserves a pre-header timeout without fabricating response facts", async () => {
+  let now = Date.now(), fetches = 0;
+  class Clock extends Date { static now() { return now; } }
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    fetches++;
+    now += 320001;
+    throw new TypeError("PRIVATE_CONNECTION_ERROR");
+  }, { clock: Clock });
+  const result = await sendSummary("A request that never received response headers");
+  assert.equal(result.ok, false);
+  assert.equal(result.diagnostics.error_code, "summary_timeout");
+  const failure = result.diagnostics.summary_response_failures[0];
+  assert.equal(failure.phase, "request");
+  assert.equal(failure.reason, "aborted");
+  assert.equal(failure.aborted, true);
+  assert.equal(failure.deadline_elapsed, true);
+  assert.equal(failure.transfer_deadline_elapsed, false);
+  assert.equal(failure.http_status, undefined);
+  assert.equal(failure.headers_ms, undefined);
+  assert.equal(failure.elapsed_ms, 320001);
+  assert.equal(fetches, 1, "Detailed logging must not introduce a request retry.");
+  assert.doesNotMatch(JSON.stringify(failure), /PRIVATE|A request that never/);
 });
 
 for (const format of ["json", "ndjson"]) test(`summary response diagnosis: valid ${format} service-error envelopes are distinguished from broken parsing`, async () => {

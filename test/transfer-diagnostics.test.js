@@ -243,6 +243,7 @@ test("retry storms retain bounded first and last observations and the counts", (
     if (rule.type === "array") maximal[key] = key === "summary_response_failures"
       ? [1, 2].map(attempt => ({ attempt, phase: "stream_completion_validation", reason: "stream_completion_invalid", error_type: "Error" }))
       : key === "json_attempts" ? [{ outcome: "failed", mode: "fresh", failure_check: "raw_header_limit" }]
+      : key === "recovery_events" ? [{ event: "copy_unconfirmed", surface: "handoff_copy", side: "source", method: "clipboard", at_ms: 2147483647 }]
       : Array(32).fill({ event: "destination_activate", at_ms: 2147483647, code: "destination_activation_failed" });
   }
   maximal.prepared_diagnostics = structuredClone(maximal);
@@ -251,6 +252,23 @@ test("retry storms retain bounded first and last observations and the counts", (
   assert.ok(JSON.stringify(snapshot).length <= 12288);
   assert.equal(snapshot.paste_attempts, maximal.paste_attempts);
   assert.ok(validateTelemetryRequest({ headers: { "content-type": "application/json" }, body: payload({ diagnostics: snapshot }) }).ok);
+});
+
+test("copy recovery accepts only bounded fixed outcomes through both relays", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  const base = { event: "box_shown", surface: "dialog", side: "source", at_ms: 100 };
+  const report = recovery_events => ({ version: 1, recovery_events });
+  for (const event of [base, { ...base, event: "copy_succeeded", method: "native" },
+    { ...base, event: "copy_unconfirmed", method: "clipboard", stop_confirmed: false }]) {
+    assert.ok(validateTelemetryPayload(payload({ diagnostics: report([event]) })));
+    assert.ok(edge.validateTelemetryPayload(payload({ diagnostics: report([event]) })));
+  }
+  for (const events of [[base, base], Array(13).fill(base), [{ ...base, text: "PRIVATE" }],
+    [{ ...base, event: "copy_succeeded" }], [{ ...base, method: "https://PRIVATE" }]]) {
+    assert.equal(diagnostics.validate(report(events)), null);
+    assert.equal(edge.validateTelemetryPayload(payload({ diagnostics: report(events) })), null);
+  }
+  assert.deepEqual(diagnostics.mergeRecoveryEvents([base], [{ ...base, at_ms: 999 }]), [base]);
 });
 
 test("Edge forwards diagnostics as the optional RPC argument without changing receipt trust", async () => {

@@ -480,13 +480,18 @@ function sameTransferIdentity(first, second) {
     && first.sourcePlatform === second.sourcePlatform && first.destinationPlatform === second.destinationPlatform;
 }
 
-function mergePasteCheckpointEvents(first = [], second = []) {
+function mergePasteCheckpointEvents(first = [], second = [], key = "paste_events") {
   if (!first.length && !second.length) return {};
   const records = new Map();
   for (const entry of [...first, ...second]) records.set(`${entry.event}:${entry.at_ms}:${entry.code || ""}`, entry);
   const ordered = [...records.values()].sort((a, b) => a.at_ms - b.at_ms);
-  return { paste_events: ordered.length > 32 ? [...ordered.slice(0, 16), ...ordered.slice(-16)] : ordered,
+  return { [key]: ordered.length > 32 ? [...ordered.slice(0, 16), ...ordered.slice(-16)] : ordered,
     ...(ordered.length > 32 ? { events_truncated: true } : {}) };
+}
+
+function mergeRecoveryDiagnostics(first, second) {
+  if (!first?.recovery_events && !second?.recovery_events) return {};
+  return { version: 1, recovery_events: globalThis.CapTransferDiagnostics.mergeRecoveryEvents(first?.recovery_events, second?.recovery_events) };
 }
 
 function mergeTransferTelemetryEvents(previous, next) {
@@ -496,6 +501,8 @@ function mergeTransferTelemetryEvents(previous, next) {
     ...previous,
     ...(!previous.diagnostics && next.status === previous.status && next.lastStage === previous.lastStage
       && next.failureReason === previous.failureReason && next.diagnostics ? { diagnostics: next.diagnostics } : {}),
+    ...((previous.diagnostics?.recovery_events || next.diagnostics?.recovery_events) ? { diagnostics: {
+      ...(previous.diagnostics || {}), ...mergeRecoveryDiagnostics(previous.diagnostics, next.diagnostics) } } : {}),
     ...(TELEMETRY_MODEL_STAGES.has(previous.lastStage) && !previous.reportedModel && next.reportedModel
       ? { reportedModel: next.reportedModel } : {})
   };
@@ -509,6 +516,8 @@ function mergeTransferTelemetryEvents(previous, next) {
       ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.lastStage) >= stages.indexOf(previous.lastStage)
         ? next.diagnostics || {} : {}),
       ...mergePasteCheckpointEvents(previous.diagnostics?.paste_events, next.diagnostics?.paste_events),
+      ...mergePasteCheckpointEvents(previous.diagnostics?.delivery_events, next.diagnostics?.delivery_events, "delivery_events"),
+      ...mergeRecoveryDiagnostics(previous.diagnostics, next.diagnostics),
       ...((previous.diagnostics?.json_attempts || next.diagnostics?.json_attempts) ? { version: 1,
         json_attempts: globalThis.CapTransferDiagnostics.mergeJsonAttempts(previous.diagnostics?.json_attempts, next.diagnostics?.json_attempts) } : {}),
       ...((previous.diagnostics?.summary_response_failures || next.diagnostics?.summary_response_failures) ? {
@@ -746,6 +755,37 @@ function recordPasteCheckpoint(message, sender) {
   } }, operation.sourceTabId);
 }
 
+async function recordRecoveryCheckpoint(message, sender) {
+  if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)
+      || !isUuid(message.transferId)
+      || Object.keys(message).some(key => !["type", "transferId", "destination", "checkpoint", "surface", "method", "stopConfirmed"].includes(key))
+      || message.stopConfirmed !== undefined && typeof message.stopConfirmed !== "boolean") return false;
+  const event = await enqueueTelemetryWork(async () => {
+    await restoreActiveTransferTelemetry();
+    const active = activeTransferTelemetry.get(message.transferId);
+    const sourceTabId = activeTransferSourceTabs.get(message.transferId);
+    if (!active || active.destinationPlatform !== message.destination || !Number.isInteger(sourceTabId)) return null;
+    const platform = getPlatformFromUrl(sender.url || sender.tab.url);
+    const operation = transferOperations.get(message.transferId);
+    const side = sender.tab.id === sourceTabId && platform === active.sourcePlatform ? "source"
+      : operation?.sourceTabId === sourceTabId && operation.tabIds.has(sender.tab.id)
+        && platform === active.destinationPlatform ? "destination" : null;
+    if (!side) return null;
+    const observation = globalThis.CapTransferDiagnostics.validateRecoveryEvent({ event: message.checkpoint, surface: message.surface, side,
+      at_ms: Math.max(0, Math.min(2147483647, Date.now() - Date.parse(active.attemptedAt))),
+      ...(message.method !== undefined ? { method: message.method } : {}),
+      ...(message.stopConfirmed !== undefined ? { stop_confirmed: message.stopConfirmed } : {}) });
+    if (!observation) return null;
+    const previous = active.diagnostics?.recovery_events || [];
+    const recovery_events = globalThis.CapTransferDiagnostics.mergeRecoveryEvents(previous, [observation]);
+    if (JSON.stringify(previous) === JSON.stringify(recovery_events)) return null;
+    // Only this bounded append-only trail may enrich a terminal client report.
+    // Clipboard recovery never rewrites the original delivery or counting facts.
+    return { ...active, diagnostics: { ...(active.diagnostics || { version: 1 }), recovery_events } };
+  });
+  return event ? recordTransferTelemetry(event, activeTransferSourceTabs.get(message.transferId)) : false;
+}
+
 function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
   if (!event || typeof event !== "object") return null;
   if (!isUuid(event.attemptId)) return null;
@@ -949,9 +989,13 @@ function mergeTelemetryPayloads(previous, next) {
       : stages.indexOf(previous.last_stage) > stages.indexOf(next.last_stage) ? previous.last_stage : next.last_stage,
     failure_reason: terminal ? previous.failure_reason : next.failure_reason,
     ...((previous.diagnostics || next.diagnostics) ? { diagnostics: terminal
-      ? previous.diagnostics || (next.status === previous.status && next.last_stage === previous.last_stage && next.failure_reason === previous.failure_reason ? next.diagnostics : undefined)
+      ? (previous.diagnostics?.recovery_events || next.diagnostics?.recovery_events
+        ? { ...(previous.diagnostics || { version: 1 }), ...mergeRecoveryDiagnostics(previous.diagnostics, next.diagnostics) }
+        : previous.diagnostics || (next.status === previous.status && next.last_stage === previous.last_stage && next.failure_reason === previous.failure_reason ? next.diagnostics : undefined))
       : { ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.last_stage) >= stages.indexOf(previous.last_stage) ? next.diagnostics || {} : {}),
         ...mergePasteCheckpointEvents(previous.diagnostics?.paste_events, next.diagnostics?.paste_events),
+        ...mergePasteCheckpointEvents(previous.diagnostics?.delivery_events, next.diagnostics?.delivery_events, "delivery_events"),
+        ...mergeRecoveryDiagnostics(previous.diagnostics, next.diagnostics),
         ...((previous.diagnostics?.json_attempts || next.diagnostics?.json_attempts) ? { version: 1,
           json_attempts: globalThis.CapTransferDiagnostics.mergeJsonAttempts(previous.diagnostics?.json_attempts, next.diagnostics?.json_attempts) } : {}),
         ...((previous.diagnostics?.summary_response_failures || next.diagnostics?.summary_response_failures) ? {
@@ -1229,6 +1273,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "RECORD_RECOVERY_CHECKPOINT") {
+    recordRecoveryCheckpoint(message, sender)
+      .then(accepted => sendResponse({ ok: accepted === true })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (message?.type === "EXTEND_DOM_CAPTURE_DEADLINE") {
     const operation = transferOperations.get(message.transferId);
     const now = Date.now();
@@ -1456,6 +1506,7 @@ function makeSummaryResponseFailure(debug, error, attempt, requestSignal, reques
   if (!contract) return null;
   const phase = contract.summaryResponseFailureSchema.phase.values.includes(debug.phase) ? debug.phase : "unknown";
   const reason = debug.aborted ? "aborted" : debug.http_status >= 400 ? "http_rejected"
+    : phase === "request" ? "fetch_failed"
     : error?.summaryServiceFailure ? "service_rejected"
     : phase === "stream_utf8_decode" ? "utf8_decode_failed"
     : phase === "stream_json_parse" || (phase === "response_body" && error?.name === "SyntaxError") ? "json_parse_failed"
@@ -1607,7 +1658,7 @@ async function fetchSummaryFromBackendOnce(conversationText, transferId = null, 
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
   const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "summary_request" };
-  let responseReceived = false;
+  let responseReceived = false, requestSent = false;
   const responseDebug = { attempt_id: transferId, started_at: new Date().toISOString(), phase: "request" };
   const controller = new AbortController();
   const onCancel = () => controller.abort(requestSignal.reason);
@@ -1647,6 +1698,7 @@ async function fetchSummaryFromBackendOnce(conversationText, transferId = null, 
       });
     }
     const fetchStartedAt = nowMs();
+    requestSent = true;
     const response = await fetch(SUMMARY_BACKEND_URL, {
       method: "POST",
       credentials: "omit",
@@ -1728,7 +1780,7 @@ async function fetchSummaryFromBackendOnce(conversationText, transferId = null, 
     let failure = error;
     try { checkSummaryDeadline(); } catch (deadlineError) { failure = deadlineError; }
     responseDebug.aborted = controller.signal.aborted;
-    if (responseReceived) {
+    if (responseReceived || requestSent) {
       // Reporting is optional. Even broken storage/console hooks must not
       // suppress the original error, retry, local carry or deadline handling.
       try { logSummaryResponseFailure(responseDebug, error); } catch {}
@@ -2155,6 +2207,46 @@ async function pasteIntoDestinationWithActivation(
   return pasteResult;
 }
 
+function recordDestinationObservation(operation, event, changes = {}, { destination = null, tabId = null, error = null, site = event } = {}) {
+  try {
+    if (!operation || (Number.isInteger(tabId) && !operation.tabIds.has(tabId))) return;
+    const observedAt = Date.now();
+    const contract = globalThis.CapTransferDiagnostics;
+    if (!contract) return;
+    const observed = operation.destinationDiagnostics ||= { version: 1 };
+    const seen = operation.destinationDiagnosticSteps ||= new Set();
+    const key = `${site}:${event}:${tabId ?? "new"}`;
+    if (seen.has(key) || seen.size >= 12) return;
+    seen.add(key);
+    contract.update(observed, changes);
+    if (error) {
+      const details = contract.errorDetails(error, site);
+      for (const field of ["error_type", "error_file", "error_line", "error_column", "failure_site"]) {
+        contract.update(observed, { [field]: details[field] });
+      }
+      contract.update(observed, { recovery_error_code: contract.errorCode(error,
+        site === "destination_activate" ? "destination_activation_failed" : "destination_open_failed"), error_origin: "background" });
+    }
+    const snapshot = contract.snapshot(observed);
+    // Queue behind the initial identity even on a cold/stalled worker. Commit
+    // within this queue slot so a later terminal report cannot overtake it.
+    enqueueTelemetryWork(async () => {
+      await restoreActiveTransferTelemetry();
+      const active = activeTransferTelemetry.get(operation.transferId);
+      if (active?.status !== "started" || activeTransferSourceTabs.get(operation.transferId) !== operation.sourceTabId
+          || (destination && DESTINATIONS[active.destinationPlatform] !== destination)) return;
+      const diagnostics = { ...(active.diagnostics || { version: 1 }), ...snapshot };
+      contract.event(diagnostics, event, Math.max(0, observedAt - Date.parse(active.attemptedAt)), "delivery_events",
+        error ? snapshot.recovery_error_code : null);
+      const merged = mergeTransferTelemetryEvents(active, { ...active, diagnostics });
+      activeTransferTelemetry.set(active.attemptId, merged);
+      const installId = await getOrCreateTelemetryInstallId();
+      updatePreparedSummaryTelemetry(merged, installId);
+      await queueActiveTransferTelemetry(makeTelemetryPayload(merged, installId), active.attemptId);
+    }).catch(() => {});
+  } catch { /* Optional diagnosis must not alter native tab operations. */ }
+}
+
 async function prepareDestination(destinationId, deadlineAt = null, sourceTab = null, transferId = null) {
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   checkTransferDeadline(deadlineAt);
@@ -2174,6 +2266,8 @@ async function prepareDestination(destinationId, deadlineAt = null, sourceTab = 
 }
 
 async function createDestinationTab(destination, options = {}) {
+  const openedAt = nowMs();
+  recordDestinationObservation(options.operation, "destination_prepare", {}, { destination });
   try {
     const checkedSource = await checkTransferSource(options.operation);
     let placement = {};
@@ -2198,10 +2292,15 @@ async function createDestinationTab(destination, options = {}) {
       await chrome.tabs.remove(destinationTab.id).catch(() => {});
       checkTransferOperation(options.operation);
     }
+    recordDestinationObservation(options.operation, "destination_open", {
+      destination_prepared: true, destination_open_ms: Math.round(nowMs() - openedAt), destination_tab_status: destinationTab.status
+    }, { destination, tabId: destinationTab.id });
     return destinationTab.id;
   } catch (error) {
     error.code = error.code || "destination_open_failed";
     error.diagnosticCode ||= "destination_open_failed";
+    recordDestinationObservation(options.operation, "failure", { destination_prepared: false,
+      destination_open_ms: Math.round(nowMs() - openedAt) }, { destination, error, site: "destination_open" });
     throw error;
   }
 }
@@ -2209,6 +2308,8 @@ async function createDestinationTab(destination, options = {}) {
 async function activateDestinationTab(tabId, deadlineAt = null, operation = null, completionOperation = operation, diagnostics = null) {
   await checkTransferSource(operation);
   checkTransferDeadline(deadlineAt);
+  const activatedAt = nowMs();
+  recordDestinationObservation(completionOperation, "destination_activate", {}, { tabId });
   try {
     const tab = await chrome.tabs.update(tabId, { active: true });
     if (tab?.url) globalThis.CapTransferDiagnostics?.update(diagnostics, {
@@ -2223,6 +2324,8 @@ async function activateDestinationTab(tabId, deadlineAt = null, operation = null
     }
     checkTransferOperation(completionOperation);
     operation?.onTabActivated?.(tabId);
+    recordDestinationObservation(completionOperation, "destination_activate", { activation_ms: Math.round(nowMs() - activatedAt) },
+      { tabId, site: "destination_activated" });
   } catch (error) {
     checkTransferOperation(completionOperation);
     if (["transfer_timeout", "user_cancelled"].includes(error?.code)) throw error;
@@ -2231,6 +2334,8 @@ async function activateDestinationTab(tabId, deadlineAt = null, operation = null
     const activationError = new Error("Could not switch to the destination tab. Return to your original tab and try again.");
     activationError.code = "destination_open_failed";
     activationError.diagnosticCode = "destination_activation_failed";
+    recordDestinationObservation(completionOperation, "failure", { activation_ms: Math.round(nowMs() - activatedAt) },
+      { tabId, error: activationError, site: "destination_activate" });
     throw activationError;
   }
 }

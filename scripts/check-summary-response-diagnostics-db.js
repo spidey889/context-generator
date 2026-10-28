@@ -16,14 +16,19 @@ async function checkSummaryResponseDiagnostics(db, sql) {
   const base = { attempt: 1, phase: "stream_read", reason: "body_read_failed", error_type: "TypeError" };
   const report = records => ({ version: 1, summary_response_failures: records });
   const before = await snapshot();
+  const historicalSchema = structuredClone(contract.schema);
+  delete historicalSchema.recovery_events;
+  const historicalResponseSchema = structuredClone(contract.summaryResponseFailureSchema);
+  historicalResponseSchema.phase.values = historicalResponseSchema.phase.values.filter(value => value !== "request");
+  historicalResponseSchema.reason.values = historicalResponseSchema.reason.values.filter(value => value !== "fetch_failed");
   equal((await rows("select public.is_valid_transfer_diagnostics($1::jsonb) valid", [JSON.stringify(report([base]))]))[0].valid, false);
   await db.exec(sql);
   equal(await snapshot(), before);
   const definition = (await rows("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) sql"))[0].sql;
-  equal(JSON.parse(definition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.schema);
-  equal(JSON.parse(definition.match(/summary_response_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.summaryResponseFailureSchema);
+  equal(JSON.parse(definition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);
+  equal(JSON.parse(definition.match(/summary_response_rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalResponseSchema);
   const samples = [{ label: "legacy report", value: { version: 1, summary_http_status: 200 }, expected: true }];
-  for (const [key, rule] of Object.entries(contract.summaryResponseFailureSchema)) {
+  for (const [key, rule] of Object.entries(historicalResponseSchema)) {
     const values = rule.values || (rule.type === "boolean" ? [true, false] : [rule.min || 0, rule.max]);
     for (const value of new Set([values[0], values.at(-1)]))
       samples.push({ label: `response failure ${key} ${value}`, value: report([{ ...base, [key]: value }]), expected: true });

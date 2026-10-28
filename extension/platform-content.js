@@ -1122,7 +1122,8 @@
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
       // Inactive delivery needs recovery before final activation can fail.
       // Already-focused local delivery can save its receipt before building UI.
-      if (!localDirect) showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
+      if (!localDirect) showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true, false, false,
+        { recovery: { transferId: transferTrace.id, destination: destinationId } });
       if (!requiresFocusedPaste) {
         await completeHandoffForDestinationReveal(transferTrace, true);
         checkTransferDeadline(transferTrace);
@@ -1142,7 +1143,8 @@
       markTransferTrace(transferTrace, "transfer complete");
       finishTransferTrace(transferTrace);
       resetRunningFlag();
-      if (localDirect) showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
+      if (localDirect) showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true, false, false,
+        { recovery: { transferId: transferTrace.id, destination: destinationId } });
     } catch (error) {
       // Manual takeover owns the pending clipboard/cancellation feedback. Late
       // delivery replies must not dismiss it or finish this attempt twice.
@@ -1156,7 +1158,8 @@
       const draftPresent = transferStage === "paste" && transferTrace.diagnostics?.error_code === "editor_has_draft";
       if (draftPresent && summary) {
         try {
-          transferTrace.copyBoxShown = showContextTransferFailure(error, { destinationId, stage: transferStage, summary }) === true;
+          transferTrace.copyBoxShown = showContextTransferFailure(error, { destinationId, stage: transferStage, summary,
+            transferId: transferTrace.id }) === true;
         } catch {
           // A recovery UI failure must remain a failed attempt, never a claimed recovery.
           transferTrace.copyBoxShown = false;
@@ -1173,7 +1176,8 @@
       if (!draftPresent) showContextTransferFailure(error, {
         destinationId,
         stage: transferStage,
-        summary
+        summary,
+        transferId: transferTrace.id
       });
       if (!transferTrace.copyBoxShown) await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }).catch(() => {});
     }
@@ -1196,7 +1200,8 @@
     if (summary) {
       // Source recovery keeps its original copy dialog. The destination owns
       // the draft-specific explanation where the existing input is visible.
-      return showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed");
+      return showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed", false,
+        { recovery: { transferId: details.transferId, destination: details.destinationId } });
     }
 
     showErrorOverlay(error || "Transfer failed. Please try again.");
@@ -1386,9 +1391,11 @@
         tabId: response?.tabId || null,
         background: response?.timing || null
       });
-      updateTransferDiagnostics(trace, { destination_prepared: Number.isInteger(response?.tabId), destination_open_ms: response?.timing?.totalMs });
+      updateTransferDiagnostics(trace, { destination_prepared: Number.isInteger(response?.tabId), destination_open_ms: response?.timing?.openMs });
       return response;
     }).catch((error) => {
+      const preparedDiagnostics = globalThis.CapTransferDiagnostics?.validate(error?.diagnostics);
+      if (trace?.diagnostics && preparedDiagnostics) trace.diagnostics.prepared_diagnostics = preparedDiagnostics;
       updateTransferDiagnostics(trace, { destination_prepared: false, recovery_error_code: globalThis.CapTransferDiagnostics?.errorCode(error) });
       if (error?.code === "user_cancelled" && trace) cancelSourceTransfer(trace.id, trace);
       return null;
@@ -1520,13 +1527,25 @@
     }, Math.max(0, deadlineAt - Date.now()));
   }
 
+  function recordRecoveryCheckpoint(recovery, checkpoint, surface, method = null, stopConfirmed = undefined) {
+    if (!instanceActive || !recovery?.transferId || !getPlatform(recovery.destination)) return;
+    // Recovery can happen after the transfer outcome is final. Send only fixed
+    // observations under that original identity; clipboard contents stay local.
+    try {
+      Promise.resolve(extensionRuntime.sendMessage({ type: "RECORD_RECOVERY_CHECKPOINT",
+        transferId: recovery.transferId, destination: recovery.destination, checkpoint, surface,
+        ...(method ? { method } : {}), ...(typeof stopConfirmed === "boolean" ? { stopConfirmed } : {}) })).catch(() => {});
+    } catch {}
+  }
+
   function startPasteHandoff(trace, text) {
+    const recovery = { transferId: trace.id, destination: trace.destinationId };
     const stopDelivery = () => notifyBackground({ type: "CANCEL_TRANSFER", transferId: trace.id, preserveDestination: true });
     // Give the destination the same absolute write deadline as the source UI.
     // Even a suspended timer or lost cancellation reply cannot permit late writes.
     setTransferDeadline(trace, Math.min(trace.deadlineAt || Infinity, Date.now() + PASTE_HANDOFF_TIMEOUT_MS), () => {
       stopDelivery().catch(() => {});
-      showFallbackModal(text, getPlatform(trace.destinationId)?.name || "the destination", false, true);
+      showFallbackModal(text, getPlatform(trace.destinationId)?.name || "the destination", false, true, false, { recovery });
     });
     const button = document.getElementById("context-generator-handoff-copy");
     if (!button) return;
@@ -1543,21 +1562,31 @@
       button.textContent = "Copying…";
       // Start clipboard access inside the click's user activation, before any
       // await. Failure retains the original copy dialog and its native fallback.
-      let copying;
-      try { copying = navigator.clipboard?.writeText ? navigator.clipboard.writeText(text).then(() => true) : false; }
-      catch { copying = false; }
+      let copying, copyState = "failed", stopConfirmed;
+      try {
+        if (navigator.clipboard?.writeText) {
+          copyState = "pending";
+          recordRecoveryCheckpoint(recovery, "copy_started", "handoff_copy", "clipboard");
+          copying = navigator.clipboard.writeText(text).then(() => { copyState = "succeeded"; return true; },
+            () => { copyState = "failed"; return false; });
+        } else copying = false;
+      } catch { copying = false; copyState = "failed"; }
       const [copied, stopped] = await Promise.all([
-        waitForHandoffAction(copying), waitForHandoffAction(stopDelivery().then(reply => reply?.ok === true))
+        waitForHandoffAction(copying), waitForHandoffAction(stopDelivery().then(reply => {
+          stopConfirmed = reply?.ok === true; return stopConfirmed;
+        }))
       ]);
       if (!instanceActive || activeTransferTrace !== trace || trace.completed) return;
       let sourceChanged = false;
       try { trace.sourceGuard?.check(); } catch { sourceChanged = true; }
+      recordRecoveryCheckpoint(recovery, copyState === "pending" ? "copy_unconfirmed" : copied ? "copy_succeeded" : "copy_failed",
+        "handoff_copy", "clipboard", stopConfirmed);
       cancelSourceTransfer(trace.id, trace);
       if (sourceChanged) return;
       if (!copied || !stopped) {
         // A cancellation acknowledgement stops future writes; the carry may
         // already have landed before the click, even when clipboard copy fails.
-        showFallbackModal(text, getPlatform(trace.destinationId)?.name || "the destination", false, true);
+        showFallbackModal(text, getPlatform(trace.destinationId)?.name || "the destination", false, true, false, { recovery });
       } else {
         showDestinationPasteStatus()?.(true, "Context copied. Auto-paste stopped. Check the destination before pasting.");
       }
@@ -3107,7 +3136,8 @@
       globalThis.CapTransferDiagnostics?.failure(diagnostics, error, "destination", Date.now() - startedAt);
       error.diagnostics = globalThis.CapTransferDiagnostics?.snapshot(diagnostics) || null;
       if (diagnostics.error_code === "editor_has_draft") {
-        showFallbackModal(text, getPlatform(destinationId)?.name || "the destination", false, false, true, { destinationCopy: true });
+        showFallbackModal(text, getPlatform(destinationId)?.name || "the destination", false, false, true,
+          { destinationCopy: true, recovery: { transferId, destination: destinationId } });
       }
       throw error;
     }
@@ -3204,6 +3234,7 @@
     };
     const guard = {
       ...routeGuard,
+      recovery: { transferId, destination: destination.id },
       get userHandled() { return userHandled; },
       check() {
         if (cancelled || !instanceActive) throw createTransferCancelledError();
@@ -3499,7 +3530,8 @@
     } finally {
       if (pendingPasteRecheck === pending) {
         cancelPendingPasteRecheck();
-        if (needsCopy) showFallbackModal(text, destination.name, false, false, draftPresent, { destinationCopy: true });
+        if (needsCopy) showFallbackModal(text, destination.name, false, false, draftPresent,
+          { destinationCopy: true, recovery: pending.guard.recovery });
       }
     }
   }
@@ -9806,16 +9838,19 @@
           copyAgain.disabled = true;
           try {
             if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
+            recordRecoveryCheckpoint(copiedContext.recovery, "copy_started", "copy_notice", "clipboard");
             await navigator.clipboard.writeText(copiedContext.text);
             if (!ownsNotice()) return;
+            recordRecoveryCheckpoint(copiedContext.recovery, "copy_succeeded", "copy_notice", "clipboard");
             copyAgain.textContent = "Copied again!";
             clearTimeout(errorDiv.contextGeneratorHideTimer);
             errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), noticeDurationMs);
           } catch {
             if (!ownsNotice()) return;
+            recordRecoveryCheckpoint(copiedContext.recovery, "copy_failed", "copy_notice", "clipboard");
             hideErrorOverlay(errorDiv, { immediate: true });
             showFallbackModal(copiedContext.text, copiedContext.destinationName, false, false,
-              copiedContext.draftPresent, { destinationCopy: true });
+              copiedContext.draftPresent, { destinationCopy: true, recovery: copiedContext.recovery });
           } finally {
             if (ownsNotice()) copyAgain.disabled = false;
           }
@@ -9939,7 +9974,8 @@
     }, 280);
   }
 
-  function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false, { destinationCopy = false } = {}) {
+  function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false,
+    { destinationCopy = false, recovery = null } = {}) {
     // A new destination recovery owns the carry. A pending Copy again from an
     // older notice must not reopen its text over this dialog after rejection.
     const copyNotice = document.getElementById("context-generator-error-overlay");
@@ -10159,11 +10195,13 @@
 
       addOwnedEventListener(copyBtn, "click", async () => {
         const copyOwner = modal.contextGeneratorCopyOwner;
+        const recovery = modal.contextGeneratorRecovery;
         // A concise preview must never shorten the payload sent to the clipboard.
         const currentText = (draftPresent ? modal.contextGeneratorCopyText : textarea.value) || "";
-        let copied = false;
+        let copied = false, method = "clipboard";
         try {
           if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
+          recordRecoveryCheckpoint(recovery, "copy_started", "dialog", "clipboard");
           await navigator.clipboard.writeText(currentText);
           copied = true;
         } catch (_error) {
@@ -10171,6 +10209,8 @@
           modal.contextGeneratorSetExpanded?.(true);
           textarea.focus();
           textarea.select();
+          method = "native";
+          recordRecoveryCheckpoint(recovery, "copy_started", "dialog", "native");
           try {
             copied = document.execCommand("copy") === true;
           } catch {
@@ -10179,6 +10219,8 @@
         }
 
         if (!ensureLiveExtensionInstance() || !modal.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
+        recordRecoveryCheckpoint(recovery, copied ? "copy_succeeded" : "copy_failed", "dialog",
+          copied ? method : "manual_selection");
         if (!copied) {
           copyBtn.textContent = "Select text and copy manually";
           copyBtn.style.setProperty("background", "linear-gradient(180deg,#ffd980,#e8ad37)", "important");
@@ -10191,7 +10233,7 @@
         copyBtn.style.setProperty("color", draftPresent ? "#173e27" : "#07150d", "important");
 
         if (modal.contextGeneratorDestinationCopy) {
-          const copiedContext = { text: currentText, destinationName: modal.contextGeneratorDestinationName, draftPresent };
+          const copiedContext = { text: currentText, destinationName: modal.contextGeneratorDestinationName, draftPresent, recovery };
           const finish = () => {
             if (!modal.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
             closeModal();
@@ -10289,6 +10331,7 @@
     // Reusing a box cancels any older copy/closing animation for that box.
     clearTimeout(modal.contextGeneratorCopyCloseTimer);
     modal.contextGeneratorCopyOwner = {};
+    modal.contextGeneratorRecovery = recovery;
     modal.contextGeneratorDestinationCopy = destinationCopy;
     modal.contextGeneratorDestinationName = destinationName;
     modal.contextGeneratorResetCopyFeedback?.();
@@ -10326,6 +10369,9 @@
     setTimeout(() => {
       document.getElementById("context-generator-fallback-copy")?.focus?.({ preventScroll: true });
     }, 0);
+    // A normal successful transfer always keeps a backup box. Record opening
+    // only for recovery; a later explicit copy from any box still reports.
+    if (!isBackup) recordRecoveryCheckpoint(recovery, "box_shown", "dialog");
     return true;
   }
 

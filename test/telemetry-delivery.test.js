@@ -126,6 +126,77 @@ function startOwnedPaste(background, { stalled = false } = {}) {
   return pending;
 }
 
+function recoveryCheckpoint(background, checkpoint, options = {}, sender = {}) {
+  return new Promise(resolve => background.listeners.message({ type: "RECORD_RECOVERY_CHECKPOINT", transferId: id(1),
+    destination: "gemini", checkpoint, surface: "dialog", ...options },
+  { id: "fixture-extension", frameId: 0, tab: { id: 42, url: "https://claude.ai/new" }, ...sender }, resolve));
+}
+
+test("destination observations wait for cold identity storage and survive an already queued terminal report", async () => {
+  const delivered = [];
+  const background = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); });
+  await background.settled();
+  blockStorage(background, "local", "get");
+  const initial = background.ack(event(1, { destinationPlatform: "gemini" }));
+  await new Promise(setImmediate);
+  assert.equal(background.evaluate(`activeTransferTelemetry.has("${id(1)}")`), false);
+  background.evaluate(`recordDestinationObservation(getTransferOperation("${id(1)}", { id: 42 }, Date.now()+60000),
+    "destination_prepare", {}, { destination: DESTINATIONS.gemini })`);
+  const terminal = background.ack(event(1, { destinationPlatform: "gemini", status: "failed", lastStage: "paste_started", failureReason: "paste_failed" }));
+  background.evaluate("releaseStorage()");
+  await Promise.all([initial, terminal]);
+  await background.settled();
+  assert.equal(delivered.at(-1).status, "failed");
+  assert.equal(delivered.at(-1).diagnostics.delivery_events[0].event, "destination_prepare");
+});
+
+test("copy recovery enriches a failed transfer without replacing terminal facts, including after worker restart", async () => {
+  const background = worker(async () => { throw new Error("offline"); });
+  await background.settled();
+  await background.ack(event(1, { destinationPlatform: "gemini", status: "failed", lastStage: "paste_started", failureReason: "paste_failed",
+    diagnostics: { version: 1, error_code: "message_timeout", message_reply: "timeout" } }));
+  assert.equal((await recoveryCheckpoint(background, "box_shown")).ok, true);
+  assert.equal((await recoveryCheckpoint(background, "copy_succeeded", { method: "native" })).ok, true);
+  assert.equal((await recoveryCheckpoint(background, "copy_succeeded", { method: "native" })).ok, false);
+  await background.ack(event(1, { destinationPlatform: "gemini", status: "succeeded", lastStage: "completed",
+    diagnostics: { version: 1, error_code: "editor_missing", recovery_events: [] } }));
+  await background.settled();
+  const queued = background.shared.local[OUTBOX][0].payload;
+  assert.equal(queued.status, "failed");
+  assert.equal(queued.failure_reason, "paste_failed");
+  assert.equal(queued.diagnostics.error_code, "message_timeout");
+  assert.deepEqual(queued.diagnostics.recovery_events.map(entry => entry.event), ["box_shown", "copy_succeeded"]);
+  const delivered = [];
+  const restarted = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); }, background.shared);
+  await restarted.settled();
+  await restarted.retry();
+  assert.deepEqual(delivered.at(-1).diagnostics, queued.diagnostics);
+  assert.equal((await recoveryCheckpoint(restarted, "copy_failed", { method: "manual_selection" })).ok, true);
+  await restarted.settled();
+  assert.equal(delivered.at(-1).status, "failed");
+  assert.equal(delivered.at(-1).diagnostics.recovery_events.length, 3);
+});
+
+test("recovery checkpoints require an owned source or dispatched destination and reject private fields", async () => {
+  const background = worker(async () => success());
+  await background.settled();
+  await background.ack(event(1, { destinationPlatform: "gemini", lastStage: "paste_started" }));
+  for (const sender of [{ id: "other-extension" }, { frameId: 1 }, { tab: { id: 85, url: "https://gemini.google.com/app" } },
+    { tab: { id: 42, url: "https://chatgpt.com/" } }])
+    assert.equal((await recoveryCheckpoint(background, "box_shown", {}, sender)).ok, false);
+  assert.equal((await recoveryCheckpoint(background, "copy_succeeded")).ok, false);
+  assert.equal((await recoveryCheckpoint(background, "copy_failed", { method: "native", text: "PRIVATE" })).ok, false);
+  await startOwnedPaste(background);
+  background.evaluate("fixturePasteTrace.operation.tabIds.add(84)");
+  assert.equal((await recoveryCheckpoint(background, "copy_unconfirmed", { method: "clipboard", stopConfirmed: false },
+    { tab: { id: 84, url: "https://gemini.google.com/app" } })).ok, true);
+  await background.settled();
+  const active = background.evaluate(`activeTransferTelemetry.get("${id(1)}")`);
+  assert.equal(active.diagnostics.recovery_events[0].side, "destination");
+  assert.equal(active.diagnostics.recovery_events[0].stop_confirmed, false);
+  assert.equal(active.status, "started");
+});
+
 function pasteCheckpoint(background, checkpoint, diagnostics = {}, sender = {}, overrides = {}) {
   return new Promise(resolve => background.listeners.message({ type: "RECORD_PASTE_CHECKPOINT", transferId: id(1),
     destination: "gemini", checkpoint, diagnostics: { version: 1, ...diagnostics }, ...overrides },

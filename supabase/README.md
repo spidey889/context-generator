@@ -14,6 +14,8 @@ Only target **cap-context-telemetry** (`iqkzynzxbmemhtiupwwu`). The first thirte
 
 ## Migration history
 
+`20261028182544_transfer_flow_diagnostics.sql` extends the existing diagnostics JSON contract with pre-header request failures and a bounded `recovery_events` trail. A post-terminal copy observation may append to that trail while all other terminal client diagnosis, identity, outcomes, proof and counters remain protected. The pure merge helper is callable only by `service_role`/its owner. No table or column is added. Deploy this migration and the matching Edge/Vercel validators before distributing the updated extension.
+
 `migrations/` is the ordered history used to rebuild the database. Keep recorded SQL files unchanged, including older function definitions that later migrations replace. The local replay checks, hosted migration history and encrypted backup recovery depend on those versions.
 
 `archive/` contains the never-applied activity-view reference and is excluded from migration replay. Keep it outside `migrations/`.
