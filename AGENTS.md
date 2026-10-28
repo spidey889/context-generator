@@ -15,7 +15,10 @@
 ## Documentation
 
 - `LOGIC.md` is the source of truth for current production architecture and behavior. Update it after meaningful behavior changes and remove descriptions of dead, replaced or disabled behavior.
-- Record meaningful decisions, changes, replaced approaches and useful historical context in `CHANGELOG.md`. Skip insignificant changes and routine command transcripts.
+- Update `CHANGELOG.md` only when a change has lasting historical value: a meaningful new capability, an important bug fix, a security/privacy or compatibility change, or a significant decision future work needs to understand. A task, commit or file edit does not automatically need an entry.
+- Skip routine UI/cosmetic changes, wording tweaks, version-only bumps, refactoring, test cleanup, documentation edits and command transcripts. A UI fix that resolves a significant functional or accessibility bug follows the important-bug rule below.
+- For significant or hard-to-diagnose bug fixes, write at least five to six substantive lines, with more when useful. Explain the symptom and impact, root cause, key investigation findings, what fixed it, how it was verified, and any remaining uncertainty or limitation. Preserve a failed/replaced approach only when its reason could prevent repeating the mistake. Use short paragraphs or supporting bullets; visual line wrapping does not count, and do not pad entries with filler.
+- Other worthwhile changes can use a short entry proportional to their importance. Combine related follow-up fixes into the existing entry instead of logging every iteration. Keep detailed command output and routine implementation history in Git or a linked investigation document.
 - Add comments or notes when they explain non-obvious logic, fragile behavior, important tradeoffs or information useful in a later session. Do not comment everything.
 
 ## Tests and checks

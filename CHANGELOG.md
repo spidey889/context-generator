@@ -214,6 +214,6 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## Keeping this useful
 
-- Add one short dated bullet for a meaningful behavior change, regression, compatibility boundary or decision. State what changed and why; link detailed evidence.
+- Follow the selection and detail rules in [AGENTS.md](AGENTS.md#documentation). Significant or difficult bug fixes need at least five to six substantive lines of useful explanation; routine UI/cosmetic changes need no entry. Link longer investigations when useful.
 - Combine iterations into the final decision. Keep rejected approaches only when their reason helps future work. Skip routine merges, hook versions, cosmetic trials, repeated test totals and command transcripts.
 - Keep current settings, invariants and check commands in `LOGIC.md` or the owning doc. Record deployments only when verified, naming the component and preserving release/distribution boundaries.
