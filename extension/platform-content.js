@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-plain-errors-v202";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-error-guidance-v203";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1709,6 +1709,8 @@
     const detail = details.capture_detail;
     // Translate only at the display boundary. The original Error, native failure
     // check and diagnostic codes still own reporting, retries and recovery.
+    if (code === "no_conversation" || isNoConversationError(error)) return NO_CONVERSATION_ERROR_MESSAGE;
+    if (code === "transfer_timeout") return "Transfer timed out. Please try again.";
     if (code === "capture_roles_unverified") {
       return "We found messages, but couldn’t read the conversation reliably. Refresh the page and try again.";
     }
@@ -1721,7 +1723,11 @@
     if (code === "request_too_large") {
       return "This chat is too large to send for a summary. Our limit is 4,400,000 bytes. Try a shorter chat.";
     }
+    if (["rate_limited", "service_busy", "client_not_allowed"].includes(code) && error?.message) return error.message;
     if (isCaptureSizeLimitError(error)) return getCaptureSizeLimitMessage(error);
+    if (["message_timeout", "message_receiver_missing", "message_reply_missing", "message_reply_invalid", "message_transport_failed"].includes(code)) {
+      return "Cap Context couldn’t connect to this page. Refresh this chat and try again.";
+    }
     if (["capture_json_unavailable", "capture_json_failed", "capture_dom_failed"].includes(code)) {
       if (["Invalid unreadable-file notice.", "Invalid separate-file notice."].includes(error?.message)) {
         return "We couldn’t prepare this chat’s file information. Refresh the page and try again.";
@@ -1736,12 +1742,34 @@
       if (detail === "hook_unavailable" || code === "capture_json_unavailable") {
         return "Cap Context isn’t ready on this page yet. Refresh the page and try again.";
       }
-      if (["http_error", "network_error", "non_json_response", "invalid_json", "timeout"].includes(detail)) {
+      if (detail === "missing_text") {
+        return "We couldn’t find readable conversation text in this chat. Try another chat.";
+      }
+      if (detail === "network_error") {
+        // Only the browser's explicit offline signal gets offline guidance.
+        return navigator.onLine === false
+          ? "You appear to be offline. Reconnect to the internet, then try again."
+          : `We couldn’t connect to ${currentPlatform.name}. Check your internet connection, then try again.`;
+      }
+      if (detail === "timeout") return "Reading this chat took too long. Refresh the page and try again.";
+      if (detail === "http_error") {
+        const status = details.capture_http_status;
+        if ([401, 403].includes(status)) {
+          return `We couldn’t access this chat. Open it in ${currentPlatform.name}, check that you’re signed in, then try again.`;
+        }
+        if (status === 429) return "The AI website asked us to slow down. Wait a little, then try again.";
+        if ([408, 500, 502, 503, 504, 529].includes(status)) {
+          return `${currentPlatform.name} couldn’t load this chat right now. Wait a moment, then try again.`;
+        }
+      }
+      if (["http_error", "non_json_response", "invalid_json"].includes(detail)) {
         return "We couldn’t load this chat. Refresh the page and try again.";
       }
       return "We couldn’t read this chat completely. Refresh the page and try again.";
     }
-    return error?.message || "Transfer failed. Please try again.";
+    // Unknown failures need an honest fallback, not a guessed cause or a raw
+    // exception. Reporting has already retained the original diagnosis.
+    return "We couldn’t finish the transfer. Refresh this chat and try again.";
   }
 
   function markCaptureDone(trace, conversationText) {

@@ -984,7 +984,8 @@ async function startFixtureServer() {
         assert.equal(request.headers["chatgpt-account-id"], "smoke-account");
         assert.equal(url.search, "", "The full-tree URL must not carry recent-page parameters.");
       }
-      response.writeHead(full && CHATGPT_FAILURE_SMOKE === "ranged" ? 206 : 200, { "Content-Type": "application/json" });
+      const failureStatus = { ranged: 206, "access-denied": 403 }[CHATGPT_FAILURE_SMOKE];
+      response.writeHead(full && failureStatus ? failureStatus : 200, { "Content-Type": "application/json" });
       const history = JSON.stringify(full ? chatGptTreeFixture() : { messages: [], page_info: { has_previous_page: true } });
       // Keep the first native read pending across destination selection, as a
       // large real chat does. The discovery request remains unaffected.
@@ -3341,7 +3342,7 @@ async function run() {
         assert.equal(failedCapture.calls, 0, "Failed JSON capture must never scroll the sidebar.");
       }
       assert.equal(failedCapture.fallbackNotice, false, `Terminal capture errors must not enter DOM recovery: ${JSON.stringify(failedCapture)}`);
-      assert.match(failedCapture.error, /couldn’t (?:read|load)|too long|limit/i);
+      assert.match(failedCapture.error, /couldn’t (?:read|load|access)|too long|limit/i);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
       assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
       if (CHATGPT_FAILURE_SMOKE === "partial") {
@@ -3352,6 +3353,15 @@ async function run() {
         assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "incomplete_history");
         assert.equal(terminal.diagnostics.json_attempts[0].failure_stage, "serialize");
         assert.doesNotMatch(JSON.stringify(terminal), /We couldn’t read this chat completely/);
+      }
+      if (CHATGPT_FAILURE_SMOKE === "access-denied") {
+        assert.equal(failedCapture.error, "We couldn’t access this chat. Open it in ChatGPT, check that you’re signed in, then try again.");
+        const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the original access rejection behind its notice");
+        assert.equal(terminal.diagnostics.error_code, "capture_json_failed");
+        assert.equal(terminal.diagnostics.capture_detail, "http_error");
+        assert.equal(terminal.diagnostics.capture_http_status, 403);
+        assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "http_error");
+        assert.equal(terminal.diagnostics.json_attempts[0].http_status, 403);
       }
       if (SIZE_CAPTURE_SMOKE) {
         assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /too large.*limit is 1,000,000 characters/ : /too large.*limit is [\d,]+ bytes/);

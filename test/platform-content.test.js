@@ -303,6 +303,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   innerHeight = 720,
   runtimeSendMessage = async () => ({ ok: true }),
   clipboardWrite = null,
+  online,
   storageSet = null
 } = {}) {
   let hooks = null;
@@ -443,7 +444,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   const sandbox = {
     TextEncoder,
     AbortController,
-    navigator: { userAgent: "Chrome", ...(clipboardWrite ? { clipboard: { writeText: clipboardWrite } } : {}) },
+    navigator: { userAgent: "Chrome", ...(typeof online === "boolean" ? { onLine: online } : {}),
+      ...(clipboardWrite ? { clipboard: { writeText: clipboardWrite } } : {}) },
     console: {
       ...console,
       debug: () => {},
@@ -3928,7 +3930,8 @@ clockTest("ChatGPT empty-chat notice explains login only for the active logged-o
     assert.equal(hooks.document.getElementById("context-generator-error-title").textContent,
       needsLogin ? "You are not logged into ChatGPT" : empty ? "Chat is empty" : "Transfer failed", `${hostname}${pathname}`);
     assert.equal(hooks.document.getElementById("context-generator-error-text").textContent,
-      needsLogin ? "Log in to ChatGPT, then try again." : message);
+      needsLogin ? "Log in to ChatGPT, then try again." : empty ? message
+        : "We couldn’t finish the transfer. Refresh this chat and try again.");
   }
 });
 
@@ -3936,7 +3939,7 @@ clockTest("plain error notices preserve the real cause in the error and terminal
   const refresh = "Refresh the page and try again.";
   const cases = [
     ["summary_failed", undefined, "PRIVATE summary-service failure",
-      "Try again right now. We might have made a mistake. It almost never happens the second time.", "summary"],
+      "Try again right now. We might have made a mistake. It almost never happens the second time.", { stage: "summary" }],
     ["capture_roles_unverified", undefined, "Chat messages were found, but their user/assistant roles could not be verified.",
       `We found messages, but couldn’t read the conversation reliably. ${refresh}`],
     ["capture_json_unavailable", "hook_unavailable", "Claude JSON hook is not ready.",
@@ -3950,7 +3953,23 @@ clockTest("plain error notices preserve the real cause in the error and terminal
     ["capture_json_failed", "branch_cycle", "ChatGPT JSON capture blocked: The active branch contains a parent cycle.",
       `We couldn’t read this chat completely. ${refresh}`],
     ["capture_json_failed", "http_error", "The full-tree request returned HTTP 503.",
-      `We couldn’t load this chat. ${refresh}`],
+      "ChatGPT couldn’t load this chat right now. Wait a moment, then try again."],
+    ...[401, 403].map(status => ["capture_json_failed", "http_error", `PRIVATE HTTP ${status}`,
+      "We couldn’t access this chat. Open it in ChatGPT, check that you’re signed in, then try again.", { status }]),
+    ["capture_json_failed", "http_error", "PRIVATE HTTP 429",
+      "The AI website asked us to slow down. Wait a little, then try again.", { status: 429 }],
+    ["capture_json_failed", "http_error", "PRIVATE HTTP 404", `We couldn’t load this chat. ${refresh}`, { status: 404 }],
+    ["capture_json_failed", "network_error", "PRIVATE network failure",
+      "We couldn’t connect to ChatGPT. Check your internet connection, then try again."],
+    ["capture_json_failed", "network_error", "PRIVATE offline failure",
+      "You appear to be offline. Reconnect to the internet, then try again.", { online: false }],
+    ["capture_json_failed", "timeout", "PRIVATE native read timeout", `Reading this chat took too long. ${refresh}`],
+    ["capture_json_failed", "missing_text", "No usable user or assistant text was found.",
+      "We couldn’t find readable conversation text in this chat. Try another chat."],
+    ["message_transport_failed", undefined, "PRIVATE native messaging error",
+      "Cap Context couldn’t connect to this page. Refresh this chat and try again."],
+    ["unknown_error", undefined, "PRIVATE unexpected exception with secret details",
+      "We couldn’t finish the transfer. Refresh this chat and try again."],
     ["capture_json_failed", "invalid_json", "Invalid or truncated Gemini RPC response.",
       `We couldn’t load this chat. ${refresh}`],
     ...["Invalid unreadable-file notice.", "Invalid separate-file notice."].map(message => [
@@ -3964,15 +3983,15 @@ clockTest("plain error notices preserve the real cause in the error and terminal
     ["conversation_too_large", "attachment_size_limit", "Original attachment byte guard.",
       "These text files are too large to transfer together. The total limit is 4,100,000 bytes."]
   ];
-  for (const [code, detail, originalMessage, expected, stage = "capture"] of cases) {
+  for (const [code, detail, originalMessage, expected, { stage = "capture", status = 503, online } = {}] of cases) {
     const sent = [];
-    const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => { sent.push(message); return { ok: true }; } });
+    const hooks = loadPlatformContent([], "chatgpt.com", { online, runtimeSendMessage: async message => { sent.push(message); return { ok: true }; } });
     for (const id of ["overlay", "title", "text", "mark"]) {
       hooks.registerElementId(`context-generator-error-${id}`, new FakeElement());
     }
     const error = Object.assign(new Error(originalMessage), { diagnosticCode: code,
       diagnostics: { version: 1, ...(detail ? { capture_detail: detail } : {}),
-        ...(detail === "http_error" ? { capture_http_status: 503 } : {}) } });
+        ...(detail === "http_error" ? { capture_http_status: status } : {}) } });
     const original = JSON.stringify({ message: error.message, code: error.diagnosticCode, diagnostics: error.diagnostics });
     const trace = hooks.beginTransferAttempt("claude", "destination tile");
     hooks.recordTransferFailureDiagnostics(trace, error);
@@ -3986,8 +4005,9 @@ clockTest("plain error notices preserve the real cause in the error and terminal
     const terminal = sent.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").at(-1).event;
     assert.equal(terminal.diagnostics.error_code, code);
     assert.equal(terminal.diagnostics.capture_detail, detail);
-    if (detail === "http_error") assert.equal(terminal.diagnostics.capture_http_status, 503);
-    assert.doesNotMatch(JSON.stringify(terminal), /Refresh the page|RPC response|parent cycle|Original attachment/);
+    if (detail === "http_error") assert.equal(terminal.diagnostics.capture_http_status, status);
+    if (online === false) assert.equal(terminal.diagnostics.online, false);
+    assert.doesNotMatch(JSON.stringify(terminal), /PRIVATE|Refresh the page|RPC response|parent cycle|Original attachment/);
   }
 });
 

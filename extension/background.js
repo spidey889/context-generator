@@ -1055,6 +1055,7 @@ function isUuid(value) {
 async function handleToolbarClick(tab) {
   try {
     clearBadge();
+    setToolbarMessage(tab?.id);
 
     const platform = getPlatformFromUrl(tab.url);
     if (!tab.id || !platform) {
@@ -1073,7 +1074,21 @@ async function handleToolbarClick(tab) {
     }
   } catch (error) {
     console.error("[Context Generator Relay]", error);
+    setToolbarMessage(tab?.id, getPlatformFromUrl(tab?.url)
+      ? "Cap Context couldn’t open here. Refresh this chat and try again."
+      : "Open a Claude, ChatGPT, Gemini, Grok, or DeepSeek chat to use Cap Context.");
     await setBadge("ERR", "#b42318", 5000);
+  }
+}
+
+async function setToolbarMessage(tabId, title = "Carry context to another AI") {
+  if (!Number.isInteger(tabId)) return;
+  try {
+    // Per-tab tooltips can explain failure even where we cannot inject a notice.
+    // The next click restores the ordinary title; decoration cannot block work.
+    await chrome.action.setTitle?.({ tabId, title });
+  } catch {
+    console.debug("[Context Generator] Toolbar message unavailable.");
   }
 }
 

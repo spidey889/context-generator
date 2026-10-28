@@ -133,6 +133,7 @@ function loadBackgroundForTransferTest({
     fetched: [],
     removed: [],
     errors: [],
+    titles: [],
     badges: []
   };
   const event = { addListener: () => {} };
@@ -150,7 +151,8 @@ function loadBackgroundForTransferTest({
       action: {
         onClicked: { addListener: listener => { toolbarClickListener = listener; } },
         setBadgeBackgroundColor: async () => badgeImpl?.(),
-        setBadgeText: async options => { operations.badges.push(options.text); }
+        setBadgeText: async options => { operations.badges.push(options.text); },
+        setTitle: async options => { operations.titles.push(options); }
       },
       alarms: {
         clear: async () => true,
@@ -324,6 +326,7 @@ test("toolbar opens the picker on supported tabs without starting a transfer or 
     assert.deepEqual(JSON.parse(JSON.stringify(operations.sent[0].message)), { type: "OPEN_DESTINATION_PICKER" });
     assert.equal(operations.created.length + operations.fetched.length, 0);
     assert.deepEqual(operations.badges, [""], "opening the picker only clears an old badge");
+    assert.deepEqual(JSON.parse(JSON.stringify(operations.titles)), [{ tabId: 7, title: manifest.action.default_title }]);
   }
 });
 
@@ -348,6 +351,9 @@ test("toolbar repairs a missing receiver but rejects unsupported tabs and failed
     assert.equal(rejected.operations.sent.length, tab === sourceTab ? 1 : 0);
     assert.equal(rejected.operations.badges.at(-1), "ERR");
     assert.equal(rejected.operations.created.length, 0);
+    if (Number.isInteger(tab.id)) assert.equal(rejected.operations.titles.at(-1).title,
+      tab === sourceTab ? "Cap Context couldn’t open here. Refresh this chat and try again."
+        : "Open a Claude, ChatGPT, Gemini, Grok, or DeepSeek chat to use Cap Context.");
   }
 });
 
@@ -1247,7 +1253,7 @@ clockTest("expired transfer messages cannot fetch summaries, open tabs, paste or
     assert.equal(response.code, "transfer_timeout");
   }
   const { errors, badges, ...transferOperations } = harness.operations;
-  assert.deepEqual(transferOperations, { cancellationOrder: [], created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [], removed: [] });
+  assert.deepEqual(transferOperations, { cancellationOrder: [], created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [], removed: [], titles: [] });
   assert.equal(errors[0][1].code, "transfer_timeout", "real failures must still be logged");
   assert.ok(badges.includes("ERR"));
 });
