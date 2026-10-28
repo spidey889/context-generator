@@ -45,8 +45,7 @@ async function checkProviderFailures(db, sql, migrations) {
     await db.exec("reset role;");
     const old = { ...sample, id: "c0de5714-0000-4000-8000-000000000003", occurred_at: "2000-01-01T00:00:00.000Z" };
     await db.query("select public.record_provider_failure($1::jsonb)", [JSON.stringify(old)]);
-    const job = (await rows("select command,schedule from cron.job where jobname='prune-provider-failures'"))[0];
-    equal(job.schedule, "23 3 * * *");
+    const job = (await rows("select command from cron.job where jobname='prune-provider-failures'"))[0];
     await db.exec(job.command);
     equal((await rows("select count(*)::int as count from public.provider_failures"))[0].count, 2);
     const restored = await require("./check-telemetry-backup").checkSnapshot({

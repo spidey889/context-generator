@@ -41,8 +41,6 @@ async function checkFileSizeFailureReason(db, sql, migrations) {
       && transfer.diagnostics?.capture_detail === "attachment_size_limit") transfer.failure_reason = "file_size_limit";
   }
   equal(await snapshot(), expected);
-  equal((await db.query("select count(*)::int as count from information_schema.columns where table_schema='public' and table_name='transfers'")).rows[0].count, 18);
-  equal((await db.query("select count(*)::int as count from information_schema.columns where table_schema='public' and table_name='transfers' and column_name='file_size_failure_reason'")).rows[0].count, 0);
   equal(await outcome(1), { status: "failed", failure_reason: "file_size_limit" });
   equal(await outcome(2), { status: "failed", failure_reason: "conversation_too_large" });
   equal(await outcome(3), { status: "succeeded", failure_reason: null });

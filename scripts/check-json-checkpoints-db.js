@@ -29,13 +29,18 @@ async function checkJsonCheckpoints(db, sql) {
     failure_check: "routing_unavailable", progress_seq: 3 };
   const report = entries => ({ version: 1, json_attempts: entries });
   const samples = [{ label: "routing checkpoint", value: report([first]), expected: true }];
+  const boundaries = [{ ...first }, { ...first }];
   for (const key of checkpointKeys) {
     const rule = contract.jsonAttemptSchema[key];
-    for (const value of [...(rule.values || (rule.type === "boolean" ? [true,false] : [rule.min || 0,rule.max])), "PRIVATE", null])
+    const values = rule.values || (rule.type === "boolean" ? [true,false] : [rule.min || 0,rule.max]);
+    boundaries[0][key] = values[0];
+    boundaries[1][key] = values.at(-1);
+    for (const value of ["PRIVATE", null])
       samples.push({ label: key, value: report([{ ...first, [key]: value }]),
         expected: typeof value === rule.type && (rule.values ? rule.values.includes(value)
           : rule.type !== "number" || Number.isInteger(value) && value >= (rule.min || 0) && value <= rule.max) });
   }
+  boundaries.forEach((value, index) => samples.push({ label: `complete checkpoint boundary ${index}`, value: report([value]), expected: true }));
   for (const key of ["title","filename","url","chat_id","request_id","error_message","stack"])
     samples.push({ label: key, value: report([{ ...first, [key]: "PRIVATE" }]), expected: false });
   samples.push({ label: "unfinished observation", value: report([{ ...first, outcome: "started" }]), expected: true });

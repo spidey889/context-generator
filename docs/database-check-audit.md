@@ -173,3 +173,70 @@ using the existing LF-normalized local input. JavaScript syntax and diff checks
 also pass. Only test verifiers and this audit change; production files and SQL
 migrations are unchanged. This remains a local commit on the same worktree
 branch, with no push or merge.
+
+## All remaining original checks: 701-1645
+
+Continued locally from `aa5bcad`, extending the requested next batch to all
+945 remaining original assertions. The execution trace now also accounts for
+the nine assertions grouped into `checks += 3` in the JSON helpers: the original
+trace and verifier both report exactly 1,645. No earlier cleanup removed an
+assertion in this remaining range.
+
+This pass reduces these 945 counted assertions to 553: 392 fewer. The whole
+local suite falls from 1,446 to 1,054. Every migration and every real receipt,
+counter, retry, immutability, access, backup and recovery scenario remains.
+
+| Original checks | Area | Before | After | Decision |
+| --- | --- | --- | --- | --- |
+| 701-712 | Remaining draft recovery | 12 | 12 | Keep authenticated work, duplicate handled outcomes, missing acknowledgements and direct-write rejection. |
+| 713-728 | Attachment-size labels | 16 | 16 | Keep both historical label cutovers, exact recomputation and the other failure categories. |
+| 729-749 | File-size failure reason | 21 | 19 | Remove the fixed intermediate column count and duplicate column-absence query; the bounded restore still requires the exact removed-column list. |
+| 750-1060 | Initial JSON observation schema | 311 | 175 | Combine positive fields and enum boundaries into complete records; keep all numeric, private-key and malformed negatives. |
+| 1061-1073 | JSON label-only successor | 13 | 13 | Keep implementation/grant equality and both new labels' before/after acceptance checks. |
+| 1074-1091 | TokenHarbor routes | 18 | 18 | Keep both model routes through restricted-role writes, unverified reports, authentic upgrades and idempotency. |
+| 1092-1105 | Dots display label | 14 | 14 | Keep all-row preservation, old queued receipts, unverified reports and sticky verified attribution. |
+| 1106-1123 | Historical provider-failure table | 18 | 17 | Remove the retired prune job's fixed schedule; execute its real command and keep retention, private grants, invalid input and backup recovery. |
+| 1124-1146 | Provider evidence in diagnostics | 23 | 23 | Keep migration preservation, counter/identity isolation, client-forgery rejection and recorder-to-Edge-to-SQL lost-acknowledgement recovery. |
+| 1147-1161 | File-download diagnostics | 15 | 15 | Keep real fetch/HTTP/body observations, all private/boundary failures and persistence under the service role. |
+| 1162-1178 | Raised admission limits | 17 | 15 | Remove an arbitrary interior character-count sample and a duplicate file endpoint. Keep an independent literal assertion that 4,100,000 bytes is accepted, both old boundaries, new caps and above-limit rejection. |
+| 1179-1189 | Destination authentication clue | 11 | 11 | Keep exact schema/implementation preservation and true/false versus URL, number and null behavior. |
+| 1190-1289 | Attachment-decode diagnostics | 100 | 30 | Combine valid enum cases; keep every private/null rejection, unknown key and actual stored decode failure. |
+| 1290-1465 | Summary-response failures | 176 | 100 | Combine valid field/boundary samples; retain all malformed/private arrays and both-attempt merge, late-report and terminal-freeze scenarios. |
+| 1466-1596 | JSON capture checkpoints | 131 | 53 | Combine valid fields/boundaries; retain unfinished observations, malformed/private cases and all retry/progress/terminal ordering. |
+| 1597-1644 | Published-worker receipt integration | 48 | 21 | Keep all four models, every send and forged-model rejection; compare response vectors and all observed RPC names together. |
+| 1645 | Final-schema backup restore | 1 | 1 | Keep the complete final recovery and preserved-value verification. |
+
+### What consolidation retains
+
+- The initial JSON schema's 138 individual positive field/enum examples become
+  two records containing every field at its first/last allowed value. Numeric
+  minimum/maximum values remain explicit; exact full schema equality retains
+  all enum members. Legacy and two-attempt acceptance remain separate.
+- Attachment decoding's 72 positive enum examples become two complete boundary
+  records, with its legacy record retained. Its twelve private/null value cases,
+  seven private keys, schema/implementation checks and real persistence remain.
+- Summary responses' 78 positive field examples become two complete records.
+  All 87 negative samples and all stateful two-attempt writes remain.
+- Checkpoints' 80 positive field examples become two complete records. The
+  routing and unfinished-observation records, all 39 negative samples, and all
+  monotonic/stale/terminal write scenarios remain.
+- Receipt integration collects the four expected delivery statuses per model
+  into one vector instead of four assertions. All sixteen RPC names are still
+  observed and must form exactly the expected singleton route set. Each model's
+  persisted outcome, proof, counters and invalid-model response stay separate.
+
+Combined positive failures identify a record/boundary instead of one field;
+exact schema comparisons and separately labelled rejection cases still help
+locate the cause. No rejection predicate or expected invalid input was weakened.
+
+Validation compared every pure-validator sample batch to the original suite:
+all 373 negative payload/expectation pairs are unchanged at their original
+migration boundaries, and all 240 positive numeric/boolean path-values remain.
+The complete local replay passes 1,054 assertions across all 52 migrations;
+syntax and diff checks also pass. The same LF-only disposable SQL input is used
+for the existing Windows migration-body comparison issue. Production code,
+SQL history, hosted data and CI configuration are unchanged.
+
+All original checks 1-1645 have now been audited. These later commits remain
+only on the local `codex/db-next200-audit` worktree branch; no push or merge is
+part of this work.

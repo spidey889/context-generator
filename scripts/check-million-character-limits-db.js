@@ -30,12 +30,14 @@ async function checkMillionCharacterLimits(db, sql) {
   const historicalAttemptSchema = require("./check-json-checkpoints-db").beforeCheckpoints();
   for (const key of ["failure_file_extension", "failure_response_charset", "failure_body_hint", "failure_decode_stage"]) delete historicalAttemptSchema[key];
   equal(JSON.parse(definitions.client.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalAttemptSchema);
+  // Keep an independent assertion that the new file endpoint is accepted;
+  // omit its duplicate from the parity matrix below.
   equal((await validClient(file))[0].valid, true);
-  for (const count of [350000, 350001, 500000, 1000000, 1000001]) {
+  for (const count of [350000, 350001, 1000000, 1000001]) {
     const sample = { ...event, input_chars: count };
     equal((await validProvider(sample))[0].valid, provider.validate(sample) !== null);
   }
-  for (const count of [2100000, 2100001, 4100000, 4100001]) {
+  for (const count of [2100000, 2100001, 4100001]) {
     const sample = { version: 1, json_attempts: [{ outcome: "failed", mode: "fresh", failure_file_bytes: count }] };
     equal((await validClient(sample))[0].valid, diagnostics.validate(sample) !== null);
   }

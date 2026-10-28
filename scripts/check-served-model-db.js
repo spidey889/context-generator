@@ -106,13 +106,14 @@ async function checkStoreModelReceipts(db) {
   const fields = ["attempt_id", "install_id", "attempted_at", "source_platform", "destination_platform", "character_count",
     "status", "last_stage", "failure_reason", "extension_version", "summary_verified", "completed_at", "summary_confirmed_at", "model", "reported_model"];
   const types = ["uuid", "text", "timestamptz", "text", "text", "integer", "text", "text", "text", "text", "boolean", "timestamptz", "timestamptz", "text", "text"];
+  const rpcNames = new Set();
   let rpcFailure;
   const handler = createTelemetryHandler({
     getEnv: name => ({ TELEMETRY_SIGNING_KEY: secret, TELEMETRY_RELAY_SECRET: secret,
       SUPABASE_URL: "https://store-check.invalid", SUPABASE_SERVICE_ROLE_KEY: "local-only" })[name],
     log() {},
     createClient: () => ({ rpc: async (name, args) => {
-      equal(name, "record_transfer_event");
+      rpcNames.add(name);
       await db.exec("set role service_role");
       try {
         await db.query(`select public.record_transfer_event(${types.map((type, i) => `$${i + 1}::${type}`).join(",")})`, fields.map(field => args[`p_${field}`]));
@@ -138,12 +139,13 @@ async function checkStoreModelReceipts(db) {
       extension_version: "1.4.8", summary_confirmed_at: attempted };
     const summary_proof = await createSummaryProof({ ...event, model }, secret);
     const oldWorker = { ...event, summary_proof }; // No model field survives the old worker.
-    equal((await send(oldWorker)).status, 204);
+    const statuses = [(await send(oldWorker)).status];
     const terminal = { ...oldWorker, status: "failed", last_stage: "paste_started", failure_reason: "paste_failed" };
-    equal((await send(terminal)).status, 204);
-    equal((await send(terminal)).status, 204);
+    statuses.push((await send(terminal)).status);
+    statuses.push((await send(terminal)).status);
     const legacyProof = await createSummaryProof(event, secret);
-    equal((await send({ ...terminal, summary_proof: legacyProof })).status, 204);
+    statuses.push((await send({ ...terminal, summary_proof: legacyProof })).status);
+    equal(statuses, [204, 204, 204, 204]);
     const row = (await db.query("select model,status,failure_reason,summary_verified from public.transfers where attempt_id=$1", [event.attempt_id])).rows[0];
     equal(row, { model: model === "inclusionai/ling-3.1-flash" ? "space bunny 2" : model === "dots-studio/dots-3-note-preview:free" ? "dots (free)" : model,
       status: "failed", failure_reason: "paste_failed", summary_verified: true });
@@ -151,6 +153,9 @@ async function checkStoreModelReceipts(db) {
     equal((await send({ ...terminal, model: "made-up-model" })).status, 422);
     equal(await counts(), { total: index + 1, today: index + 1, failed: index + 1 });
   }
+  // Every observed RPC still has to use the expected route, once for the whole
+  // matrix. Status vectors retain every delivery and legacy-proof response.
+  equal([...rpcNames], ["record_transfer_event"]);
   console.log(`PASS: ${checks} Web Store receipt, real Edge/RPC, sticky model/outcome and duplicate-counter checks.`);
   return checks;
 }
