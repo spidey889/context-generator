@@ -23,17 +23,15 @@ async function checkSummaryResponseDiagnostics(db, sql) {
   equal(JSON.parse(definition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.schema);
   equal(JSON.parse(definition.match(/summary_response_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.summaryResponseFailureSchema);
   const samples = [{ label: "legacy report", value: { version: 1, summary_http_status: 200 }, expected: true }];
-  const boundaries = [{ ...base }, { ...base }];
   for (const [key, rule] of Object.entries(contract.summaryResponseFailureSchema)) {
     const values = rule.values || (rule.type === "boolean" ? [true, false] : [rule.min || 0, rule.max]);
-    boundaries[0][key] = values[0];
-    boundaries[1][key] = values.at(-1);
+    for (const value of new Set([values[0], values.at(-1)]))
+      samples.push({ label: `response failure ${key} ${value}`, value: report([{ ...base, [key]: value }]), expected: true });
     for (const value of ["PRIVATE", null, ...(rule.type === "number" ? [-1, 0.5, rule.max + 1] : [])])
       samples.push({ label: `reject invalid ${key} ${value}`, value: report([{ ...base, [key]: value }]), expected: false });
   }
-  // Preserve all fields, numeric endpoints and both boolean states in two
-  // records. Schema parity retains the full enum sets; every rejection remains.
-  boundaries.forEach((value, index) => samples.push({ label: `complete response failure boundary ${index}`, value: report([value]), expected: true }));
+  // Each optional field must work without the other optional fields. Full
+  // schema equality covers enum interiors; sparse cases protect that contract.
   for (const entries of [[base, base], [base, { ...base, attempt: 2 }, { ...base, attempt: 3 }], [null], [{ attempt: 1 }]])
     samples.push({ label: "reject invalid response array", value: report(entries), expected: false });
   for (const key of ["text", "summary", "filename", "url", "headers", "request_id", "stack", "message", "body"])

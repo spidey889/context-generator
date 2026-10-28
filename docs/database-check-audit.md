@@ -1,5 +1,13 @@
 # Database check audits
 
+## Reviewed result
+
+The pre-merge review restored sparse diagnostic acceptance coverage. The final
+suite has 1,326 assertions across all 52 migrations, down from the original
+1,645. The batch sections below describe each historical cleanup commit; the
+pre-merge review at the end supersedes their complete-record consolidations
+and records the final verification.
+
 ## Original checks 1-100
 
 Reviewed against `41fd38b` in execution order in
@@ -117,8 +125,8 @@ part of this pass; the rest of the timestamp-reference loop is left intact.
 Only verifier scripts and this audit changed.
 
 Validation: baseline 1,624; after cleanup 1,585, all passing through the same
-LF-normalized local SQL input described above. This pass is committed on the
-local `codex/db-next200-audit` worktree branch and is not pushed or merged.
+LF-normalized local SQL input described above. This pass was initially committed
+only on the local `codex/db-next200-audit` worktree branch.
 
 ## Original checks 301-700
 
@@ -171,7 +179,7 @@ names still cannot be written.
 Validation: all 1,446 database assertions pass across the same 52 migrations,
 using the existing LF-normalized local input. JavaScript syntax and diff checks
 also pass. Only test verifiers and this audit change; production files and SQL
-migrations are unchanged. This remains a local commit on the same worktree
+migrations are unchanged. This was initially a local commit on the same worktree
 branch, with no push or merge.
 
 ## All remaining original checks: 701-1645
@@ -237,6 +245,47 @@ syntax and diff checks also pass. The same LF-only disposable SQL input is used
 for the existing Windows migration-body comparison issue. Production code,
 SQL history, hosted data and CI configuration are unchanged.
 
-All original checks 1-1645 have now been audited. These later commits remain
-only on the local `codex/db-next200-audit` worktree branch; no push or merge is
-part of this work.
+All original checks 1-1645 were audited. These later commits were initially
+kept only on the local worktree branch, before the owner requested the review
+and CI-gated publication below.
+
+## Pre-merge review of every cleanup commit
+
+Reviewed `5fe09cf`, `75082f4`, `aa5bcad` and `3b25db4` against the original
+`41fd38b` suite. Complete positive diagnostic records could hide an accidental
+requirement for another optional field. Real extension updates can be sparse,
+so accepting a complete record does not prove that a partial update still works.
+
+Restored independent acceptance cases instead of relying on complete records:
+
+| Area | Assertions restored | Coverage |
+| --- | --- | --- |
+| Initial transfer diagnostics | 79 | Each historical field works independently. |
+| Typed failure diagnostics | 26 | Each field's first/last enum value works separately at root and prepared depth. |
+| Initial JSON observations | 89 | Each optional field works independently at its boundary values. |
+| Attachment decoding | 6 | Each decoding field works independently at its enum boundaries. |
+| Summary-response failures | 42 | Each optional failure field works independently. |
+| JSON checkpoints | 30 | Each optional checkpoint field works independently. |
+| Total | 272 | The suite rises from 1,054 to 1,326 assertions. |
+
+A disposable in-memory mutation made `draft_present` wrongly require
+`editor_seen`. The complete-record suite passed that mutation; the restored
+suite rejected it at `historical field draft_present`. No migration file was
+changed. The all-installation backfill comparison also now uses identity-keyed
+results, avoiding dependence on SQL versus JavaScript text sort order.
+
+The remaining reductions cover obsolete behavior, duplicate assertions and
+enum interiors already protected by exact schema equality and generic enum
+validation. All four receipt models, every original receipt send, backfilled
+identities, counter transitions, migration preservation, access controls and
+backup/recovery scenarios remain exercised.
+
+Verification: the full local replay passes all 1,326 assertions and all 52
+migrations using the existing Windows LF-normalized disposable input. A
+comparison with the original sample batches confirms all 373 diagnostic
+rejection payloads at their original migration boundaries and all 240 positive
+numeric/boolean path-values remain. JavaScript syntax and diff checks pass.
+Only verifier scripts and this audit document changed; production code,
+immutable SQL history, CI configuration and Chrome permissions are unchanged.
+Publication requires the branch's exact final commit to pass Offline checks
+before merging to master.

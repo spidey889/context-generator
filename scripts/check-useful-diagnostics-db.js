@@ -26,19 +26,17 @@ async function checkUsefulDiagnostics(db, sql) {
   historicalContract.capture_detail.values = historicalContract.capture_detail.values.filter(value => !["attachment_size_limit", "invalid_utf8"].includes(value));
   equal(historicalRules, historicalContract);
   const samples = [];
-  const boundaries = [{ version: 1 }, { version: 1 }];
-  // Complete positive records visit every key at root and prepared depth.
-  // Negative root/prepared samples stay separate, so a valid root cannot mask
-  // an ignored invalid nested observation. Schema parity covers every member.
+  // Keep sparse root/prepared acceptance independent. Complete records would
+  // hide accidental dependencies between otherwise optional observations.
   for (const key of ["failure_site", "error_type", "error_file", "capture_detail", "capture_request_stage", "summary_failure_detail", "summary_failed_provider"]) {
     const values = historicalRules[key].values;
-    boundaries[0][key] = values[0];
-    boundaries[1][key] = values.at(-1);
+    for (const value of new Set([values[0], values.at(-1)])) {
+      samples.push({ label: `root ${key}: ${value}`, value: { version: 1, [key]: value }, expected: true });
+      samples.push({ label: `prepared ${key}: ${value}`, value: { version: 1, prepared_diagnostics: { version: 1, [key]: value } }, expected: true });
+    }
     samples.push({ label: `root ${key} rejects private text`, value: { version: 1, [key]: "PRIVATE URL/text" }, expected: false });
     samples.push({ label: `prepared ${key} rejects private text`, value: { version: 1, prepared_diagnostics: { version: 1, [key]: "PRIVATE URL/text" } }, expected: false });
   }
-  boundaries.forEach((value, index) => samples.push({ label: `complete typed diagnostics boundary ${index}`,
-    value: { ...value, prepared_diagnostics: value }, expected: true }));
   const report = { version: 1, error_code: "capture_json_failed", failure_site: "capture_session", capture_detail: "http_error", capture_http_status: 403, error_type: "Error" };
   samples.push({ label: "complete capture failure", value: report, expected: true });
   samples.push({ label: "legacy minimal diagnostics", value: { version: 1 }, expected: true });

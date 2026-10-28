@@ -55,10 +55,11 @@ async function checkTransferUserAllocation(db, sql) {
   equal(await unlinked(), 0);
   // Compare every backfilled identity and all three counters in one assertion.
   // Keep the full set, rather than sampling a single installation.
-  equal(await rows(`select install_id,lifetime_summaries::int as total,
+  const backfilled = await rows(`select install_id,lifetime_summaries::int as total,
     today_summaries::int as today,today_failed_attempts::int as failed
-    from public.users where install_id=any($1::text[]) order by install_id`, [missing.map(user => user.install_id)]),
-    missing.map(({ install_id }) => ({ install_id, ...zero })).sort((a, b) => a.install_id.localeCompare(b.install_id)));
+    from public.users where install_id=any($1::text[])`, [missing.map(user => user.install_id)]);
+  equal(Object.fromEntries(backfilled.map(({ install_id, ...counters }) => [install_id, counters])),
+    Object.fromEntries(missing.map(({ install_id }) => [install_id, zero])));
 
   await db.exec("begin");
   try {

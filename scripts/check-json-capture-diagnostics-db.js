@@ -54,17 +54,15 @@ async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
     { label: "two attempts maximum", value: report([attempt, attempt, attempt]), expected: false },
     { label: "missing outcome", value: report([{ mode: "fresh" }]), expected: false }
   ];
-  const boundaries = [{ ...attempt }, { ...attempt }];
   for (const [key, rule] of Object.entries(attemptRules)) {
     const values = rule.values || [rule.min || 0, rule.max];
-    boundaries[0][key] = values[0];
-    boundaries[1][key] = values.at(-1);
+    for (const value of new Set([values[0], values.at(-1)]))
+      samples.push({ label: `observation ${key}`, value: report([{ ...attempt, [key]: value }]), expected: true });
     samples.push({ label: `private/invalid ${key}`, value: report([{ ...attempt, [key]: "PRIVATE text/url/token" }]), expected: false });
     if (rule.type === "number") for (const value of [-1, 0.5, rule.max + 1]) samples.push({ label: `number boundary ${key}`, value: report([{ ...attempt, [key]: value }]), expected: false });
   }
-  // Exact schema equality covers every enum label. Complete first/last records
-  // exercise all fields and numeric boundaries together; negatives stay separate.
-  boundaries.forEach((value, index) => samples.push({ label: `complete observation boundary ${index}`, value: report([value]), expected: true }));
+  // Boundary values still exercise each optional field independently; enum
+  // interiors share the same membership path and exact full-schema comparison.
   for (const key of ["text", "filename", "url", "token", "stack"]) samples.push({ label: `private key ${key}`, value: report([{ ...attempt, [key]: "PRIVATE" }]), expected: false });
   return checks + await checkDiagnosticsSamples(db, samples);
 }
@@ -135,16 +133,12 @@ async function checkAttachmentDecodeDiagnostics(db, sql) {
   const withoutRules = value => value.replace(/\b(?:attempt_rules|rules) constant jsonb := '[^']+'::jsonb/g, "RULES");
   assert.equal(withoutRules(updated), withoutRules(original)); checks++;
   const samples = [{ label: "legacy diagnostics remain valid", value: { version: 1, capture_detail: "network_error" }, expected: true }];
-  const boundaries = [{}, {}];
   for (const key of ["failure_file_extension", "failure_response_charset", "failure_body_hint", "failure_decode_stage"]) {
     const values = contract.jsonAttemptSchema[key].values;
-    boundaries[0][key] = values[0];
-    boundaries[1][key] = values.at(-1);
-    for (const value of ["PRIVATE_FILE.csv", "https://PRIVATE", null])
+    for (const value of [...new Set([values[0], values.at(-1)]), "PRIVATE_FILE.csv", "https://PRIVATE", null])
       samples.push({ label: `attachment decode ${key} ${value}`, value: report({ [key]: value }),
         expected: contract.jsonAttemptSchema[key].values.includes(value) });
   }
-  boundaries.forEach((value, index) => samples.push({ label: `complete attachment decode boundary ${index}`, value: report(value), expected: true }));
   for (const key of ["file_name", "file_id", "url", "prefix", "bytes", "content", "raw_error"])
     samples.push({ label: `reject private field ${key}`, value: report({ [key]: "PRIVATE" }), expected: false });
   checks += await checkDiagnosticsSamples(db, samples);

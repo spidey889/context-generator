@@ -65,8 +65,7 @@ async function checkUserNameReuse(db, sql) {
       $1::uuid,$2::text,clock_timestamp(),'claude','chatgpt',50,'failed','capture_started','capture_failed','1.4.7')`,
       [id(count + 2), install(count + 2)]));
     equal((await one("select today_failed_attempts::int as n from public.users where install_id=$1", [install(count + 2)])).n, 1);
-    // Preserve unique identity and the existing closed name allowlist.
-    // Retain the name allowlist guards even though names may now repeat.
+    // Retain the closed name allowlist even though names may now repeat.
     equal((await one("select count(*)::int as n from pg_constraint where conrelid='public.users'::regclass and conname in ('users_name_check','users_name_in_pool')")).n, 2);
     for (const role of ["anon", "authenticated"]) {
       equal((await one("select has_table_privilege($1,'public.users','INSERT') as allowed", [role])).allowed, false);

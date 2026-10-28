@@ -21,16 +21,14 @@ async function checkTransferDiagnostics(db, sql) {
   equal(await rows("select relname,relacl::text,relrowsecurity from pg_class where oid in ('public.transfers'::regclass,'public.users'::regclass) order by relname"), security);
   equal((await one("select count(*)::int as count from public.transfers where diagnostics is not null")).count, 0);
   const samples = [];
-  const complete = { version: 1 };
   for (const [key, rule] of Object.entries(rules)) {
     const value = rule.values?.[0] ?? (rule.type === "boolean" ? false : rule.type === "number" ? 23 : rule.type === "object"
       ? { version: 1, error_code: "editor_missing", paste_events: [{ event: "failure", at_ms: 23, code: "editor_missing" }] }
       : [{ event: "admission", at_ms: 0 }]);
-    complete[key] = value;
+    samples.push({ label: `historical field ${key}`, value: { version: 1, [key]: value }, expected: true });
   }
-  // The validator visits every key. One complete record retains acceptance
-  // coverage for the full historical field set, alongside exact schema parity.
-  samples.push({ label: "complete historical field set", value: complete, expected: true });
+  // Real updates are sparse. Keep single-field acceptance so a newly required
+  // companion field cannot hide inside a complete-record fixture.
   const malformed = [{}, [], null, { version: 2 }, { version: 1, raw_error: "PRIVATE" },
     { version: 1, capture_chars: -1 }, { version: 1, capture_chars: 1.5 }, { version: 1, paste_attempts: 2147483648 },
     { version: 1, error_code: "PRIVATE" }, { version: 1, online: "true" }, { version: 1, events: [{ event: "PRIVATE", at_ms: 0 }] },
