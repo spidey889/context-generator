@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-error-guidance-v204";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-top-error-notices-v207";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -9646,7 +9646,7 @@
         "position:fixed",
         "z-index:9999999",
         "right:20px",
-        "bottom:80px",
+        "top:80px",
         "width:min(340px,calc(100vw - 32px))",
         "box-sizing:border-box",
         "padding:14px",
@@ -9874,11 +9874,11 @@
       errorDiv.contextGeneratorEnterTimer = null;
       errorDiv.style.display = "flex";
       errorDiv.setAttribute("aria-hidden", "false");
-      // Copy confirmation uses the upper corner; errors retain their placement.
+      // Every notice enters from the same point, including reused error nodes.
       errorDiv.style.right = "20px";
-      errorDiv.style.bottom = copiedContext ? "auto" : "80px";
+      errorDiv.style.bottom = "auto";
       errorDiv.style.left = "auto";
-      errorDiv.style.top = copiedContext ? "80px" : "auto";
+      errorDiv.style.top = "80px";
       const settle = () => {
         errorDiv.contextGeneratorAnimationFrame = null;
         errorDiv.style.opacity = "1";

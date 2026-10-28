@@ -1345,7 +1345,7 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
       handoffShown: window.__emptySmokeHandoffShown,
       sheetHidden: document.getElementById("context-generator-destination-sheet").style.display === "none",
       insideViewport: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight,
-      bottomRight: Math.abs(document.documentElement.clientWidth - rect.right - 20) < 1 && Math.abs(innerHeight - rect.bottom - 80) < 1,
+      topRight: Math.abs(document.documentElement.clientWidth - rect.right - 20) < 1 && Math.abs(rect.top - 80) < 1,
       bounds: { right: rect.right, bottom: rect.bottom, width: document.documentElement.clientWidth, height: innerHeight },
       enteredFromRight: window.__emptySmokeEnteredFromRight,
       role: error.getAttribute("role") };
@@ -1353,7 +1353,7 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
   assert.equal(result.title, "Chat is empty");
   assert.equal(result.message, "Send a message first, then try again.");
   assert.equal(result.handoffShown, false, "Empty chat must never flash the handoff.");
-  assert.equal(result.sheetHidden && result.insideViewport && result.bottomRight && result.enteredFromRight, true, JSON.stringify(result));
+  assert.equal(result.sheetHidden && result.insideViewport && result.topRight && result.enteredFromRight, true, JSON.stringify(result));
   assert.equal(result.role, "alert");
   assert.equal(state.summaryRequests.length, before.summaries);
   assert.equal(state.jsonRequests, before.json);
@@ -1824,9 +1824,9 @@ async function verifyDestinationCopyNotice(session, contextId, { nativeCopy = fa
       check(toast().getAttribute("aria-hidden") === "true" && document.getElementById("context-generator-error-copy-again").onclick === null,
         "Dismiss releases the callback immediately.");
       window.__capSmokeShowError("Synthetic ordinary error.");
-      check(toast().getAttribute("role") === "alert" && toast().style.top === "auto" && toast().style.bottom === "80px"
+      check(toast().getAttribute("role") === "alert" && toast().style.top === "80px" && toast().style.bottom === "auto"
         && toast().style.backdropFilter === "none" && timers.get(toast().contextGeneratorHideTimer)?.ms === 8000,
-        "An ordinary error restores its original placement, palette and duration.");
+        "An ordinary error keeps the shared top-right position and restores its original palette and duration.");
       check(document.getElementById("context-generator-error-copy-again").style.display === "none", "Error notices cannot retain copy actions.");
       document.getElementById("context-generator-error-dismiss").click();
       return { passed: true, nativeCopy: ${nativeCopy} };
