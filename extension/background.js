@@ -1,5 +1,8 @@
 if (!globalThis.CapTransferDiagnostics && typeof importScripts === "function") importScripts("transfer-diagnostics.js");
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
+// Opening a page after removal needs no host access. Keep this URL fixed and
+// anonymous; never add the form to manifest permissions or content-script matches.
+const UNINSTALL_FEEDBACK_URL = "https://docs.google.com/forms/d/e/1FAIpQLSdrKf4ajWa1BVa8Hs3yna2_qafP_RJoOPPytdWQ3HYDXh3aGw/viewform";
 const SUMMARY_CLIENT_HEADER = "cap-context-extension/1";
 // Keep the serialized body below Vercel's 4.5 MB ceiling. Character count
 // alone cannot bound JSON escaping; never submit a clipped conversation.
@@ -259,9 +262,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 initializeBackground();
 
 function initializeBackground() {
+  registerUninstallFeedback();
   injectIntoOpenSupportedTabs();
   scheduleStoredRawTranscriptExpiry();
   initializeTelemetryDelivery();
+}
+
+async function registerUninstallFeedback() {
+  try {
+    // Initialization also runs on updates so existing installations get the form.
+    await chrome.runtime.setUninstallURL(UNINSTALL_FEEDBACK_URL);
+  } catch {
+    // Optional feedback must never prevent normal extension startup.
+    console.debug("[Context Generator] Could not register uninstall feedback.");
+  }
 }
 
 async function scheduleStoredRawTranscriptExpiry() {

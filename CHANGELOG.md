@@ -6,6 +6,7 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-28
 
+- **Add optional uninstall feedback without more permissions.** Publish a basic Google Form with five reasons and an optional comment, no email collection or required sign-in, and a short thank-you. Register its fixed public URL on worker initialization/install/update/startup without identifiers, new host access or content scripts. Keep feedback separate from transfer telemetry and leave normal startup working if registration fails. The published form and source change do not imply a Chrome Web Store update.
 - **Prepare source 1.4.34.** Bump the extension version with the merged capture and handoff animation fixes. Backend deployment and Chrome Web Store publication remain separate.
 - **Keep handoff bars moving and finish smoothly.** Replace the summary line's fixed transition, which stopped at its estimate, with continuous bounded activity. On real completion, glide from the visible position to the end without a next-stage update cancelling the animation. Preserve the existing design, capture/summary work, local sweeps, reduced motion and destination timing.
 - **Show capture in the handoff instead of the picker.** Destination selection now opens the existing handoff while native JSON is still loading. Its capture line moves gently below completion, then continues into summarizing after capture succeeds. Preserve prefetched reads, reduced motion, short local carries and cancellation; DOM recovery keeps its normal interpolation without moving backwards.

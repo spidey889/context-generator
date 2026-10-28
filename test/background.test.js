@@ -113,12 +113,14 @@ function loadBackgroundForTransferTest({
   sendMessageImpl,
   createTabImpl,
   badgeImpl,
+  setUninstallURL = async () => {},
   firstCreatedTabId = 100,
   useRealTimers = false
 } = {}) {
   let messageListener = null;
   let toolbarClickListener = null;
   let tabRemovedListener;
+  const lifecycle = {};
   const closedTabs = new Set();
   let nextCreatedTabId = firstCreatedTabId;
   const operations = {
@@ -157,8 +159,9 @@ function loadBackgroundForTransferTest({
       },
       runtime: {
         id: "cap-context-test",
-        onInstalled: event,
-        onStartup: event,
+        setUninstallURL,
+        onInstalled: { addListener: listener => { lifecycle.installed = listener; } },
+        onStartup: { addListener: listener => { lifecycle.startup = listener; } },
         onMessage: {
           addListener(listener) {
             messageListener = listener;
@@ -213,6 +216,7 @@ function loadBackgroundForTransferTest({
 
   return {
     operations,
+    lifecycle,
     message(message, sender) { let reply; messageListener(message, sender, value => { reply = value; }); return reply; },
     clickToolbar: toolbarClickListener,
     cancel(tabId, sender = {}, options = {}) {
@@ -267,6 +271,31 @@ function loadBackgroundForTransferTest({
     }
   };
 }
+
+test("uninstall feedback registers an anonymous public URL for new and existing installations", () => {
+  const urls = [];
+  const background = loadBackgroundForTransferTest({ setUninstallURL: async url => { urls.push(url); } });
+  background.lifecycle.installed({ reason: "install" });
+  background.lifecycle.installed({ reason: "update" });
+  background.lifecycle.startup();
+  assert.equal(urls.length, 4, "worker load, install, update and startup register the form");
+  assert.ok(urls.every(url => url === urls[0]));
+  const url = new URL(urls[0]);
+  assert.equal(url.origin, "https://docs.google.com");
+  assert.match(url.pathname, /^\/forms\/d\/e\/[^/]+\/viewform$/);
+  assert.equal(url.search, "", "do not append installation, transfer or account data");
+  assert.equal(url.hash, "");
+  assert.equal(background.operations.created.length, 0, "registration does not open the form");
+  assert.equal(background.operations.fetched.length, 0, "registration does not send feedback");
+});
+
+test("uninstall feedback registration failure leaves normal startup available", async () => {
+  const background = loadBackgroundForTransferTest({ setUninstallURL: async () => { throw new Error("unavailable"); } });
+  await new Promise(setImmediate);
+  assert.equal(typeof background.clickToolbar, "function");
+  assert.equal(background.operations.created.length, 0);
+  assert.deepEqual(background.operations.errors, []);
+});
 
 test("summary worker rejects oversized JSON before fetch and admits a full Unicode million-character chat", async () => {
   let calls = 0;
