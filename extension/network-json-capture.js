@@ -66,7 +66,7 @@
       if (!await waitForHook(250, false, signal, metrics)) {
         if (signal?.aborted) throw new Error("Size check cancelled.");
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) metrics.set({ hook_status: "runtime_missing" });
-        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal, metrics)) throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal, metrics)) throw captureError("Fast capture isn't ready yet. Refresh this chat and try again.", "unavailable", "hook_unavailable", "hook");
       }
       if (signal?.aborted) throw new Error("Size check cancelled.");
       metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted });
@@ -102,7 +102,7 @@
             if (measureOnly && Number.isSafeInteger(reply.characterCount) && reply.characterCount >= 0) return resolve({ characterCount: reply.characterCount,
               ...(Number.isSafeInteger(reply.messageTurnCount) && reply.messageTurnCount >= 0 ? { messageTurnCount: reply.messageTurnCount } : {}),
               ...(Number.isSafeInteger(reply.estimatedCharacterCount) && reply.estimatedCharacterCount >= 0 ? { estimatedCharacterCount: reply.estimatedCharacterCount } : {}) });
-            if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason,
+            if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error}`, reply.captureFailureReason,
               reply.captureDetail || "network_error", reply.captureRequestStage || "history", reply.status));
             metrics.stage("serialize");
             const capture = reply.capture;
@@ -122,7 +122,7 @@
             resolve(capture);
           } catch (error) { reject(error); }
         };
-        const timer = setTimeout(() => { cleanup(); reject(captureError("Fast capture timed out. Refresh this chat or turn off the lightning button.", "timeout", "timeout", "history")); }, 27000);
+        const timer = setTimeout(() => { cleanup(); reject(captureError("Fast capture timed out. Refresh this chat and try again.", "timeout", "timeout", "history")); }, 27000);
         signal?.addEventListener("abort", onAbort, { once: true });
         window.addEventListener("message", receive);
         window.postMessage({ channel, platform, type: "request", id, ...before, ...(measureOnly ? { measureOnly: true } : {}), ...(omitLargeFiles ? { omitLargeFiles: true } : {}) }, location.origin);

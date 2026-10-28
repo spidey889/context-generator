@@ -25,7 +25,7 @@
   function serialize(data, chat, metrics, measureOnly = false) {
     metrics?.set({ files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
     // Report structural metadata only, never message text, file names, or tool payloads.
-    const unsupported = (reason, detail = "incomplete_history") => captureError(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
+    const unsupported = (reason, detail = "incomplete_history") => captureError(`This conversation has incomplete or unsupported JSON content: ${reason}`, "incomplete", detail);
     const excludedContentTypes = new Set();
     const skippedFiles = new Map();
     let pastedAttachmentIndex = 0;
@@ -204,7 +204,7 @@
       if (!parts.length) return [];
       return [{ role: message.sender === "human" ? "user" : "assistant", text: parts.join("\n\n") }];
     });
-    if (!hasText) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.", "incomplete");
+    if (!hasText) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts.", "incomplete");
     const text = `Claude conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     metrics?.set({ selected_turns: turns.length });
     if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) {
@@ -274,7 +274,7 @@
         if (signal?.aborted) throw new Error("Size check cancelled.");
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) metrics.set({ hook_status: "runtime_missing" });
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal, metrics)) {
-          throw captureError("Claude JSON hook is not ready. Refresh this chat and try again, or turn JSON capture off.", "unavailable", "hook_unavailable", "hook");
+          throw captureError("Claude JSON hook is not ready. Refresh this chat and try again.", "unavailable", "hook_unavailable", "hook");
         }
       }
       if (signal?.aborted) throw new Error("Size check cancelled.");
@@ -299,7 +299,7 @@
           metrics.adopt(reply.jsonCapture);
           try {
             if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw changedError("The Claude conversation changed during capture.");
-            if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : reply.captureFailureReason || "request_failed",
+            if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation and try again.", reply.error === "busy" ? "unavailable" : reply.captureFailureReason || "request_failed",
               reply.error === "busy" ? "busy" : reply.captureDetail || "network_error", "history", reply.status);
             metrics.stage("serialize");
             try { resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, metrics, measureOnly))); }
@@ -309,7 +309,7 @@
             }
           } catch (error) { reject(error); }
         };
-        const timer = setTimeout(() => { cleanup(); reject(captureError("Claude JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
+        const timer = setTimeout(() => { cleanup(); reject(captureError("Claude JSON capture timed out. Refresh this chat and try again.", "timeout", "timeout", "history")); }, 17000);
         signal?.addEventListener("abort", onAbort, { once: true });
         window.addEventListener("message", receive);
         window.postMessage({ channel, type: "request", id, chat, ...(measureOnly ? { measureOnly: true } : {}) }, location.origin);

@@ -28,7 +28,7 @@
     return { text: "", messageTurnCount: messages.length, estimatedCharacterCount };
   }
   function serialize(data, chat, pastedTexts = {}, sourceTreeCounts, metrics, measureOnly = false) {
-    const blocked = (reason, detail = "incomplete_history") => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
+    const blocked = (reason, detail = "incomplete_history") => captureError(`ChatGPT JSON capture blocked: ${reason}`, "incomplete", detail);
     const excludedContentTypes = new Set();
     const skippedFiles = new Map();
     let pastedAttachmentIndex = 0;
@@ -355,7 +355,7 @@
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) metrics.set({ hook_status: "runtime_missing" });
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal, metrics)) {
           if (signal?.aborted) throw cancelledError();
-          throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
+          throw captureError("Fast capture isn't ready yet. Refresh this chat and try again.", "unavailable", "hook_unavailable", "hook");
         }
       }
       if (signal?.aborted) throw cancelledError();
@@ -401,7 +401,7 @@
               const failureReason = { auth: "unavailable", busy: "unavailable", partial: "incomplete", format: "incomplete", paste: "incomplete", timeout: "timeout" }[reply.error] || "request_failed";
               const detail = reply.captureDetail === "invalid_json" ? "invalid_json" : { auth: "auth_missing", busy: "busy", partial: "partial_response", format: "non_json_response", changed: "conversation_changed", timeout: "timeout", network: "network_error", http: "http_error", paste: "attachment_failed", invalid_json: "invalid_json" }[reply.error] || "network_error";
               const stage = ["session", "history", "attachment_descriptor", "attachment_body"].includes(reply.captureRequestStage) ? reply.captureRequestStage : "history";
-              throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason, detail, stage, reply.status);
+              throw captureError(`ChatGPT JSON capture failed: ${reason}`, failureReason, detail, stage, reply.status);
             }
             metrics.stage("serialize");
             try {
@@ -416,7 +416,7 @@
             }
           } catch (error) { reject(error); }
         };
-        const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, responseTimeoutMs);
+        const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh this chat and try again.", "timeout", "timeout", "history")); }, responseTimeoutMs);
         signal?.addEventListener("abort", onAbort, { once: true });
         window.addEventListener("message", receive);
         debug("bridge_request", { measure: measureOnly });
