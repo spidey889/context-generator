@@ -743,7 +743,7 @@ function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {
     chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: false,
     createTransferTrace: () => ({}), startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
     getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
-    showErrorOverlay: error => calls.errors.push(error), clearRunningResetTimer: noop, resetRunningFlag: noop,
+    showErrorOverlay: error => calls.errors.push(typeof error === "string" ? error : error.message), clearRunningResetTimer: noop, resetRunningFlag: noop,
     transitionDestinationSheetToHandoff: async () => {}, showOverlay: noop, releaseDestinationSheetBackdrop: noop,
     prepareDestinationTab: async () => { calls.prepared++; if (navigateDuringHandoff) window.location.pathname = "/chat/other"; return {}; }, advanceTransferTelemetryStage: noop,
     prepareSourceForCapture: async () => { calls.dom++; }, setHandoffProgress: noop,
