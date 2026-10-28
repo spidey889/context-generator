@@ -244,5 +244,6 @@ test("short last parts and compact final handoffs retain a remote answer allowan
   await handler(request(finalBody()), final);
   assert.equal(final.statusCode, 200);
   assert.equal(requests.length, 2);
-  assert.ok(requests.every(body => body.max_tokens >= 1900 + 8192));
+  assert.equal(requests[0].max_tokens, 1900 + 8192, "A short tail still gets answer tokens.");
+  assert.equal(requests[1].max_tokens, 10000 + 8192, "Compact part summaries must not shrink the original large chat's final answer allowance.");
 });

@@ -58,10 +58,12 @@ async function handler(req, res) {
   const part = validation.large.phase === "part";
   if (!part && !protocol.verifyParts(validation, secret)) return res.status(400).json({ code: "invalid_parts", error: "Conversation parts could not be verified" });
   const conversation = part ? validation.conversation : finalConversation(validation.parts);
-  // A short last part or compact consolidation still needs answer tokens.
-  // The ordinary tiny profile has zero; keep that local-only policy unchanged
-  // on /summarize and floor only this remote part protocol at medium.
-  const profile = { ...getSummaryProfile(conversation.length < 8001 ? "x".repeat(8001) : conversation), directCarry: false };
+  // Compact intermediate summaries still represent an original chat above 1M.
+  // Preserve its largest output allowance when combining; a short last part
+  // only needs a medium floor so the tiny local-only profile cannot give zero.
+  // /summarize's profiles and routing remain unchanged.
+  const profileInput = !part ? "x".repeat(350001) : conversation.length < 8001 ? "x".repeat(8001) : conversation;
+  const profile = { ...getSummaryProfile(profileInput), directCarry: false };
   if (conversation.length > 1000000 || Buffer.byteLength(conversation, "utf8") > protocol.MAX_WIRE_BYTES
     || providerBodyBytes(conversation, profile) > 3800000) return res.status(413).json({ code: "request_too_large", error: "Conversation part needs a smaller encoded size" });
   const releaseSlot = acquireRequestSlot();

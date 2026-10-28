@@ -941,6 +941,9 @@ test("DeepSeek: redirected original files retain exact text and byte guards", as
 test("Network: authenticated history never follows a redirect", async t => {
   let redirectedReads = 0;
   const server = http.createServer((request, response) => {
+    // Rejected fetch redirects destroy their request. Close this disposable
+    // fixture connection too, so Node's idle parser cannot outlive the test.
+    response.setHeader("Connection", "close");
     if (request.url === "/redirect-target") { redirectedReads++; response.end("{}"); return; }
     response.writeHead(302, { Location: "/redirect-target" }); response.end();
   });
