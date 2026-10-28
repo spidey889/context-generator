@@ -1750,7 +1750,13 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   assert.equal(state.destinationRequests, 1, "A draft must never create or reload a second destination.");
   assert.equal(state.summaryRequests.length, 1);
   assert.equal(await destination.evaluate("document.getElementById('context-generator-destination-status')"), null, "The draft box replaces the paste failure banner.");
-  await telemetryFixture.verifyDraftOutcome(terminal);
+  // Both recovery surfaces report asynchronously after the first terminal
+  // event. Compare SQL with the complete signed report, not that early event.
+  const completeDraft = await waitFor(() => state.telemetryRequests.findLast(payload =>
+    payload.attempt_id === terminal.attempt_id && payload.status === "failed" && payload.summary_proof &&
+    ["source", "destination"].every(side => payload.diagnostics?.recovery_events?.some(event => event.event === "box_shown" && event.side === side))),
+  "the signed draft report with both recovery boxes");
+  await waitFor(() => telemetryFixture.verifyDraftOutcome(completeDraft).then(() => true), "the saved complete draft report");
   process.stdout.write("✓ The native login/signup clue reached the saved diagnosis without page text or URLs.\n");
   // Source copying keeps the modal and existing feedback; only destination
   // recovery fades into the copied notice.

@@ -190,11 +190,14 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled, summaryMod
     async verifyDraftOutcome(terminal) {
       if (!databaseEnabled) return;
       await rpcChain;
+      const latest = received.findLast(payload => payload.attempt_id === terminal.attempt_id && payload.status === "failed");
+      assert.equal(latest.summary_proof, terminal.summary_proof, "Recovery updates must retain the signed summary receipt.");
       const row = (await database.query("select status,failure_reason,summary_verified,diagnostics from public.transfers where attempt_id=$1", [terminal.attempt_id])).rows[0];
       assert.equal(row.status, "text_box");
       assert.equal(row.failure_reason, null);
       assert.equal(row.summary_verified, Boolean(terminal.summary_proof));
-      assert.deepEqual(row.diagnostics, terminal.diagnostics);
+      assert.deepEqual(row.diagnostics, latest.diagnostics);
+      for (const side of ["source", "destination"]) assert.ok(row.diagnostics.recovery_events.some(event => event.event === "box_shown" && event.side === side));
       assert.equal(row.diagnostics.error_code, "editor_has_draft");
       assert.equal(row.diagnostics.paste_attempts, 1);
       assert.equal(row.diagnostics.fresh_recovery, undefined);
