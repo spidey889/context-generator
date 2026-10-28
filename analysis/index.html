@@ -460,6 +460,13 @@
       gap: 8px;
     }
 
+    .timeline-note {
+      margin: -4px 0 14px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     .step {
       display: grid;
       grid-template-columns: 140px minmax(0, 1fr) 96px;
@@ -663,14 +670,15 @@
         const delta = step.querySelector(".step-time").textContent.trim();
         const total = step.querySelector(".step-total").textContent.trim();
         const chips = [...step.querySelectorAll(".chip")].map((chip) => chip.textContent.trim());
-        return `${label}: ${delta} (total: ${total})${chips.length ? `\n  ${chips.join("\n  ")}` : ""}`;
+        return `${label}: ${delta}; ${total}${chips.length ? `\n  ${chips.join("\n  ")}` : ""}`;
       });
       const report = [
         "Cap Context — Latest Run",
         `Total time: ${app.querySelector("h1").textContent.trim()}`,
         `Route: ${app.querySelector(".route").textContent.replace(/\s+/g, " ").trim()}`,
         `Receipt: ${app.querySelector(".side-title > span").textContent.trim()}`,
-        "", ...details, "", `Timeline: ${timeline.length} marks`, ...timeline
+        "", ...details, "", `Timeline: ${timeline.length} marks`,
+        "Steps can overlap; do not add their durations.", ...timeline
       ].join("\n");
       clearTimeout(copyFeedbackTimer);
       try {
@@ -841,6 +849,7 @@
             <h2>Timeline</h2>
             <span>${escapeHtml(formatNumber(stats.timeline?.length || 0))} marks</span>
           </div>
+          <p class="timeline-note">Each mark shows the time since the previous mark and since the transfer started. Steps can overlap, so their durations should not be added.</p>
           <div class="timeline-list">
             ${(stats.timeline || []).map(timelineStep).join("")}
           </div>
@@ -891,12 +900,12 @@
 
       return `
         <div class="step">
-          <div class="step-time">+${escapeHtml(formatDuration(step.deltaMs))}</div>
+          <div class="step-time">+${escapeHtml(formatDuration(step.deltaMs))} since previous mark</div>
           <div class="step-label">
             <strong>${escapeHtml(step.label)}</strong>
             <div class="chips">${chips}</div>
           </div>
-          <div class="step-total">${escapeHtml(formatDuration(step.totalMs))}</div>
+          <div class="step-total">${escapeHtml(formatDuration(step.totalMs))} since transfer start</div>
         </div>
       `;
     }
