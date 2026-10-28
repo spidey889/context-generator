@@ -33,8 +33,8 @@
     const receive = event => {
       const reply = event.data;
       if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id
-          && reply.version !== (platform === "deepseek" ? 34 : platform === "grok" ? 23 : 20)) metrics?.set({ hook_status: "version_mismatch" });
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 34 : platform === "grok" ? 23 : 20)) finish(true);
+          && reply.version !== (platform === "deepseek" ? 35 : platform === "grok" ? 24 : 21)) metrics?.set({ hook_status: "version_mismatch" });
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 35 : platform === "grok" ? 24 : 21)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
@@ -102,7 +102,7 @@
             if (measureOnly && Number.isSafeInteger(reply.characterCount) && reply.characterCount >= 0) return resolve({ characterCount: reply.characterCount,
               ...(Number.isSafeInteger(reply.messageTurnCount) && reply.messageTurnCount >= 0 ? { messageTurnCount: reply.messageTurnCount } : {}),
               ...(Number.isSafeInteger(reply.estimatedCharacterCount) && reply.estimatedCharacterCount >= 0 ? { estimatedCharacterCount: reply.estimatedCharacterCount } : {}) });
-            if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error}`, reply.captureFailureReason,
+            if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 4,000,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error}`, reply.captureFailureReason,
               reply.captureDetail || "network_error", reply.captureRequestStage || "history", reply.status));
             metrics.stage("serialize");
             const capture = reply.capture;
@@ -112,7 +112,7 @@
             if (capture?.omittedFiles !== undefined && (!omitLargeFiles || platform !== "deepseek" || !Array.isArray(capture.omittedFiles)
               || capture.omittedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim()
                 || !Number.isSafeInteger(file.bytes) || file.bytes <= 4100000))) return reject(captureError("Invalid separate-file notice.", "incomplete"));
-            if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 1000000 || new TextEncoder().encode(capture.text).length > 4000000) return reject(captureError("Fast capture returned an invalid or incomplete conversation.", "incomplete"));
+            if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 4000000 || new TextEncoder().encode(capture.text).length > 16000000) return reject(captureError("Fast capture returned an invalid or incomplete conversation.", "incomplete"));
             const name = { gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" }[platform];
             // MAIN owns the native adapter. Verify both views agree before accepting
             // its message boundaries; never infer roles from flattened text.

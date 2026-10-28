@@ -23,7 +23,7 @@ test("Chromium loads only its worker; Firefox packaging preserves identity and c
   assert.equal(fs.existsSync(path.join(output, "stale.js")), false);
   assert.equal(fs.existsSync(path.join(output, "chrome.zip")), false);
   const firefox = JSON.parse(fs.readFileSync(path.join(output, "manifest.json"), "utf8"));
-  assert.deepEqual(firefox.background, { scripts: ["transfer-diagnostics.js", "background.js"] });
+  assert.deepEqual(firefox.background, { scripts: ["transfer-diagnostics.js", "large-transfer.js", "background.js"] });
   assert.deepEqual(firefox.browser_specific_settings, { gecko: {
     id: "{8f4d7c20-9f3b-4b7e-9c11-2f4cbe2d41a9}",
     data_collection_permissions: { required: ["personalCommunications"] }

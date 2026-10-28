@@ -126,14 +126,14 @@
   const CHATGPT_LOGGED_OUT_ERROR_MESSAGE = "Log in to ChatGPT, then try again.";
   const SUMMARY_RETRY_ERROR_TITLE = "Try again";
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
-  // Only this middle range reaches api/request-security.js; direct carries stay local.
+  // Preserve ordinary routing through 1M; larger chats use the worker's bounded part requests.
   const MIN_BACKEND_CONVERSATION_CHARS = 10000;
   const MAX_BACKEND_CONVERSATION_CHARS = 1000000;
-  const MAX_TRANSFER_CONVERSATION_CHARS = 1000000;
+  const MAX_TRANSFER_CONVERSATION_CHARS = 4000000;
   // Claude, ChatGPT, Gemini and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
   const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "gemini", "grok"]);
-  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 1,000,000 characters. Try a shorter chat.";
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 4,000,000 characters. Try a shorter chat.";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
@@ -775,6 +775,28 @@
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
+    if (message?.type === "LARGE_SUMMARY_PROGRESS") {
+      const trace = activeTransferTrace;
+      if (trace?.id === message.transferId && trace.largeSummaryPending && !trace.completed
+          && Number.isInteger(message.total) && message.total >= 2 && message.total <= 16
+          && Number.isInteger(message.completed) && message.completed >= 0 && message.completed <= message.total
+          && ["parts", "final"].includes(message.phase)) {
+        try {
+          checkTransferDeadline(trace);
+          const label = message.phase === "final" ? "Combining summaries"
+            : `Summarized ${message.completed} of ${message.total} parts`;
+          const statusLabel = document.getElementById("context-generator-text-label");
+          const stage = document.getElementById("context-generator-handoff-progress")
+            ?.querySelector("[data-context-generator-stage='summary']");
+          if (statusLabel) statusLabel.textContent = label;
+          const stageLabel = stage?.querySelector(".context-generator-handoff-stage-label");
+          if (stageLabel) stageLabel.textContent = label;
+          if (stage) stage.setAttribute("aria-label", `${label}, active`);
+        } catch {}
+      }
+      sendResponse({ ok: true });
+      return false;
+    }
     if (message?.type === "SUMMARY_NEAR_END") {
       const trace = activeTransferTrace;
       if (trace?.id === message.transferId && trace.onSummaryNearEnd) {
@@ -1083,6 +1105,19 @@
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       if (!localDirect) setHandoffProgress("summary", "done");
+      if (transferTrace.largeLocalRecovery) {
+        // A full multi-million-character transcript is safe in this local box;
+        // attempting to inject it into a composer can freeze or overwrite a draft.
+        checkTransferDeadline(transferTrace);
+        if (!instanceActive || activeTransferTrace !== transferTrace || transferTrace.completed || transferTrace.manualCopy) return;
+        stopSourceDestinationProgress(transferTrace);
+        transferTrace.copyBoxShown = showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", false, false, false,
+          { recovery: { transferId: transferTrace.id, destination: destinationId }, largeTranscript: true }) === true;
+        markTransferTrace(transferTrace, transferTrace.copyBoxShown ? "copy box shown" : "failed: Local recovery could not be shown.");
+        finishTransferTrace(transferTrace, transferTrace.manualRecoveryReason || "summary_failed");
+        resetRunningFlag();
+        return;
+      }
       const localPresentation = localDirect ? completeLocalHandoff(transferTrace, destinationPrepPromise) : null;
       // Preparation/cancellation may settle while the same tab promise is awaited below.
       localPresentation?.catch(() => {});
@@ -1220,18 +1255,20 @@
     setHandoffProgress("summary", "active", null, conversationText.length);
     let summary;
     let timing;
+    const largeConversation = conversationText.length > MAX_BACKEND_CONVERSATION_CHARS;
     // Route on the captured String.length before JSON escaping or trimming.
     // Local processing is synchronous; its brief handoff cues run separately.
-    if (conversationText.length < MIN_BACKEND_CONVERSATION_CHARS || conversationText.length > MAX_BACKEND_CONVERSATION_CHARS) {
+    if (conversationText.length < MIN_BACKEND_CONVERSATION_CHARS) {
       ({ summary, timing } = createLocalContextCarry(conversationText));
     } else {
       try {
         if (trace) trace.onSummaryNearEnd = onNearEnd;
-        startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length), onNearEnd);
+        if (trace && largeConversation) trace.largeSummaryPending = true;
+        if (!largeConversation) startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length), onNearEnd);
         const response = await notifyBackground({
           type: "SUMMARIZE_WITH_BACKEND",
           conversation: conversationText,
-          ...(trace?.conversationMessages ? { messages: trace.conversationMessages, platform: currentPlatform.name } : {}),
+          ...(!largeConversation && trace?.conversationMessages ? { messages: trace.conversationMessages, platform: currentPlatform.name } : {}),
           transferId: trace?.id || null,
           deadlineAt: trace?.deadlineAt
         });
@@ -1242,7 +1279,7 @@
         summary = response.summary.trim();
         timing = response.timing || null;
       } catch (error) {
-        if (["user_cancelled", "extension_reloaded", "request_too_large"].includes(error?.code)) throw error;
+        if (error?.code === "user_cancelled" || (!largeConversation && ["extension_reloaded", "request_too_large"].includes(error?.code))) throw error;
         checkTransferDeadline(trace);
         mergeTransferDiagnostics(trace, error?.diagnostics);
         const failureDetails = globalThis.CapTransferDiagnostics?.errorDetails(error, "summary_request");
@@ -1253,11 +1290,28 @@
         // The verified transcript stays in the source page even when the backend
         // or MV3 worker is unavailable. Paste failure still offers manual copy.
         ({ summary, timing } = createLocalContextCarry(conversationText, "summary_service_unavailable"));
+        if (trace && largeConversation) {
+          const reason = getSafeTelemetryFailureReason(error, "summary");
+          // A part's wire limit is a summarization failure, not a source-size
+          // rejection: this verified chat already passed the 4M admission cap.
+          trace.manualRecoveryReason = reason === "conversation_too_large" ? "summary_failed" : reason;
+        }
       } finally {
-        if (trace) delete trace.onSummaryNearEnd;
+        if (trace) { delete trace.onSummaryNearEnd; delete trace.largeSummaryPending; }
       }
     }
     checkTransferDeadline(trace);
+    if (largeConversation && timing?.backend?.model === "local-direct") {
+      // Rebuild from the verified source even if a worker's fallback was trimmed
+      // or reformatted. The exact transcript must remain available for copying.
+      ({ summary, timing } = createLocalContextCarry(conversationText, "summary_service_unavailable"));
+      if (trace) {
+        trace.largeLocalRecovery = true;
+        trace.manualRecoveryReason ||= "summary_failed";
+        updateTransferDiagnostics(trace, { summary_error_code: trace.diagnostics?.summary_error_code || "summary_failed",
+          summary_fallback: true, summary_mode: "local_fallback" });
+      }
+    }
     const fileRequests = [];
     if (currentPlatform.id === "deepseek" && trace?.destinationId === "chatgpt" && trace.omittedFiles?.length)
       fileRequests.push(...trace.omittedFiles.map(file => `- ${JSON.stringify(file.name)}`));
@@ -1291,12 +1345,13 @@
   function createLocalContextCarry(conversationText, fallbackReason = null) {
     const startedAt = getNow();
     const inputChars = conversationText.length;
-    const transcript = fallbackReason
+    const transcript = fallbackReason && inputChars <= MAX_BACKEND_CONVERSATION_CHARS
       ? conversationText.replace(/\r\n?/g, "\n").trim().split("\n").map(line => `> ${line}`).join("\n")
       : conversationText;
     // Keep captured speaker labels, paragraphs and code verbatim; parsing turns
     // could mistake quoted labels inside messages for new speakers.
-    // Service-error recovery retains its existing format; neither path has a server receipt.
+    // Ordinary service-error recovery retains its format; large recovery keeps
+    // every captured character, including CRLF and surrounding whitespace.
     const summary = (fallbackReason ? [
       "╔══════════════════════════════════════════╗",
       "║         CONTEXT CARRY — READY TO PASTE        ║",
@@ -2758,7 +2813,7 @@
       // Keep the existing relay contract. SQL recognizes the acknowledged local
       // draft fallback and stores copy_ready without incrementing failed counters.
       failed || trace.copyBoxShown ? "failed" : "succeeded",
-      captureFailed ? "capture_failed" : trace.copyBoxShown ? "paste_failed" : failed ? telemetryFailureReason || "unknown_failure" : null
+      captureFailed ? "capture_failed" : trace.copyBoxShown ? trace.manualRecoveryReason || "paste_failed" : failed ? telemetryFailureReason || "unknown_failure" : null
     );
   }
 
@@ -9975,7 +10030,7 @@
   }
 
   function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false,
-    { destinationCopy = false, recovery = null } = {}) {
+    { destinationCopy = false, recovery = null, largeTranscript = false } = {}) {
     // A new destination recovery owns the carry. A pending Copy again from an
     // older notice must not reopen its text over this dialog after rejection.
     const copyNotice = document.getElementById("context-generator-error-overlay");
@@ -10196,8 +10251,9 @@
       addOwnedEventListener(copyBtn, "click", async () => {
         const copyOwner = modal.contextGeneratorCopyOwner;
         const recovery = modal.contextGeneratorRecovery;
-        // A concise preview must never shorten the payload sent to the clipboard.
-        const currentText = (draftPresent ? modal.contextGeneratorCopyText : textarea.value) || "";
+        // A concise preview must not shorten a carry. Large-chat copying also
+        // avoids textarea.value's CRLF normalization of the exact source.
+        const currentText = (draftPresent || modal.contextGeneratorLargeTranscript ? modal.contextGeneratorCopyText : textarea.value) || "";
         let copied = false, method = "clipboard";
         try {
           if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
@@ -10343,7 +10399,9 @@
 
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
-      desc.textContent = draftPresent
+      desc.textContent = largeTranscript
+        ? "We couldn’t summarize this large chat. Your complete conversation is safe here to copy."
+        : draftPresent
         ? "We noticed your text box has text in it. Here’s your conversation, ready to be copied."
         : pasteUnconfirmed
         ? `The paste into ${destinationName} wasn't confirmed. Check that tab first. If the context is missing, copy it from here.`
@@ -10355,6 +10413,7 @@
     const textarea = document.getElementById("context-generator-fallback-text");
     if (textarea) {
       modal.contextGeneratorCopyText = text;
+      modal.contextGeneratorLargeTranscript = largeTranscript;
       // Only hide our exact local carry wrapper in the preview; arbitrary summaries
       // and conversation text stay verbatim. Show more/manual copy restores it all.
       const prefix = "The conversation below was transferred from another AI chat so you have the context. Treat it as previous chat history and use it to continue with the user here.\n\nConversation history:\n\n";

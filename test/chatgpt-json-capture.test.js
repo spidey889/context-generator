@@ -34,7 +34,7 @@ test("ChatGPT structured turns preserve quoted role labels and exact source whit
 });
 
 test("ChatGPT fresh DOM size check includes healthy pasted files after a failed download", async () => {
-  const { data, files, fetchImpl } = pasteFixture(["broken file", "x".repeat(1000001)]);
+  const { data, files, fetchImpl } = pasteFixture(["broken file", "x".repeat(4000001)]);
   const h = setup(data, 200, { fetchImpl: request => {
     const url = new URL(request.url, "https://chatgpt.com");
     if (url.pathname === `/backend-api/files/download/${files[0].id}`) throw new TypeError("PRIVATE_FILE_FAILURE");
@@ -43,7 +43,7 @@ test("ChatGPT fresh DOM size check includes healthy pasted files after a failed 
   await discover(h);
   await assert.rejects(h.window.__capCaptureChatGptJson());
   const result = await h.window.__capMeasureChatGptJson();
-  assert.ok(result.characterCount > 500000);
+  assert.ok(result.characterCount > 4000000);
   assert.deepEqual(Object.keys(result), ["characterCount", "messageTurnCount"]);
   assert.ok(h.requests.some(request => new URL(request.url, "https://chatgpt.com").searchParams.get("id") === files[1].id));
   await assert.rejects(h.window.__capCaptureChatGptJson(), "Ordinary capture must still reject unreadable files.");
@@ -605,7 +605,7 @@ test("ChatGPT discards large alternate branches and descendants before the bridg
 
 test("ChatGPT reports the selected text limit after reading a history larger than the former raw limit", async () => {
   const data = fixture();
-  data.mapping.answer.message.content.parts = ["x".repeat(1300000)];
+  data.mapping.answer.message.content.parts = ["x".repeat(4300000)];
   data.mapping.answer.message.metadata = { ignored: "x".repeat(5000000) };
   const history = Buffer.from(JSON.stringify(data));
   const harness = setup(data, 200, { fetchImpl: request => new Response(
@@ -615,7 +615,7 @@ test("ChatGPT reports the selected text limit after reading a history larger tha
   await discover(harness);
   await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
     assert.equal(error.captureFailureReason, "size_limit");
-    assert.match(error.message, /1,000,000/);
+    assert.match(error.message, /4,000,000/);
     return true;
   });
 });
@@ -1010,7 +1010,7 @@ test("ChatGPT accepts combined pastes up to 4.1 MB, retaining the transcript lim
     const harness = setup(data, 200, { fetchImpl });
     await discover(harness);
     const capture = harness.window.__capCaptureChatGptJson();
-    if (characters < 1000000) {
+    if (characters < 4000000) {
       assert.equal((await capture).text, `ChatGPT conversation:\n\nUser: ${texts.join("\n\n")}\n\nAssistant: Selected answer`);
     } else {
       await assert.rejects(capture, error => error.captureFailureReason === "size_limit");
@@ -1133,10 +1133,10 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   const harness = setup(data, 200, { fetchImpl });
   await discover(harness);
   const old = harness.window.__capChatGptFetchState;
-  old.version = 8;
+  old.version = 29;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 29);
+  assert.equal(harness.window.__capChatGptFetchState.version, 30);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
@@ -1284,9 +1284,9 @@ test("ChatGPT validates paste byte counts, truncation flags and transcript size 
       await assert.rejects(harness.window.__capCaptureChatGptJson(), /4\.1 MB/);
     else assert.equal((await harness.window.__capCaptureChatGptJson()).text, "ChatGPT conversation:\n\nAssistant: Selected answer");
   }
-  const { data, fetchImpl } = pasteFixture(["x".repeat(1000000)]);
+  const { data, fetchImpl } = pasteFixture(["x".repeat(4000000)]);
   const harness = setup(data, 200, { fetchImpl }); await discover(harness);
-  await assert.rejects(harness.window.__capCaptureChatGptJson(), /1,000,000/);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), /4,000,000/);
 });
 
 // Native format inspected in the owner's synthetic table chat on 2026-10-05:
@@ -1348,9 +1348,9 @@ test("ChatGPT rejects malformed, truncated and oversized recognized Python resul
     const h = setup(data); await discover(h);
     await assert.rejects(h.window.__capCaptureChatGptJson(), /ChatGPT JSON capture blocked/);
   }
-  const data = fixture(); addPythonResult(data, "x".repeat(1000000));
+  const data = fixture(); addPythonResult(data, "x".repeat(4000000));
   const h = setup(data); await discover(h);
-  await assert.rejects(h.window.__capCaptureChatGptJson(), /1,000,000/);
+  await assert.rejects(h.window.__capCaptureChatGptJson(), /4,000,000/);
 });
 
 // Native canvas format observed in both older code.text and newer text.parts
@@ -1516,11 +1516,11 @@ test("ChatGPT JSON capture rejects absent auth and changed routes", async () => 
 });
 
 
-test("ChatGPT JSON capture admits transcripts through 1,000,000 characters without clipping", async () => {
+test("ChatGPT JSON capture admits transcripts through 4,000,000 characters without clipping", async () => {
   const baseline = setup();
   await discover(baseline);
   const overhead = (await baseline.window.__capCaptureChatGptJson()).text.length - "Selected answer".length;
-  for (const length of [350001, 1000000, 1000001]) {
+  for (const length of [350001, 1000000, 1000001, 4000000, 4000001]) {
     const data = fixture();
     data.mapping.answer.message.content.parts = ["漢".repeat(length - overhead)];
     // Discovery observes headers only; encode the large owned history once.
@@ -1530,7 +1530,7 @@ test("ChatGPT JSON capture admits transcripts through 1,000,000 characters witho
       { headers: { "content-type": "application/json" } }
     ) });
     await discover(h);
-    if (length > 1000000) await assert.rejects(h.window.__capCaptureChatGptJson(), /1,000,000/);
+    if (length > 4000000) await assert.rejects(h.window.__capCaptureChatGptJson(), /4,000,000/);
     else assert.equal((await h.window.__capCaptureChatGptJson()).text.length, length);
   }
 });

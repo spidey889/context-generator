@@ -731,9 +731,9 @@ function networkSmokeFixture(platform) {
   fixture.data.data.biz_data.chat_messages.push({ message_id: 9999, parent_id: 1, role: "ASSISTANT",
     fragments: [{ type: "RESPONSE", content: "UNUSED_BRANCH_SENTINEL" + "x".repeat(13000000) }] });
   if (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE) {
-    // Match the real incident: a valid ~1 MB text file passes download limits,
-    // then exceeds the 1,000,000-character transcript cap. DOM omits this file.
-    const text = "x".repeat(999998);
+    // A supported text file passes the unchanged 4.1 MB download limit,
+    // then exceeds the 4M-character transcript cap. DOM omits this file.
+    const text = "x".repeat(3999998);
     fixture.files[fixture.file.id] = text;
     fixture.file.file_size = Buffer.byteLength(text);
     return fixture;
@@ -748,8 +748,8 @@ function networkSmokeFixture(platform) {
       file.file_size = 1;
     }
     if (DEEPSEEK_DOM_SIZE_SMOKE && i === 1) {
-      fixture.files[file.id] = "x".repeat(1000001);
-      file.file_size = 1000001;
+      fixture.files[file.id] = "x".repeat(4000001);
+      file.file_size = 4000001;
     }
     fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push(file);
     extraBodies.push(`Attachment: ${JSON.stringify(file.file_name)}` + (DEEPSEEK_BAD_FILE_SMOKE && i === 1 ? ""
@@ -3416,7 +3416,7 @@ async function run() {
         notice: Boolean(document.getElementById("context-generator-capture-notice")),
         error: document.getElementById("context-generator-error-text").textContent
       })`);
-      assert.match(result.error, /1,000,000/);
+      assert.match(result.error, /4,000,000/);
       assert.ok(state.jsonRequests - jsonRequestsBeforeTransfer >= 3, "Capture, retry and independent DOM count must each fetch fresh history.");
       assert.equal(state.summaryRequests.length, 0, "Oversized DOM recovery must stop before summary or paste.");
       const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the DOM size-limit telemetry");
@@ -3426,7 +3426,7 @@ async function run() {
       assert.ok(terminal.diagnostics.json_fallback_code, "The transfer must actually enter DOM recovery.");
       assert.equal(terminal.diagnostics.json_attempts.length, 2, "The background measurement is not another JSON transfer attempt.");
       assert.equal(terminal.diagnostics.error_code, "conversation_too_large");
-      process.stdout.write("✓ Fresh background count included a healthy 1M text file despite a broken file and stopped DOM recovery before summary/paste.\n");
+      process.stdout.write("✓ Fresh background count included a healthy 4M text file despite a broken file and stopped DOM recovery before summary/paste.\n");
       return;
     }
     if (JSON_FALLBACK_SMOKE) {
@@ -3467,7 +3467,7 @@ async function run() {
         assert.equal(terminal.diagnostics.json_attempts[0].http_status, 403);
       }
       if (SIZE_CAPTURE_SMOKE) {
-        assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /too large.*limit is 1,000,000 characters/ : /too large.*limit is [\d,]+ bytes/);
+        assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /too large.*limit is 4,000,000 characters/ : /too large.*limit is [\d,]+ bytes/);
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the terminal size rejection");
         assert.equal(terminal.last_stage, "capture_started", "Size rejection must stop before summary or paste.");
         assert.equal(terminal.failure_reason, "conversation_too_large");
@@ -3476,7 +3476,7 @@ async function run() {
         assert.ok(!failedCapture.error.includes(observedSize.toLocaleString("en-US")), "The user's measured size stays in diagnostics, outside the error message.");
         if (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE) {
           assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "transcript_char_limit");
-          assert.ok(terminal.diagnostics.json_attempts[0].failure_value > 1000000);
+          assert.ok(terminal.diagnostics.json_attempts[0].failure_value > 4000000);
         }
       }
       if (TELEMETRY_DATABASE_SMOKE) {

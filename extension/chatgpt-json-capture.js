@@ -277,7 +277,7 @@
       (turn.role === "assistant" && turns[index - 1]?.role === "assistant" ? 0 : 1), 0);
     const text = `ChatGPT conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     metrics?.set({ selected_turns: messageTurnCount });
-    if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) throw captureError("This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat.", "size_limit");
+    if (metrics ? !metrics.transcript(text) : text.length > 4000000 || new TextEncoder().encode(text).length > 16000000) throw captureError("This chat is too long to transfer (limit: 4,000,000 characters). Try a shorter chat.", "size_limit");
     return { text, messages: turns, messageTurnCount, excludedContentTypes: [...excludedContentTypes].sort(),
       ...(captureWarning ? { captureWarning } : {}), ...(skippedFiles.size ? { skippedFiles: [...skippedFiles.values()] } : {}) };
   }
@@ -303,11 +303,11 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.type === "pong" && reply.id === id
-            && reply.version !== 29) metrics?.set({ hook_status: "version_mismatch" });
+            && reply.version !== 30) metrics?.set({ hook_status: "version_mismatch" });
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
           && reply.type === "pong" && reply.id === id) {
           debug("hook_reply", { observed_version: Number.isSafeInteger(reply.version) ? reply.version : 0 });
-          if (reply.version === 29) finish(true);
+          if (reply.version === 30) finish(true);
         }
       };
       const ping = () => {
@@ -359,7 +359,7 @@
         }
       }
       if (signal?.aborted) throw cancelledError();
-      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 29 });
+      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 30 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       metrics.checkpoint("route", "history");
       return await new Promise((resolve, reject) => {
@@ -392,7 +392,7 @@
             if (reply.error) {
               if (reply.error === "size") {
                 const fileLimit = reply.captureDetail === "attachment_size_limit";
-                throw captureError(fileLimit ? "Text attachments exceed the combined 4.1 MB capture limit." : "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat.",
+                throw captureError(fileLimit ? "Text attachments exceed the combined 4.1 MB capture limit." : "This chat is too long to transfer (limit: 4,000,000 characters). Try a shorter chat.",
                   "size_limit", fileLimit ? "attachment_size_limit" : "size_limit", fileLimit ? "attachment_descriptor" : "history");
               }
               const reasons = { auth: "ChatGPT authentication is unavailable. Refresh this signed-in chat.", partial: "ChatGPT returned incomplete, invalid or oversized JSON.", busy: "Another ChatGPT JSON capture is running. Try again after it finishes.", format: "ChatGPT returned a non-JSON response.", changed: "The ChatGPT conversation changed during capture.", timeout: "The full-tree request timed out.", network: "The full-tree request failed or returned invalid JSON." };

@@ -2606,15 +2606,168 @@ test("direct and AI ranges use exact captured character boundaries on every plat
     }
     assert.equal(summaryRequests, 6, `${hostname}: both inclusive AI boundaries and untrimmed length use the backend`);
     const requestsBeforeRejectedTransfers = runtimeRequests;
-    await assert.rejects(hooks.summarizeWithBackend("x".repeat(1000001)), error => {
+    for (const length of [1000001, 4000000]) {
+      assert.equal(await hooks.summarizeWithBackend("x".repeat(length)), "AI must never replace this tiny transcript.");
+    }
+    const requestsBeforeOversize = runtimeRequests;
+    await assert.rejects(hooks.summarizeWithBackend("x".repeat(4000001)), error => {
       assert.equal(error.code, "conversation_too_large");
-      assert.match(error.message, /limit is 1,000,000 characters/);
+      assert.match(error.message, /limit is 4,000,000 characters/);
       return true;
     });
     await assert.rejects(hooks.summarizeWithBackend("tiny", { deadlineAt: Date.now() - 1 }), /Transfer timed out/);
-    assert.equal(summaryRequests, 6, `${hostname}: oversized and expired transfers never reach the backend`);
-    assert.equal(runtimeRequests, requestsBeforeRejectedTransfers, `${hostname}: rejection sends no worker messages`);
+    assert.equal(summaryRequests, 8, `${hostname}: both new large boundaries use the worker`);
+    assert.equal(runtimeRequests, requestsBeforeOversize, `${hostname}: oversize and expired rejection sends no worker messages`);
+    assert.equal(requestsBeforeOversize, requestsBeforeRejectedTransfers + 2);
   }
+});
+
+test("large summary transport keeps the exact flat source without duplicating structured messages", async () => {
+  const requests = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+    if (message.type === "SUMMARIZE_WITH_BACKEND") requests.push(message);
+    return { ok: true, summary: "Verified AI summary" };
+  } });
+  const trace = hooks.createTransferTrace("gemini", "test");
+  trace.conversationMessages = [{ role: "user", text: "already present in captured text" }];
+  for (const length of [1000000, 1000001]) {
+    const source = "x".repeat(length - 5) + "\r\n  z";
+    assert.equal(await hooks.summarizeWithBackend(source, trace), "Verified AI summary");
+    assert.equal(requests.at(-1).conversation, source);
+    assert.equal(requests.at(-1).transferId, trace.id);
+  }
+  assert.equal(requests[0].messages, trace.conversationMessages);
+  assert.equal(requests[0].platform, "ChatGPT");
+  assert.equal(requests[1].messages, undefined);
+  assert.equal(requests[1].platform, undefined);
+});
+
+test("large summary errors and worker local carries preserve every captured character", async () => {
+  const prefix = " \r\nUser: Exact start\r\n", suffix = "\r\n  Assistant: Exact end \r\n ";
+  const transcript = prefix + "x".repeat(4000000 - prefix.length - suffix.length) + suffix;
+  for (const outcome of ["offline", "request_too_large", "extension_reloaded", "worker-local"]) {
+    const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+      if (message.type !== "SUMMARIZE_WITH_BACKEND") return { ok: true };
+      if (outcome === "worker-local") return { ok: true, summary: "worker reformatted text", timing: { backend: { model: "local-direct" } } };
+      return { ok: false, code: outcome, error: "Summary failed" };
+    } });
+    const trace = hooks.createTransferTrace("gemini", "test");
+    const carry = await hooks.summarizeWithBackend(transcript, trace);
+    assert.ok(carry.includes(transcript), outcome);
+    assert.equal(carry.split(transcript).length, 2, "The complete transcript occurs once.");
+    assert.equal(trace.largeLocalRecovery, true);
+    assert.equal(trace.diagnostics.summary_mode, "local_fallback");
+    assert.equal(trace.telemetryReportedModel, "local-direct");
+    assert.equal(trace.onSummaryNearEnd, undefined);
+    assert.equal(trace.largeSummaryPending, undefined);
+  }
+});
+
+test("large local recovery offers the full transcript before destination waits and never counts a box as delivery", async () => {
+  const flowStart = PLATFORM_CONTENT_SOURCE.indexOf("  async function runContextFlow(");
+  const flowEnd = PLATFORM_CONTENT_SOURCE.indexOf("  function showContextTransferFailure(", flowStart);
+  const code = new vm.Script(PLATFORM_CONTENT_SOURCE.slice(flowStart, flowEnd) + "\nglobalThis.runFlow = runContextFlow;");
+  const transcript = " \r\nUser: Original source\r\n" + "z".repeat(1000000) + "\r\n End \r\n ";
+  for (const failure of ["summary_failed", "request_too_large"]) {
+    const messages = [];
+    let shown = null;
+    let resets = 0;
+    const hooks = loadPlatformContent([], "chatgpt.com", {
+      storageSet: () => { throw new Error("Storage quota exceeded"); },
+      runtimeSendMessage: async message => {
+        messages.push(message);
+        if (message.type === "SUMMARIZE_WITH_BACKEND") return { ok: false, code: failure };
+        return { ok: true };
+      }
+    });
+    const trace = hooks.beginTransferAttempt("gemini", "test");
+    hooks.markCaptureDone(trace, transcript);
+    const context = vm.createContext({
+      MIN_BACKEND_CONVERSATION_CHARS: 10000, activeTransferTrace: trace, instanceActive: true,
+      startTransferTelemetry() {}, checkTransferDeadline: attempt => attempt.sourceGuard?.check(),
+      isHandoffOverlayVisible: () => true,
+      createEarlyDestinationReveal: () => ({ stop() {}, wait() { throw new Error("Manual recovery must not wait for a destination reveal"); } }),
+      summarizeWithBackend: hooks.summarizeWithBackend, stopHandoffCountdown() {}, setHandoffProgress() {},
+      markTransferTrace: (attempt, label, detail) => attempt.marks.push({ label, detail }),
+      stopSourceDestinationProgress() {}, getPlatform: () => ({ name: "Gemini" }),
+      showFallbackModal: (text, destination, backup, _unconfirmed, _draft, options) => {
+        shown = { text, destination, backup, options };
+        messages.push({ type: "RECORD_RECOVERY_CHECKPOINT", checkpoint: "box_shown", ...options.recovery });
+        return true;
+      },
+      finishTransferTrace: hooks.finishTransferTrace,
+      resetRunningFlag: () => { resets++; hooks.resetRunningFlag(); },
+      notifyBackground: async message => { messages.push(message); throw new Error("No paste or destination activation expected"); },
+      recordTransferFailureDiagnostics: hooks.recordTransferFailureDiagnostics,
+      getSafeTelemetryFailureReason: hooks.getSafeTelemetryFailureReason,
+      showContextTransferFailure: () => { throw new Error("Manual recovery should already be ready"); }
+    });
+    code.runInContext(context);
+    // Preparation can remain pending: complete local recovery must still appear now.
+    await context.runFlow("gemini", new Promise(() => {}), transcript, trace);
+    assert.ok(shown.text.includes(transcript), failure);
+    assert.equal(shown.backup, false);
+    assert.equal(shown.options.recovery.transferId, trace.id);
+    assert.equal(shown.options.largeTranscript, true);
+    assert.equal(resets, 1);
+    assert.equal(hooks.buildLatestTransferStats(trace, 1).status, "copy_ready");
+    const terminal = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY" && message.event.status !== "started");
+    assert.equal(terminal.length, 1);
+    assert.equal(terminal[0].event.status, "failed");
+    assert.equal(terminal[0].event.lastStage, "summary_completed");
+    assert.equal(terminal[0].event.failureReason, "summary_failed");
+    assert.ok(messages.some(message => message.type === "RECORD_RECOVERY_CHECKPOINT" && message.checkpoint === "box_shown"));
+    assert.ok(!messages.some(message => message.type === "TRANSFER_TO_DESTINATION" || message.type === "ACTIVATE_DESTINATION_TAB"
+      || message.type === "RECORD_RECOVERY_CHECKPOINT" && ["copy_started", "copy_succeeded"].includes(message.checkpoint)));
+  }
+});
+
+test("a large local recovery cannot reopen a copy box over a newer source attempt", async () => {
+  const start = PLATFORM_CONTENT_SOURCE.indexOf("  async function runContextFlow(");
+  const end = PLATFORM_CONTENT_SOURCE.indexOf("  function showContextTransferFailure(", start);
+  const trace = { id: "original", completed: false, largeLocalRecovery: true };
+  let staleActions = 0;
+  const context = vm.createContext({
+    MIN_BACKEND_CONVERSATION_CHARS: 10000, activeTransferTrace: trace, instanceActive: true,
+    startTransferTelemetry() {}, checkTransferDeadline() {}, isHandoffOverlayVisible: () => true,
+    createEarlyDestinationReveal: () => ({ stop() {} }), stopHandoffCountdown() {},
+    summarizeWithBackend: async () => {
+      context.activeTransferTrace = { id: "new-source-attempt" };
+      return "Exact full local carry";
+    },
+    markTransferTrace() {}, setHandoffProgress() {},
+    showFallbackModal: () => { staleActions++; }, finishTransferTrace: () => { staleActions++; },
+    resetRunningFlag: () => { staleActions++; }, notifyBackground: () => { staleActions++; }
+  });
+  new vm.Script(PLATFORM_CONTENT_SOURCE.slice(start, end) + "\nglobalThis.runFlow = runContextFlow;").runInContext(context);
+  await context.runFlow("gemini", new Promise(() => {}), "x".repeat(1000001), trace);
+  assert.equal(staleActions, 0, "The old attempt cannot show feedback or unlock the new attempt.");
+});
+
+test("large summary progress belongs only to its pending live source attempt", async () => {
+  let resolveSummary;
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: message => message.type === "SUMMARIZE_WITH_BACKEND"
+    ? new Promise(resolve => { resolveSummary = resolve; }) : Promise.resolve({ ok: true }) });
+  const label = new FakeElement({ text: "Summarizing" });
+  hooks.registerElementId("context-generator-text-label", label);
+  const trace = hooks.beginTransferAttempt("gemini", "test");
+  const pending = hooks.summarizeWithBackend("x".repeat(1000001), trace);
+  const progress = (fields = {}) => hooks.runtimeMessageListeners[0]({
+    type: "LARGE_SUMMARY_PROGRESS", transferId: trace.id, completed: 1, total: 3, phase: "parts", ...fields
+  }, {}, () => {});
+  progress({ transferId: "other-attempt" });
+  progress({ completed: 4 });
+  assert.equal(label.textContent, "Summarizing");
+  progress();
+  assert.equal(label.textContent, "Summarized 1 of 3 parts");
+  progress({ completed: 3, phase: "final" });
+  assert.equal(label.textContent, "Combining summaries");
+  resolveSummary({ ok: true, summary: "Verified final summary" });
+  await pending;
+  label.textContent = "Ready";
+  progress();
+  assert.equal(label.textContent, "Ready", "Late progress cannot replace final delivery or recovery feedback.");
+  hooks.resetRunningFlag();
 });
 
 test("separate large-file names survive direct, AI and recovery carries in Next step without changing other routes", async () => {

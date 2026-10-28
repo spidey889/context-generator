@@ -7,7 +7,7 @@ function prepareFirefoxExtension(root = path.resolve(__dirname, "..")) {
   const manifest = JSON.parse(fs.readFileSync(path.join(source, "manifest.json"), "utf8"));
   // A combined manifest loads, but Chromium reports the Firefox scripts as an
   // MV2 warning. Keep the unpacked/Store source Chromium-only and derive Firefox.
-  manifest.background = { scripts: ["transfer-diagnostics.js", manifest.background.service_worker] };
+  manifest.background = { scripts: ["transfer-diagnostics.js", "large-transfer.js", manifest.background.service_worker] };
   manifest.browser_specific_settings = {
     gecko: {
       id: "{8f4d7c20-9f3b-4b7e-9c11-2f4cbe2d41a9}",

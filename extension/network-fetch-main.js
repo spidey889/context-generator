@@ -3,10 +3,11 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 34 : platform === "grok" ? 23 : 20, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 35 : platform === "grok" ? 24 : 21, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
-  // Shared across unique text files; the final transcript has its own limits.
+  // Shared across unique text files; the larger transcript cap does not raise
+  // this pool or the 32 MB native download allowance.
   const maxUploadBytes = 4100000;
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
@@ -412,7 +413,7 @@
           measureDeepseek();
           // The fresh history alone can already prove excess. Otherwise fetch
           // text files too; their contents may be what pushes it over the cap.
-          if (reply.characterCount > 1000000) return;
+          if (reply.characterCount > 4000000) return;
         }
         const uploads = new Map();
         let uploadBytes = 0;
@@ -470,7 +471,7 @@
                 files[file.id] = content.text;
                 if (measureOnly) {
                   measureDeepseek();
-                  if (reply.characterCount > 1000000) { controller.abort("size_limit"); return; }
+                  if (reply.characterCount > 4000000) { controller.abort("size_limit"); return; }
                 }
               } catch (error) {
                 if (!measureOnly && error.captureFailureReason === "size_limit") throw error;

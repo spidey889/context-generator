@@ -4,6 +4,15 @@ Decisions, important regressions and replaced approaches worth remembering. [LOG
 
 Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spidey889/context-generator/blob/9b663fdfbe98204803ec5526f91be2c01c61d62e/CHANGELOG.md) remains in Git with detailed experiments, rollout evidence and superseded iterations.
 
+## 2026-10-29
+
+- **Prepare a separate 4M-character beta on `codex/large-chat-4m`.** Repeated oversized attempts showed that this affects several users. Keep every existing transfer route through 1M unchanged; raise only capture/transfer admission and add a separate path for larger verified transcripts.
+  - A single 4M request can exceed provider upload/context bounds. Split into bounded ordered pieces, then combine their summaries after checking signed receipts for complete original coverage. Count both JSON encodings, preserve Unicode/CRLF and never clip the source.
+  - Use the already configured TokenHarbor free DeepSeek route with bounded concurrency/time and no retry. Keep NVIDIA experiments synthetic; they do not become a production route. Existing file, raw-history, completeness and identity guards remain.
+  - Only the final response can authenticate summary work. Part results stay transient; no database, permission or text-logging changes are introduced.
+  - If any piece fails, stop sibling work and offer every captured character for manual copying. Do not inject a 4M fallback automatically or report a completed summary/paste.
+  - Regression coverage exercises exact 4M capture, byte escaping, receipt tampering/expiry, cancellation and failed-part recovery. Installed-Brave checks use a synthetic upstream model; live summary fidelity and provider availability remain beta limitations. This branch is not a production deployment or Store release.
+
 ## 2026-10-28
 
 - **Keep transfer failures diagnosable through lost replies and manual recovery.** A DeepSeek-to-Gemini attempt prepared a 457,957-character full-chat fallback, then timed out waiting for the paste reply; its saved record had no destination paste observations. A whole-flow audit also found missing early-request, destination-preparation and copy-recovery facts.

@@ -1,4 +1,7 @@
 if (!globalThis.CapTransferDiagnostics && typeof importScripts === "function") importScripts("transfer-diagnostics.js");
+// MV3 must discover worker dependencies during startup, before an event tries
+// to use them. Importing a new script lazily from a transfer event can fail.
+if (!globalThis.CapLargeTransfer && typeof importScripts === "function") importScripts("large-transfer.js");
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 // Opening a page after removal needs no host access. Keep this URL fixed and
 // anonymous; never add the form to manifest permissions or content-script matches.
@@ -1555,6 +1558,10 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   checkTransferDeadline(deadlineAt);
   await checkTransferSource(operation);
+  // Keep the established <=1M transport/cache/retry path intact. Larger chats
+  // have their own bounded part protocol and never share partial cache entries.
+  if (typeof conversation === "string" && conversation.length > 1000000)
+    return summarizeLargeWithBackend(conversation, transferId, deadlineAt, operation);
   const conversationText = conversation?.trim();
   if (!conversationText) {
     throw Object.assign(new Error("AI conversation text could not be captured."), { diagnosticCode: "capture_dom_failed" });
@@ -1631,6 +1638,102 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
       if (summaryInflight.get(cacheKey) === entry) summaryInflight.delete(cacheKey);
     }
   }
+}
+
+async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, operation) {
+  if (!globalThis.CapLargeTransfer || !isUuid(transferId))
+    throw Object.assign(new Error("Large-chat summarization is unavailable."), { code: "summary_failed" });
+  const started = nowMs(), stopKeepAlive = startSummaryServiceWorkerKeepAlive();
+  const signal = operation?.controller.signal;
+  let fetchMs = 0, parseMs = 0, requestCount = 0;
+  try {
+    const telemetry = getPreparedSummaryTelemetry(transferId) || await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
+      await restoreActiveTransferTelemetry();
+      const active = activeTransferTelemetry.get(transferId);
+      if (!active || active.status !== "started") return null;
+      const installId = await getOrCreateTelemetryInstallId();
+      updatePreparedSummaryTelemetry(active, installId);
+      return getPreparedSummaryTelemetry(transferId);
+    }), signal || new AbortController().signal);
+    checkTransferOperation(operation);
+    checkTransferDeadline(deadlineAt);
+    const result = await globalThis.CapLargeTransfer.summarize({ conversation, transferId, signal,
+      deadlineAt: deadlineAt || Infinity,
+      onProgress(progress) {
+        if (signal?.aborted || !Number.isInteger(operation?.sourceTabId)) return;
+        try { chrome.tabs.sendMessage(operation.sourceTabId, { type: "LARGE_SUMMARY_PROGRESS", transferId,
+          ...progress }).catch(() => {}); } catch {}
+      },
+      async post(payload, { signal: requestSignal, deadlineAt: requestDeadline }) {
+        checkTransferOperation(operation);
+        await checkTransferSource(operation);
+        const controller = new AbortController();
+        const onAbort = () => controller.abort(requestSignal.reason);
+        requestSignal.addEventListener("abort", onAbort, { once: true });
+        if (requestSignal.aborted) onAbort();
+        const expiresAt = Math.min(requestDeadline, Date.now() + 85000);
+        const timer = setTimeout(() => controller.abort(), Math.max(0, expiresAt - Date.now()));
+        const check = () => {
+          checkTransferOperation(operation);
+          checkTransferDeadline(deadlineAt);
+          if (Date.now() >= expiresAt) controller.abort();
+          controller.signal.throwIfAborted();
+        };
+        try {
+          check();
+          const body = JSON.stringify({ ...payload, ...(telemetry ? { telemetry } : {}) });
+          if (new TextEncoder().encode(body).length > 3000000)
+            throw Object.assign(new Error("Large-chat part exceeds the request bound."), { code: "request_too_large" });
+          const fetchedAt = nowMs();
+          requestCount++;
+          const response = await fetch(SUMMARY_BACKEND_URL.replace(/\/summarize$/, "/large-summary"), {
+            method: "POST", credentials: "omit", redirect: "error", signal: controller.signal,
+            headers: { "Content-Type": "application/json", "Accept": "application/x-ndjson",
+              "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER }, body
+          });
+          fetchMs += nowMs() - fetchedAt;
+          check();
+          if (!response.ok) throw await createSummaryBackendError(response);
+          const parsedAt = nowMs();
+          const data = await readSummaryResponse(response, check);
+          parseMs += nowMs() - parsedAt;
+          check();
+          if (data?.ok === false || data?.code && !data?.summary?.trim())
+            throw createSummaryBackendPayloadError(data, data.status || response.status);
+          await checkTransferSource(operation);
+          return data;
+        } finally {
+          clearTimeout(timer);
+          requestSignal.removeEventListener("abort", onAbort);
+        }
+      }
+    });
+    checkTransferOperation(operation);
+    await checkTransferSource(operation);
+    checkTransferDeadline(deadlineAt);
+    // Parts never touch summaryProofs. Only the server-verified final receipt
+    // authenticates the completed handoff and may advance summary accounting.
+    const confirmation = sanitizeSummaryConfirmation({
+      summary_proof: result.summaryProofV3 || result.summaryProofV2 || result.summaryProof,
+      ...(result.summaryProofV3 || result.summaryProofV2 ? { summary_confirmed_at: result.summaryConfirmedAt } : {}),
+      ...(result.summaryProofV3 ? { model: result.summaryModel } : {})
+    });
+    if (telemetry && confirmation) {
+      await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
+        const active = activeTransferTelemetry.get(transferId);
+        if (active) {
+          summaryProofs.set(transferId, confirmation);
+          activeTransferTelemetry.set(transferId, mergeTransferTelemetryEvents(active, { ...active, lastStage: "summary_completed" }));
+        }
+        await queueActiveTransferTelemetry({ ...telemetry, last_stage: "summary_completed", ...confirmation }, transferId);
+      }), signal || new AbortController().signal);
+      initializeTelemetryDelivery();
+    }
+    return { summary: result.summary, timing: { source: "backend", status: 200,
+      summaryMs: Math.round(nowMs() - started), fetchMs: Math.round(fetchMs), parseMs: Math.round(parseMs),
+      chars: result.summary.length, requestChars: conversation.length, backendInputChars: conversation.length,
+      backend: { ...result.timing, largeChat: { parts: result.partCount, requests: requestCount } } } };
+  } finally { stopKeepAlive(); }
 }
 
 async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }) {

@@ -1,5 +1,5 @@
 (() => {
-  const version = 17;
+  const version = 18;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Unused branches and site metadata need room beyond the selected text cap.

@@ -10,6 +10,9 @@
   "functions": {
     "api/summarize.js": {
       "maxDuration": 300
+    },
+    "api/large-summary.js": {
+      "maxDuration": 90
     }
   }
 }
