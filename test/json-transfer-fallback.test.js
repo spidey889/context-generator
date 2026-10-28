@@ -45,7 +45,9 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
     showFastCaptureFallbackMessage: () => { calls.notice++; },
     runContextFlow: (destination, prep, text, trace) => { calls.flows.push({ destination, prep, text, trace }); },
     getSafeTelemetryFailureReason: () => "capture_failed",
-    showErrorOverlay: message => calls.errors.push(message)
+    // These fixtures assert capture/retry policy; the full-page fixtures verify
+    // the display translation while retaining this original diagnostic message.
+    showErrorOverlay: error => calls.errors.push(typeof error === "string" ? error : error.message)
   });
   const capture = async () => {
     calls.json++;

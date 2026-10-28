@@ -3341,9 +3341,18 @@ async function run() {
         assert.equal(failedCapture.calls, 0, "Failed JSON capture must never scroll the sidebar.");
       }
       assert.equal(failedCapture.fallbackNotice, false, `Terminal capture errors must not enter DOM recovery: ${JSON.stringify(failedCapture)}`);
-      assert.match(failedCapture.error, /JSON capture|too long|limit|Fast capture/i);
+      assert.match(failedCapture.error, /couldn’t (?:read|load)|too long|limit/i);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
       assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
+      if (CHATGPT_FAILURE_SMOKE === "partial") {
+        assert.equal(failedCapture.error, "We couldn’t read this chat completely. Refresh the page and try again.");
+        const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the original capture diagnosis behind the plain notice");
+        assert.equal(terminal.diagnostics.error_code, "capture_json_failed");
+        assert.equal(terminal.diagnostics.capture_detail, "incomplete_history");
+        assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "incomplete_history");
+        assert.equal(terminal.diagnostics.json_attempts[0].failure_stage, "serialize");
+        assert.doesNotMatch(JSON.stringify(terminal), /We couldn’t read this chat completely/);
+      }
       if (SIZE_CAPTURE_SMOKE) {
         assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /too large.*limit is 1,000,000 characters/ : /too large.*limit is [\d,]+ bytes/);
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the terminal size rejection");

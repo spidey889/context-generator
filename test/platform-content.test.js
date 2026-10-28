@@ -3932,6 +3932,65 @@ clockTest("ChatGPT empty-chat notice explains login only for the active logged-o
   }
 });
 
+clockTest("plain error notices preserve the real cause in the error and terminal diagnostics", () => {
+  const refresh = "Refresh the page and try again.";
+  const cases = [
+    ["summary_failed", undefined, "PRIVATE summary-service failure",
+      "Try again right now. We might have made a mistake. It almost never happens the second time.", "summary"],
+    ["capture_roles_unverified", undefined, "Chat messages were found, but their user/assistant roles could not be verified.",
+      `We found messages, but couldn’t read the conversation reliably. ${refresh}`],
+    ["capture_json_unavailable", "hook_unavailable", "Claude JSON hook is not ready.",
+      `Cap Context isn’t ready on this page yet. ${refresh}`],
+    ["capture_json_unavailable", "auth_missing", "ChatGPT authentication is unavailable.",
+      "Make sure you’re signed in to ChatGPT, then refresh this chat and try again."],
+    ["capture_json_unavailable", "routing_unavailable", "Open a saved ChatGPT conversation to use JSON capture.",
+      "Open a saved chat in ChatGPT, then try again."],
+    ["capture_json_failed", "busy", "Another ChatGPT JSON capture is running.",
+      "Cap Context is already reading this chat. Wait a moment and try again."],
+    ["capture_json_failed", "branch_cycle", "ChatGPT JSON capture blocked: The active branch contains a parent cycle.",
+      `We couldn’t read this chat completely. ${refresh}`],
+    ["capture_json_failed", "http_error", "The full-tree request returned HTTP 503.",
+      `We couldn’t load this chat. ${refresh}`],
+    ["capture_json_failed", "invalid_json", "Invalid or truncated Gemini RPC response.",
+      `We couldn’t load this chat. ${refresh}`],
+    ...["Invalid unreadable-file notice.", "Invalid separate-file notice."].map(message => [
+      "capture_json_failed", "incomplete_history", message, `We couldn’t prepare this chat’s file information. ${refresh}`]),
+    ["conversation_changed", undefined, "The ChatGPT conversation changed during capture.",
+      "The chat changed while we were reading it. Return to the original chat and try again."],
+    ["extension_reloaded", undefined, "Extension was reloaded. Refresh this AI tab once, then try Cap-Context again.",
+      "Cap Context needs this page refreshed. Refresh the chat and try again."],
+    ["request_too_large", undefined, "Our request limit is 4.4 MB.",
+      "This chat is too large to send for a summary. Our limit is 4,400,000 bytes. Try a shorter chat."],
+    ["conversation_too_large", "attachment_size_limit", "Original attachment byte guard.",
+      "These text files are too large to transfer together. The total limit is 4,100,000 bytes."]
+  ];
+  for (const [code, detail, originalMessage, expected, stage = "capture"] of cases) {
+    const sent = [];
+    const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => { sent.push(message); return { ok: true }; } });
+    for (const id of ["overlay", "title", "text", "mark"]) {
+      hooks.registerElementId(`context-generator-error-${id}`, new FakeElement());
+    }
+    const error = Object.assign(new Error(originalMessage), { diagnosticCode: code,
+      diagnostics: { version: 1, ...(detail ? { capture_detail: detail } : {}),
+        ...(detail === "http_error" ? { capture_http_status: 503 } : {}) } });
+    const original = JSON.stringify({ message: error.message, code: error.diagnosticCode, diagnostics: error.diagnostics });
+    const trace = hooks.beginTransferAttempt("claude", "destination tile");
+    hooks.recordTransferFailureDiagnostics(trace, error);
+    const recorded = JSON.stringify(trace.diagnostics);
+    hooks.showContextTransferFailure(error, { stage });
+    assert.equal(hooks.document.getElementById("context-generator-error-text").textContent, expected, code);
+    assert.equal(JSON.stringify(trace.diagnostics), recorded, "Presentation cannot rewrite the recorded cause");
+    assert.equal(JSON.stringify({ message: error.message, code: error.diagnosticCode, diagnostics: error.diagnostics }), original);
+    hooks.finishTransferTrace(trace, "capture_failed");
+    hooks.resetRunningFlag();
+    const terminal = sent.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").at(-1).event;
+    assert.equal(terminal.diagnostics.error_code, code);
+    assert.equal(terminal.diagnostics.capture_detail, detail);
+    if (detail === "http_error") assert.equal(terminal.diagnostics.capture_http_status, 503);
+    assert.doesNotMatch(JSON.stringify(terminal), /Refresh the page|RPC response|parent cycle|Original attachment/);
+  }
+});
+
 test("ChatGPT free transition grid mounts beside Think without responsive-footer markers", () => {
   const f = gridChatGptFixture();
   const hooks = loadPlatformContent(Object.values(f));

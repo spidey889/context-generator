@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-scroll-short-replies-v201";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-plain-errors-v202";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1186,7 +1186,7 @@
 
     if (stage === "summary") {
       if (["conversation_too_large", "request_too_large", "rate_limited", "service_busy", "client_not_allowed", "extension_reloaded"].includes(error?.code)) {
-        showErrorOverlay(error.message);
+        showErrorOverlay(error);
         return;
       }
       showErrorOverlay(SUMMARY_RETRY_ERROR_MESSAGE);
@@ -1199,7 +1199,7 @@
       return showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed");
     }
 
-    showErrorOverlay(error?.message || "Transfer failed. Please try again.");
+    showErrorOverlay(error || "Transfer failed. Please try again.");
   }
 
   async function summarizeWithBackend(conversationText, trace = null, onNearEnd = null) {
@@ -1699,6 +1699,49 @@
 
   function createDiagnosticError(message, code) {
     return Object.assign(new Error(message), { diagnosticCode: code });
+  }
+
+  function getUserFacingTransferErrorMessage(error) {
+    if (typeof error === "string") return error;
+    const contract = globalThis.CapTransferDiagnostics;
+    const details = contract?.errorDetails(error, error?.captureFailureReason || error?.jsonCapture ? "capture_json" : undefined) || error?.diagnostics || {};
+    const code = details.error_code || contract?.errorCode(error) || error?.diagnosticCode || error?.code;
+    const detail = details.capture_detail;
+    // Translate only at the display boundary. The original Error, native failure
+    // check and diagnostic codes still own reporting, retries and recovery.
+    if (code === "capture_roles_unverified") {
+      return "We found messages, but couldn’t read the conversation reliably. Refresh the page and try again.";
+    }
+    if (code === "extension_reloaded") {
+      return "Cap Context needs this page refreshed. Refresh the chat and try again.";
+    }
+    if (code === "conversation_changed") {
+      return "The chat changed while we were reading it. Return to the original chat and try again.";
+    }
+    if (code === "request_too_large") {
+      return "This chat is too large to send for a summary. Our limit is 4,400,000 bytes. Try a shorter chat.";
+    }
+    if (isCaptureSizeLimitError(error)) return getCaptureSizeLimitMessage(error);
+    if (["capture_json_unavailable", "capture_json_failed", "capture_dom_failed"].includes(code)) {
+      if (["Invalid unreadable-file notice.", "Invalid separate-file notice."].includes(error?.message)) {
+        return "We couldn’t prepare this chat’s file information. Refresh the page and try again.";
+      }
+      if (detail === "auth_missing") {
+        return `Make sure you’re signed in to ${currentPlatform.name}, then refresh this chat and try again.`;
+      }
+      if (detail === "routing_unavailable") {
+        return `Open a saved chat in ${currentPlatform.name}, then try again.`;
+      }
+      if (detail === "busy") return "Cap Context is already reading this chat. Wait a moment and try again.";
+      if (detail === "hook_unavailable" || code === "capture_json_unavailable") {
+        return "Cap Context isn’t ready on this page yet. Refresh the page and try again.";
+      }
+      if (["http_error", "network_error", "non_json_response", "invalid_json", "timeout"].includes(detail)) {
+        return "We couldn’t load this chat. Refresh the page and try again.";
+      }
+      return "We couldn’t read this chat completely. Refresh the page and try again.";
+    }
+    return error?.message || "Transfer failed. Please try again.";
   }
 
   function markCaptureDone(trace, conversationText) {
@@ -8008,12 +8051,14 @@
     // Native error prose may contain private response text.
     if (!Number.isSafeInteger(limit) || limit <= 0) {
       return error?.diagnostics?.capture_detail === "attachment_size_limit"
-        ? "Text attachments exceed our limit of 4,100,000 bytes."
+        ? "These text files are too large to transfer together. The total limit is 4,100,000 bytes."
         : OVERSIZED_CONVERSATION_ERROR_MESSAGE;
     }
     const unit = check === "transcript_char_limit" ? "characters" : "bytes";
-    const subject = check === "supported_files_limit" ? "Text attachments are"
-      : check?.startsWith("raw_") ? "Chat data is" : "This chat is";
+    if (check === "supported_files_limit") {
+      return `These text files are too large to transfer together. The total limit is ${limit.toLocaleString("en-US")} bytes.`;
+    }
+    const subject = check?.startsWith("raw_") ? "Chat data is" : "This chat is";
     return `${subject} too large to transfer. Our limit is ${limit.toLocaleString("en-US")} ${unit}.${unit === "characters" ? " Try a shorter chat." : ""}`;
   }
 
@@ -8271,7 +8316,7 @@
       markTransferTrace(trace, `failed: ${error.message}`);
       finishTransferTrace(trace, getSafeTelemetryFailureReason(error, "capture"));
       resetRunningFlag();
-      showErrorOverlay(error.message);
+      showErrorOverlay(error);
     }
   }
 
@@ -9544,7 +9589,8 @@
     hideHandoffReassurance();
   }
 
-  function showErrorOverlay(message, copiedContext = null) {
+  function showErrorOverlay(error, copiedContext = null) {
+    const message = getUserFacingTransferErrorMessage(error);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const noticeDurationMs = copiedContext ? 16000 : 8000;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
