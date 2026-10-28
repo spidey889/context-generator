@@ -85,7 +85,6 @@ async function checkLocalTransferCounts(db, sql) {
     await report(11);
     equal(await counts(), { total: 9, today: 1, failed: 0 });
     const reset = await one("select command from cron.job where jobname='cap-context-reset-daily-user-summaries'");
-    assert.ok(reset, 'Daily reset job remains present'); checks++;
     await db.query("update public.users set today_date=today_date-1 where install_id=$1", [install]);
     await db.exec(reset.command);
     equal(await counts(), { total: 9, today: 0, failed: 0 });

@@ -53,7 +53,12 @@ async function checkTransferUserAllocation(db, sql) {
   equal(after.users.filter(u => before.users.some(b => b.row.install_id === u.row.install_id)), before.users);
   equal(after.users.length, before.users.length + missing.length);
   equal(await unlinked(), 0);
-  for (const { install_id } of missing) equal(await counts(install_id), zero);
+  // Compare every backfilled identity and all three counters in one assertion.
+  // Keep the full set, rather than sampling a single installation.
+  equal(await rows(`select install_id,lifetime_summaries::int as total,
+    today_summaries::int as today,today_failed_attempts::int as failed
+    from public.users where install_id=any($1::text[]) order by install_id`, [missing.map(user => user.install_id)]),
+    missing.map(({ install_id }) => ({ install_id, ...zero })).sort((a, b) => a.install_id.localeCompare(b.install_id)));
 
   await db.exec("begin");
   try {
@@ -89,7 +94,6 @@ async function checkTransferUserAllocation(db, sql) {
     equal((await one("select count(*)::int as n from public.users where install_id like 'allocation-pool-%'")).n, pool.length + 1);
     equal(await counts(`allocation-pool-${pool.length}`), zero);
     equal(await unlinked(), 0);
-    equal((await one("select count(*)=count(distinct install_id) and count(*)=count(distinct user_no) as unique_ids from public.users")).unique_ids, true);
     equal((await one("select bool_and(name=any(public.naruto_user_names())) as valid from public.users where install_id like 'allocation-%'")).valid, true);
     for (const role of ["anon", "authenticated"]) {
       equal((await one("select has_table_privilege($1,'public.users','INSERT') or has_table_privilege($1,'public.transfers','INSERT') as allowed", [role])).allowed, false);
@@ -98,7 +102,6 @@ async function checkTransferUserAllocation(db, sql) {
     // Reset/deletion remains intentional; the next RPC retry restores labels
     // without replaying the terminal attempt's already-counted outcome.
     await db.query("delete from public.users where install_id=$1", ["allocation-new"]);
-    equal(await identity("allocation-new"), undefined);
     await report(4, "allocation-new", "failed", true, "capture_failed");
     equal(await counts("allocation-new"), zero);
     equal(await unlinked(), 0);

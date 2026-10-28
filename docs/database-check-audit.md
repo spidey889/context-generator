@@ -119,3 +119,57 @@ Only verifier scripts and this audit changed.
 Validation: baseline 1,624; after cleanup 1,585, all passing through the same
 LF-normalized local SQL input described above. This pass is committed on the
 local `codex/db-next200-audit` worktree branch and is not pushed or merged.
+
+## Original checks 301-700
+
+Continued locally from `75082f4`. Traced this batch with the original
+`41fd38b` verifier sources, including assertions emitted by the diagnostics
+sample helper. Later JSON-checkpoint helpers have bulk counters outside this
+batch and do not affect its boundary. Two repeated backfill assertions were
+already eliminated by the preceding fixture cleanup, leaving 398 assertions
+from this original 400-check range in the 1,585-check baseline.
+
+This pass reduces those 398 assertions to 259: 139 fewer counted checks.
+Most of the reduction combines positive assertions while retaining all their
+values, rather than discarding behavior. No privacy rejection sample, signed
+receipt scenario, application counter boundary, backup restore, or role/access
+matrix was removed. The user-name allowlist guards were explicitly retained
+during review because valid generated names alone would not prove that invalid
+names still cannot be written.
+
+| Original checks | Area | Before this pass | After | Retained protection |
+| --- | --- | --- | --- | --- |
+| 301-338 | Remaining timestamp cleanup | 38 | 37 | Legacy timestamps, frozen proof/outcomes, backups, permissions and actual before/after-midnight trigger execution. |
+| 339-373 | Served-model cutover | 35 | 31 | Transactional dependency refusal, full preserved state, model placement, immutable attribution, malformed models and all old RPC arities. |
+| 374-390 | Reusable display names | 17 | 14 | More than two pools of real allocations, sequential numbers, valid names, complete pool use, signed/old-client counting, allowlist guards and private access. |
+| 391-395 | Space Bunny label | 5 | 4 | Exact all-row relabeling, queued/direct canonicalization and immutable verified model. |
+| 396-412 | Reported versus verified model | 17 | 15 | Unverified reports, receipt upgrade/priority, sticky proof, counters and invalid combinations. |
+| 413-425 | User-label synchronization | 13 | 13 | Backfill, rename, spoof correction, counter stability and deletion/truncation synchronization. |
+| 426-469 | Allocation and backfill | 42 | 30 | Every installation and counter, existing users, rollback, repeated reports, pool overflow, labels and both restricted roles. |
+| 470-590 | Initial diagnostics | 121 | 42 | Every accepted field in one complete record; all malformed/prepared negative cases, persistence, immutability and legacy calls. |
+| 591-616 | Local transfer counting | 26 | 25 | Cutoffs, repeat migration, duplicates, late proof, local/server accounting, rollover and grants. |
+| 617-642 | Claude-page diagnostics | 26 | 16 | Exact full enum schema, boundary acceptance, root/prepared private-page rejection, numeric and boolean guards. |
+| 643-695 | Typed failure diagnostics | 53 | 27 | All enum boundaries in two complete records; every root/prepared privacy rejection, numeric limits, unknown keys and access rules. |
+| 696-700 | Start of draft recovery | 5 | 5 | Migration/relabel preservation and authentic handled outcomes with independent summary accounting. |
+
+### Consolidations and removals
+
+| Original checks | Decision and retained counterpart |
+| --- | --- |
+| 302 | Remove the names/count of constraints on retired columns; exact column cleanup, dependency rollback and real legacy-payload writes remain. |
+| 341, 344, 346-347 | Remove temporary staging-table absence, a fixed intermediate column count and RPC overload count. Full schema/data/security snapshots, dependency failure and actual calls at every historical arity remain. |
+| 375, 379, 384 | Remove the old unique-name constraint spelling, a repetition assertion implied by valid names across more than two complete pools, and a general identity-uniqueness assertion. Exact allocation numbers and all-row identity/label behavior remain. Name allowlist constraints (385) stay. |
+| 395 | Remove the old label's global zero count: exact relabeled snapshots plus the new-write/direct-update checks already establish it. |
+| 411-412 | Remove another counter read after rejected atomic statements and a repeated overload count. Receipt/unsigned counter checks, direct proof rejection and actual legacy API calls remain. |
+| 434-446 | Replace per-install zero-counter assertions with one SQL result containing every missing installation and all three counters. The comparison still requires the entire expected identity set; none are sampled. Two original installations were already absent from the previous cleanup, so this consolidation saves ten assertions in this pass. |
+| 461, 467 | Remove the aggregate uniqueness restatement and a read immediately after explicit deletion. Sequential numbering, failed-allocation rollback, label linking and recreation with zero replayed counters remain. |
+| 476-555 | Replace 80 one-field positive samples with one record containing all 80 fields and their same values. The validator visits every key, exact schema parity remains, and every malformed/negative sample stays separate. |
+| 613 | Remove `assert.ok(reset)` before executing `reset.command`: missing jobs already fail that execution, and actual reset counters remain asserted. |
+| 621-630 | Drop interior positive enum examples while keeping first/last page values and equality of the complete SQL/JavaScript enum schema. All eight root/prepared private-page rejection cases remain. |
+| Positive cases within 646-685 | Combine 28 first/last enum-value acceptance samples into two complete root-and-prepared records. All seven fields and both boundary values are still included. Each negative root/prepared sample remains separate, along with HTTP bounds, fractional numbers, private stacks and access checks. |
+
+Validation: all 1,446 database assertions pass across the same 52 migrations,
+using the existing LF-normalized local input. JavaScript syntax and diff checks
+also pass. Only test verifiers and this audit change; production files and SQL
+migrations are unchanged. This remains a local commit on the same worktree
+branch, with no push or merge.

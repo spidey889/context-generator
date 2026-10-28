@@ -18,7 +18,10 @@ async function checkClaudePageDiagnostics(db, sql) {
   const rules = JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]);
   equal(rules, Object.fromEntries(Object.keys(rules).map(key => [key, contract.schema[key]])));
   const samples = [];
-  for (const page of contract.schema.claude_page.values) {
+  // Rule equality covers every enum member; exercise the generic enum reader
+  // at both ends while retaining each root/prepared privacy rejection below.
+  const pages = contract.schema.claude_page.values;
+  for (const page of new Set([pages[0], pages.at(-1)])) {
     const sample = { version: 1, claude_page: page, destination_route_allowed: true,
       destination_platform_match: true, destination_message_count: 0,
       prepared_diagnostics: { version: 1, claude_page: page } };
