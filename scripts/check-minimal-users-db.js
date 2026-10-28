@@ -35,8 +35,8 @@ async function checkMinimalUsers(db, migration, migrations) {
   equal((await db.query("select column_name from information_schema.columns where table_schema='public' and table_name='users' order by column_name")).rows.map(row => row.column_name),
     ["install_id", "lifetime_successful_summaries", "name", "today_date", "today_failed_attempts", "today_successful_summaries", "user_no"]);
   const pool = (await one("select public.naruto_user_names() as names")).names;
-  equal(new Set(pool).size, pool.length);
-  assert.ok(pool.length > 100 && pool.every(name => /^[A-Za-z]+( [A-Za-z]+)*$/.test(name))); checks++;
+  // Full allocation below proves uniqueness using real rows. The historical
+  // pool's size and spelling are replaced by the next migration.
 
   // Late completion of a pre-reset test attempt must not resurrect its user.
   await event(800, { verified: true, confirmedAt: `${today}T02:00:00Z` });
@@ -63,19 +63,8 @@ async function checkMinimalUsers(db, migration, migrations) {
   await event(806, { verified: true }); // v1 proof: lifetime, unknown day.
   equal(await counts(), { user_no: 1, lifetime: 4, today: 2, failed: 2 });
   equal((await one("select name from public.users where install_id=$1", [install])).name, firstName);
-  equal(await one("select verified_summaries::int, verified_today_summaries::int, verified_unknown_day_summaries::int, legacy_total_summaries::int from public.user_summary_usage where install_id=$1", [install]),
-    { verified_summaries: 4, verified_today_summaries: 2, verified_unknown_day_summaries: 1, legacy_total_summaries: 0 });
-
-  // Both the stored midnight command and late-job ingestion reset BOTH days.
-  await db.query("update public.users set today_date=$1::date where install_id=$2", [yesterday, install]);
-  await db.exec((await one("select command from cron.job")).command);
-  equal(await counts(), { user_no: 1, lifetime: 4, today: 0, failed: 0 });
-  await db.query("update public.users set today_date=$1::date, today_successful_summaries=3, today_failed_attempts=3 where install_id=$2", [yesterday, install]);
-  await event(807, { status: "failed" });
-  equal(await counts(), { user_no: 1, lifetime: 4, today: 0, failed: 1 });
-  await db.query("update public.users set today_date=$1::date, today_successful_summaries=3, today_failed_attempts=3 where install_id=$2", [yesterday, install]);
-  await event(808, { verified: true, confirmedAt: `${today}T03:00:00Z` });
-  equal(await counts(), { user_no: 1, lifetime: 5, today: 1, failed: 0 });
+  // The later IST verifier exercises scheduled resets and ingestion rollover
+  // against the implementation that remains in use.
   for (const column of ["lifetime_successful_summaries", "today_successful_summaries", "today_failed_attempts"]) {
     await assert.rejects(db.query(`update public.users set ${column}=-1 where install_id=$1`, [install]), error => error.code === "23514"); checks++;
   }
@@ -105,7 +94,8 @@ async function checkMinimalUsers(db, migration, migrations) {
   equal(await one("select count(*)::int as users, count(distinct name)::int as names, max(user_no)::int as last from public.users"),
     { users: pool.length, names: pool.length, last: pool.length });
   await assert.rejects(db.query("insert into public.users (install_id) values ('pool-overflow')"), error => error.code === "P0001" && /pool exhausted/.test(error.message)); checks++;
-  equal((await one("select count(*)::int as count from public.users")).count, pool.length);
+  // The next migration also verifies that the exhausted pool's rows survive
+  // this failure and its transactionally rejected replacement.
   for (const role of ["anon", "authenticated"]) {
     await db.exec(`set role ${role};`);
     try {

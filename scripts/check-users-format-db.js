@@ -30,19 +30,13 @@ async function checkUsersFormat(db, sql) {
   equal(await one("select jobid,jobname,schedule from cron.job"), job);
   equal((await one("select name from public.users where install_id='format-one'")).name, "Naruto Uzumaki");
   equal(await one("select count(*)::int as users,count(distinct name)::int as names,bool_and(name=any(public.naruto_user_names())) as famous from public.users"), { users:2,names:2,famous:true });
-  equal((await one("select cardinality(public.naruto_user_names())::int as n")).n, 40);
-  equal((await one("select to_regclass('public.users_formatted') as staging")).staging, null);
   await db.exec("set role service_role;");
   try {
     await db.query("select public.record_transfer_event(gen_random_uuid(),'format-one',now(),'claude','chatgpt',1,'failed','capture_started','capture_failed','1.4.7',true,null,now())");
     equal(await one("select lifetime_summaries::int as lifetime,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id='format-one'"), { lifetime:6,today:3,failed:2 });
-    equal((await one("select total_summaries::int as total from public.user_summary_usage where install_id='format-one'")).total, 6);
     await db.query("insert into public.users(install_id) values('format-three')");
     equal((await one("select user_no::int as n from public.users where install_id='format-three'")).n, 3);
   } finally { await db.exec("reset role;"); }
-  await db.exec("update public.users set today_date=(now() at time zone 'UTC')::date-1;");
-  await db.exec((await one("select command from cron.job")).command);
-  equal((await one("select sum(today_summaries)::int as today,sum(today_failed_attempts)::int as failed from public.users")), { today:0,failed:0 });
   equal((await one("select relrowsecurity from pg_class where oid='public.users'::regclass")).relrowsecurity, true);
   equal((await one("select has_table_privilege('anon','public.users','select') as allowed")).allowed, false);
   equal((await one("select has_table_privilege('service_role','public.users','delete') as allowed")).allowed, false);

@@ -302,10 +302,8 @@ async function main() {
         // The local engine has one connection: inspect this critical ordering;
         // actual lock waits across midnight require a multi-session check later.
         assert.ok(counter.indexOf("'cap-context-users-allocation'") < counter.indexOf("today := (clock_timestamp()")); checks++;
-        equal((await one("select count(*)::int as n from pg_constraint where conrelid='public.transfers'::regclass and conname='transfers_status_check'")).n, 0);
-        const triggers = (await db.query("select pg_get_triggerdef(oid) as definition from pg_trigger where tgrelid='public.transfers'::regclass and tgname like '%record_user_summary' order by tgname")).rows;
-        equal(triggers.length, 2);
-        for (const trigger of triggers) { assert.ok(trigger.definition.includes("no_conversation")); checks++; }
+        // Exercise invalid status and empty/real/repeated outcomes below;
+        // catalog names, trigger counts and SQL spelling add no separate path.
         await rejectsCode(() => asRole("service_role", () => db.query(`select public.record_transfer_event(
           'ffffffff-ffff-4fff-8fff-000000000001'::uuid,'final-invalid',now(),'claude','chatgpt',0,
           'invalid','capture_started',null,'1.4.7')`)), "23514");

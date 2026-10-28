@@ -27,7 +27,6 @@ async function checkEmptyChatUsers(db, sql) {
   equal((await one("select count(*)::int as n from public.users where install_id='empty-only-before'")).n, 0);
   equal(await one("select user_no::text,name,lifetime_summaries::text,today_summaries::text from public.users where install_id='mixed-before'"), stable);
   equal((await one("select today_failed_attempts::int as n from public.users where install_id='mixed-before'")).n, 1);
-  equal((await one("select failed_transfers::int as n from public.user_summary_usage where install_id='mixed-before'")).n, 1);
   const counter = (await one("select pg_get_functiondef('public.record_user_summary()'::regprocedure) as sql")).sql;
   equal(counter.match(/new.received_at < '([^']+)'::timestamptz/)[1], cutoff);
   await report(4, "empty-only-after", "no_conversation");

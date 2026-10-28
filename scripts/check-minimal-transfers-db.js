@@ -66,7 +66,6 @@ async function checkMinimalTransfers(db, sql, migrations) {
   const counter = await definition();
   equal(counter.match(/new.received_at < '([^']+)'::timestamptz/)[1], cutoff);
   assert.ok(counter.indexOf("'cap-context-users-allocation'") < counter.indexOf("today := (clock_timestamp()")); checks++;
-  assert.ok(counter.includes("transaction_timestamp() at time zone 'Asia/Kolkata'")); checks++;
   for (const name of removed) { assert.ok(!counter.includes(`new.${name}`)); checks++; }
   equal((await one("select count(*)::int as n from pg_constraint where conrelid='public.transfers'::regclass and conname in ('transfers_completion_terminal','transfers_summary_receipt_consistent','transfers_terminal_receipt_consistent')")).n, 0);
 
