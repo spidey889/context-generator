@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-large-chat-master-v218";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-copy-box-v220";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -10121,7 +10121,7 @@
     const copyNotice = document.getElementById("context-generator-error-overlay");
     if (destinationCopy && copyNotice?.contextGeneratorCopyNoticeOwner) hideErrorOverlay(copyNotice, { immediate: true });
     const variant = draftPresent ? "draft" : "default";
-    const copyLabel = draftPresent ? "Copy conversation" : "Copy Context";
+    const copyLabel = draftPresent ? "Copy conversation" : "Copy context";
     const copyBackground = draftPresent ? "#e2daef" : "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
     const copyColor = draftPresent ? "#24202d" : "#111114";
     let modal = document.getElementById("context-generator-fallback-modal");
@@ -10169,7 +10169,9 @@
         draftPresent ? "background:#18181c" : "background:linear-gradient(180deg,#171719 0%,#101012 58%,#09090b 100%)",
         "color:#f5f5f5",
         draftPresent ? "box-shadow:0 18px 45px rgba(0,0,0,0.33)" : "box-shadow:0 28px 84px rgba(0,0,0,0.58),0 0 0 1px rgba(0,0,0,0.72),inset 0 1px 0 rgba(255,255,255,0.08)",
-        draftPresent ? "max-height:calc(100dvh - 36px);overflow:auto" : "overflow:hidden"
+        // The inset decoration can overflow by a pixel. Keep it clipped so
+        // only the transcript scrolls, rather than adding card scrollbars.
+        draftPresent ? "max-height:calc(100dvh - 36px);overflow:auto" : "max-height:calc(100dvh - 36px);overflow:hidden"
       ].join(";");
       const accent = document.createElement("div");
       accent.style.cssText = [
@@ -10181,7 +10183,7 @@
       if (draftPresent) accent.style.display = "none";
 
       const header = document.createElement("div");
-      header.style.cssText = `position:relative;z-index:1;display:flex;align-items:${draftPresent ? "center" : "flex-start"};justify-content:space-between;gap:16px`;
+      header.style.cssText = `position:relative;z-index:1;display:flex;flex-shrink:0;align-items:${draftPresent ? "center" : "flex-start"};justify-content:space-between;gap:16px`;
 
       const copyWrap = document.createElement("div");
       copyWrap.style.cssText = draftPresent ? "display:flex;align-items:center;gap:9px;min-width:0" : "display:flex;flex-direction:column;gap:7px;min-width:0";
@@ -10249,9 +10251,9 @@
         "position:relative",
         "z-index:1",
         draftPresent ? "height:137px" : "height:min(230px,38vh)",
-        draftPresent ? "min-height:100px;width:100%;margin:0 0 16px" : "min-height:150px",
+        draftPresent ? "min-height:100px;width:100%;margin:0 0 16px" : "min-height:80px;min-width:0;width:100%;max-width:100%;flex:0 1 auto",
         "box-sizing:border-box",
-        draftPresent ? "resize:none;scrollbar-width:thin;scrollbar-color:#47434e #101013" : "resize:vertical",
+        draftPresent ? "resize:none;scrollbar-width:thin;scrollbar-color:#47434e #101013" : "resize:none;overflow-x:hidden;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#555 #101012",
         draftPresent ? "padding:12px 13px" : "padding:14px",
         draftPresent ? "border-radius:9px" : "border-radius:14px",
         draftPresent ? "border:1px solid rgba(255,255,255,0.04)" : "border:1px solid rgba(255,255,255,0.13)",
@@ -10265,7 +10267,7 @@
       ].join(";");
 
       const buttonContainer = document.createElement("div");
-      buttonContainer.style.cssText = "position:relative;z-index:1;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap";
+      buttonContainer.style.cssText = "position:relative;z-index:1;display:flex;flex-shrink:0;justify-content:flex-end;gap:10px;flex-wrap:wrap";
 
       let previewLabel;
       if (draftPresent) {
@@ -10288,6 +10290,10 @@
         addOwnedEventListener(more, "click", () => modal.contextGeneratorSetExpanded(more.getAttribute("aria-expanded") !== "true"));
         previewLabel.appendChild(label);
         previewLabel.appendChild(more);
+      } else {
+        previewLabel = document.createElement("div");
+        previewLabel.textContent = "Context preview";
+        previewLabel.style.cssText = "position:relative;z-index:1;flex-shrink:0;margin:0 0 -8px;color:rgba(255,255,255,0.6);font-size:11px;line-height:1.4";
       }
 
       const copyBtn = document.createElement("button");
@@ -10295,20 +10301,19 @@
       copyBtn.type = "button";
       copyBtn.textContent = copyLabel;
       copyBtn.style.cssText = [
-        "height:38px",
+        "min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;max-width:100%",
         "padding:0 16px",
-        "border-radius:999px",
+        "border-radius:10px",
         "border:1px solid rgba(255,255,255,0.18)",
         `background:${copyBackground}`,
-        "box-shadow:0 10px 24px rgba(0,0,0,0.24),inset 0 1px 0 rgba(255,255,255,0.7)",
+        "box-shadow:0 2px 6px rgba(0,0,0,0.18),inset 0 1px 0 rgba(255,255,255,0.55)",
         `color:${copyColor}`,
-        "font-size:13px",
-        "font-weight:750",
+        "font-family:inherit;font-size:13px",
+        "font-weight:650",
         "cursor:pointer"
       ].join(";");
       const resetCopyLabel = () => {
         copyBtn.textContent = copyLabel;
-        if (!draftPresent) return;
         const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         icon.setAttribute("viewBox", "0 0 24 24");
         icon.setAttribute("aria-hidden", "true");
@@ -10316,7 +10321,7 @@
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
         path.setAttribute("d", "M10 8h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2ZM16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3");
         icon.appendChild(path);
-        copyBtn.prepend(icon);
+        copyBtn.insertBefore(icon, copyBtn.firstChild);
       };
       if (draftPresent) {
         copyBtn.style.cssText = `width:100%;min-height:41px;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 12px;border:0;border-radius:9px;background:${copyBackground};color:${copyColor};font-family:inherit;font-size:13px;font-weight:600;cursor:pointer`;
@@ -10329,7 +10334,7 @@
       };
 
       const setFocusStyle = (button, active) => {
-        button.style.setProperty("outline", active ? "2px solid rgba(255,255,255,0.42)" : "none", "important");
+        button.style.setProperty("outline", active ? "2px solid rgba(255,255,255,0.3)" : "none", "important");
         button.style.outlineOffset = active ? "3px" : "0";
       };
 
