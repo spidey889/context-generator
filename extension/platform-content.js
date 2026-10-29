@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-large-chat-master-v218";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-recovery-polish-v219";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -10122,8 +10122,8 @@
     if (destinationCopy && copyNotice?.contextGeneratorCopyNoticeOwner) hideErrorOverlay(copyNotice, { immediate: true });
     const variant = draftPresent ? "draft" : "default";
     const copyLabel = draftPresent ? "Copy conversation" : "Copy Context";
-    const copyBackground = draftPresent ? "#e2daef" : "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
-    const copyColor = draftPresent ? "#24202d" : "#111114";
+    const copyBackground = "#e2daef";
+    const copyColor = "#24202d";
     let modal = document.getElementById("context-generator-fallback-modal");
     // Rebuild only when the purpose changes so its protected palette, listeners
     // and copy-button reset state all belong to the same dialog variant.
@@ -10150,33 +10150,33 @@
         "justify-content:center",
         "box-sizing:border-box",
         "padding:18px",
-        draftPresent ? "background:rgba(5,5,7,0.48)" : "background:rgba(0,0,0,0.68)",
-        draftPresent ? "backdrop-filter:blur(5px)" : "backdrop-filter:blur(12px)",
+        draftPresent ? "background:rgba(5,5,7,0.48)" : "background:rgba(6,5,10,0.56)",
+        draftPresent ? "backdrop-filter:blur(5px)" : "backdrop-filter:blur(10px)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
       ].join(";");
 
       const content = document.createElement("div");
       content.style.cssText = [
         "position:relative",
-        draftPresent ? "width:min(400px,100%)" : "width:min(560px,100%)",
+        draftPresent ? "width:min(400px,100%)" : "width:min(600px,100%)",
         "box-sizing:border-box",
         "display:flex",
         "flex-direction:column",
         draftPresent ? "gap:0" : "gap:16px",
-        draftPresent ? "padding:22px" : "padding:26px",
-        draftPresent ? "border-radius:16px" : "border-radius:26px",
-        draftPresent ? "border:1px solid rgba(255,255,255,0.07)" : "border:1px solid rgba(255,255,255,0.14)",
-        draftPresent ? "background:#18181c" : "background:linear-gradient(180deg,#171719 0%,#101012 58%,#09090b 100%)",
+        draftPresent ? "padding:22px" : "padding:24px",
+        draftPresent ? "border-radius:16px" : "border-radius:22px",
+        draftPresent ? "border:1px solid rgba(255,255,255,0.07)" : "border:1px solid rgba(215,203,237,0.14)",
+        draftPresent ? "background:#18181c" : "background:linear-gradient(155deg,#222027 0%,#19171e 55%,#15141a 100%)",
         "color:#f5f5f5",
-        draftPresent ? "box-shadow:0 18px 45px rgba(0,0,0,0.33)" : "box-shadow:0 28px 84px rgba(0,0,0,0.58),0 0 0 1px rgba(0,0,0,0.72),inset 0 1px 0 rgba(255,255,255,0.08)",
-        draftPresent ? "max-height:calc(100dvh - 36px);overflow:auto" : "overflow:hidden"
+        draftPresent ? "box-shadow:0 18px 45px rgba(0,0,0,0.33)" : "box-shadow:0 24px 72px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.05)",
+        "max-height:calc(100dvh - 36px);overflow:auto;overscroll-behavior:contain"
       ].join(";");
       const accent = document.createElement("div");
       accent.style.cssText = [
         "position:absolute",
         "inset:-1px",
         "pointer-events:none",
-        "background:radial-gradient(circle at 50% -18%,rgba(255,255,255,0.12),transparent 36%),linear-gradient(180deg,rgba(255,255,255,0.045),transparent 48%)"
+        "background:radial-gradient(ellipse at 12% 0%,rgba(183,157,226,0.08),transparent 55%)"
       ].join(";");
       if (draftPresent) accent.style.display = "none";
 
@@ -10200,11 +10200,11 @@
       // Protect the absent fill too: page/theme CSS can otherwise paint a strip.
       title.style.cssText = [
         "background:transparent",
-        draftPresent ? "font-family:inherit" : "font-family:Georgia,'Times New Roman',serif",
+        "font-family:inherit",
         draftPresent ? "font-size:19px" : "font-size:22px",
-        draftPresent ? "font-weight:600" : "font-weight:500",
-        draftPresent ? "line-height:1.25" : "line-height:1.1",
-        draftPresent ? "letter-spacing:-0.25px" : "letter-spacing:0",
+        "font-weight:600",
+        "line-height:1.25",
+        draftPresent ? "letter-spacing:-0.25px" : "letter-spacing:-0.45px",
         draftPresent ? "color:#eeedf2" : "color:#ffffff"
       ].join(";");
       title.textContent = "Context is ready to copy";
@@ -10213,27 +10213,26 @@
       desc.id = "context-generator-fallback-desc";
       desc.style.cssText = [
         "font-size:13px",
-        draftPresent ? "line-height:1.6;margin:10px 0 18px" : "line-height:1.5",
-        draftPresent ? "color:#b0acb8" : "color:rgba(255,255,255,0.64)",
-        "max-width:430px"
+        draftPresent ? "line-height:1.6;margin:10px 0 18px" : "line-height:1.65",
+        draftPresent ? "color:#b0acb8" : "color:#b9b3c3",
+        "max-width:480px"
       ].join(";");
 
       const dismissBtn = document.createElement("button");
       dismissBtn.id = "context-generator-fallback-dismiss";
       dismissBtn.type = "button";
-      dismissBtn.textContent = "Close";
+      dismissBtn.textContent = "×";
       dismissBtn.setAttribute("aria-label", "Close");
       dismissBtn.style.cssText = [
-        "height:32px",
+        "width:32px;height:32px;display:grid;place-items:center",
         "flex-shrink:0",
         "white-space:nowrap",
-        "padding:0 12px",
-        "border-radius:999px",
-        "border:1px solid rgba(255,255,255,0.14)",
-        "background:rgba(255,255,255,0.045)",
-        "color:rgba(255,255,255,0.72)",
-        "font-size:12px",
-        "font-weight:650",
+        "padding:0",
+        "border-radius:9px",
+        "border:1px solid rgba(215,203,237,0.10)",
+        "background:rgba(215,203,237,0.04)",
+        "color:#b9b3c3",
+        "font-family:inherit;font-size:22px;line-height:1;font-weight:400",
         "cursor:pointer"
       ].join(";");
       if (draftPresent) {
@@ -10248,19 +10247,19 @@
       textarea.style.cssText = [
         "position:relative",
         "z-index:1",
-        draftPresent ? "height:137px" : "height:min(230px,38vh)",
+        draftPresent ? "height:137px" : "height:clamp(150px,34vh,300px)",
         draftPresent ? "min-height:100px;width:100%;margin:0 0 16px" : "min-height:150px",
         "box-sizing:border-box",
-        draftPresent ? "resize:none;scrollbar-width:thin;scrollbar-color:#47434e #101013" : "resize:vertical",
-        draftPresent ? "padding:12px 13px" : "padding:14px",
-        draftPresent ? "border-radius:9px" : "border-radius:14px",
-        draftPresent ? "border:1px solid rgba(255,255,255,0.04)" : "border:1px solid rgba(255,255,255,0.13)",
-        draftPresent ? "background:#101013" : "background:rgba(0,0,0,0.34)",
+        "resize:none;width:100%;scrollbar-width:thin;scrollbar-color:#47434e #101013",
+        draftPresent ? "padding:12px 13px" : "padding:16px",
+        draftPresent ? "border-radius:9px" : "border-radius:12px",
+        draftPresent ? "border:1px solid rgba(255,255,255,0.04)" : "border:1px solid rgba(215,203,237,0.10)",
+        "background:#101013",
         draftPresent ? "box-shadow:none" : "box-shadow:inset 0 1px 0 rgba(255,255,255,0.04)",
-        draftPresent ? "color:#dbd8e1" : "color:#f0f0f0",
+        "color:#dbd8e1",
         draftPresent ? "font-family:inherit" : "font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace",
         "font-size:12px",
-        draftPresent ? "line-height:1.65" : "line-height:1.5",
+        "line-height:1.65",
         "outline:none"
       ].join(";");
 
@@ -10288,6 +10287,15 @@
         addOwnedEventListener(more, "click", () => modal.contextGeneratorSetExpanded(more.getAttribute("aria-expanded") !== "true"));
         previewLabel.appendChild(label);
         previewLabel.appendChild(more);
+      } else {
+        previewLabel = document.createElement("div");
+        previewLabel.style.cssText = "position:relative;z-index:1;display:flex;justify-content:space-between;gap:12px;margin:4px 0 -8px;color:#a6a2ad;font-size:11px;line-height:1.4";
+        const label = document.createElement("span");
+        label.textContent = "Context preview";
+        const hint = document.createElement("span");
+        hint.textContent = "Read only";
+        previewLabel.appendChild(label);
+        previewLabel.appendChild(hint);
       }
 
       const copyBtn = document.createElement("button");
@@ -10295,20 +10303,19 @@
       copyBtn.type = "button";
       copyBtn.textContent = copyLabel;
       copyBtn.style.cssText = [
-        "height:38px",
+        "min-height:40px;display:flex;align-items:center;justify-content:center;gap:8px;max-width:100%",
         "padding:0 16px",
-        "border-radius:999px",
-        "border:1px solid rgba(255,255,255,0.18)",
+        "border-radius:10px",
+        "border:1px solid rgba(255,255,255,0.12)",
         `background:${copyBackground}`,
-        "box-shadow:0 10px 24px rgba(0,0,0,0.24),inset 0 1px 0 rgba(255,255,255,0.7)",
+        "box-shadow:0 4px 12px rgba(0,0,0,0.18)",
         `color:${copyColor}`,
-        "font-size:13px",
-        "font-weight:750",
+        "font-family:inherit;font-size:13px",
+        "font-weight:600",
         "cursor:pointer"
       ].join(";");
       const resetCopyLabel = () => {
         copyBtn.textContent = copyLabel;
-        if (!draftPresent) return;
         const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         icon.setAttribute("viewBox", "0 0 24 24");
         icon.setAttribute("aria-hidden", "true");
@@ -10316,7 +10323,7 @@
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
         path.setAttribute("d", "M10 8h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2ZM16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3");
         icon.appendChild(path);
-        copyBtn.prepend(icon);
+        copyBtn.insertBefore(icon, copyBtn.firstChild);
       };
       if (draftPresent) {
         copyBtn.style.cssText = `width:100%;min-height:41px;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 12px;border:0;border-radius:9px;background:${copyBackground};color:${copyColor};font-family:inherit;font-size:13px;font-weight:600;cursor:pointer`;
@@ -10329,7 +10336,7 @@
       };
 
       const setFocusStyle = (button, active) => {
-        button.style.setProperty("outline", active ? "2px solid rgba(255,255,255,0.42)" : "none", "important");
+        button.style.setProperty("outline", active ? "2px solid rgba(190,169,223,0.75)" : "none", "important");
         button.style.outlineOffset = active ? "3px" : "0";
       };
 
