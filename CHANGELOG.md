@@ -6,6 +6,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-29
 
+- **Keep Latest Run current when captured text exceeds browser storage.** Some admitted 4M transcripts exceed the extension's shared 10 MB local quota, leaving analysis on the previous transfer.
+  - The receipt bundled metadata and full captured text in one write, and silently ignored rejected writes.
+  - Isolated Brave confirmed that 4M CJK characters require about 12 MB and cannot fit; JSON escaping can also exceed the quota.
+  - Retry quota failures once with current metadata, omit raw text and its expiry, and show "Chat text too large to save locally."
+  - Keep ordinary raw text exact, preserve transfer/telemetry completion, and prevent a late quota retry from replacing a newer receipt from the same page.
+  - Focused checks passed for normal saves, quota recovery, storage outages, overlapping writes and analysis rendering. Isolated Brave verified an actual quota rejection, fresh metadata through the storage bridge, the visible notice and successful transfer; metadata storage remains best-effort if the browser rejects both writes.
+
 - **Prepare a separate 4M-character beta on `codex/large-chat-4m`.** Repeated oversized attempts showed that this affects several users. Keep every existing transfer route through 1M unchanged; raise only capture/transfer admission and add a separate path for larger verified transcripts.
   - A single 4M request can exceed provider upload/context bounds. Split into bounded ordered pieces, then combine their summaries after checking signed receipts for complete original coverage. Count both JSON encodings, preserve Unicode/CRLF and never clip the source.
   - At the owner’s request, use NVIDIA Nemotron 3.5 Super VL (free) through OpenRouter, with reasoning off, zero-price caps, bounded concurrency/time and no same-provider retry. Super VL was preferable to Ultra in the earlier 500k synthetic test (about 22 seconds versus a 180-second stall). The owner accepted NVIDIA’s free-endpoint data policy for this beta; that exception cannot change ordinary OpenRouter requests. Existing file, raw-history, completeness and identity guards remain.

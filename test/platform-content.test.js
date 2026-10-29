@@ -2216,6 +2216,74 @@ test("latest-run receipt preserves the exact raw scraped text", () => {
   );
 });
 
+test("latest-run storage keeps normal text exact and replaces oversized receipts with fresh metadata", async () => {
+  const key = "context-generator-last-transfer-stats-v1";
+  for (const mode of ["normal", "quota-sync", "quota-async"]) {
+    const writes = [];
+    let stored = { transferId: "previous-run" };
+    const hooks = loadPlatformContent([], "chatgpt.com", { storageSet: payload => {
+      const stats = payload[key];
+      writes.push(stats);
+      if (Buffer.byteLength(JSON.stringify(payload)) > 10485760) {
+        const error = new Error("Resource::kQuotaBytes quota exceeded");
+        if (mode === "quota-sync") throw error;
+        return Promise.reject(error);
+      }
+      stored = stats;
+      return Promise.resolve();
+    } });
+    const trace = hooks.createTransferTrace("claude", "test");
+    const text = mode === "normal" ? "Exact text \r\n <tags>  " : "漢".repeat(4000000);
+    hooks.markCaptureDone(trace, text);
+    await hooks.persistLatestTransferStats(trace, 25);
+    assert.equal(stored.transferId, trace.id, mode);
+    assert.equal(stored.capture.sentChars, text.length);
+    assert.equal(stored.totalMs, 25);
+    assert.equal(trace.rawScrapedText, text, "Storage fallback must not alter the captured source.");
+    if (mode === "normal") {
+      assert.equal(writes.length, 1);
+      assert.equal(stored.rawScrapedText, text);
+      assert.ok(stored.rawScrapedTextExpiresAt);
+      assert.equal(stored.rawScrapedTextOmitted, undefined);
+    } else {
+      assert.equal(writes.length, 2);
+      assert.equal(stored.rawScrapedTextOmitted, "storage_limit");
+      assert.ok(!Object.hasOwn(stored, "rawScrapedText"));
+      assert.ok(!Object.hasOwn(stored, "rawScrapedTextExpiresAt"));
+    }
+  }
+});
+
+test("latest-run storage failures remain optional and delayed quota retries cannot overwrite newer runs", async () => {
+  for (const failure of ["unavailable", "both-writes"]) {
+    let writes = 0;
+    const hooks = loadPlatformContent([], "chatgpt.com", { storageSet: () => {
+      writes++;
+      return Promise.reject(new Error(failure === "both-writes" ? "QUOTA_BYTES quota exceeded" : "Storage unavailable"));
+    } });
+    const trace = hooks.createTransferTrace("claude", "test");
+    hooks.markCaptureDone(trace, "Captured chat");
+    await assert.doesNotReject(hooks.persistLatestTransferStats(trace, 10));
+    assert.equal(writes, failure === "both-writes" ? 2 : 1);
+  }
+  let rejectOld;
+  const writes = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", { storageSet: payload => {
+    writes.push(payload["context-generator-last-transfer-stats-v1"]);
+    return writes.length === 1 ? new Promise((_, reject) => { rejectOld = reject; }) : Promise.resolve();
+  } });
+  const old = hooks.createTransferTrace("claude", "old");
+  hooks.markCaptureDone(old, "Old captured text");
+  const pending = hooks.persistLatestTransferStats(old, 10);
+  const next = hooks.createTransferTrace("gemini", "new");
+  hooks.markCaptureDone(next, "New captured text");
+  await hooks.persistLatestTransferStats(next, 20);
+  rejectOld(new Error("QUOTA_BYTES quota exceeded"));
+  await pending;
+  assert.equal(writes.length, 2);
+  assert.equal(writes.at(-1).transferId, next.id);
+});
+
 test("latest-run receipt retains capture exclusions and the JSON fallback reason locally", () => {
   const hooks = loadPlatformContent([]);
   const trace = hooks.createTransferTrace("claude", "test");

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-28-top-error-notices-v207";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-latest-run-storage-v208";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -46,6 +46,7 @@
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
   const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
+  let latestTransferStatsWriteId = 0;
   const TRANSFER_TELEMETRY_MESSAGE_TYPE = "RECORD_TRANSFER_TELEMETRY";
   const TRANSFER_TELEMETRY_STAGES = [
     "intent_started",
@@ -1021,6 +1022,7 @@
       resetRunningFlag,
       markCaptureDone,
       buildLatestTransferStats,
+      persistLatestTransferStats,
       getSafeTelemetryFailureReason,
       startFloatingButtonMonitoring,
       scheduleFloatingButtonUpdate,
@@ -2895,15 +2897,27 @@
     return "unknown_failure";
   }
 
-  function persistLatestTransferStats(trace, totalMs) {
+  async function persistLatestTransferStats(trace, totalMs) {
+    const writeId = ++latestTransferStatsWriteId;
     // Storage can throw synchronously during reload or browser shutdown. The
     // optional local receipt must not block terminal telemetry or lock release.
     try {
       const storage = chrome?.storage?.local;
       if (!storage?.set) return;
       const stats = buildLatestTransferStats(trace, totalMs);
-      const setResult = storage.set({ [LAST_TRANSFER_STATS_STORAGE_KEY]: stats });
-      setResult?.catch?.(() => {});
+      try {
+        await storage.set({ [LAST_TRANSFER_STATS_STORAGE_KEY]: stats });
+      } catch (error) {
+        if (!stats.rawScrapedText || !/quota/i.test(`${error?.name || ""} ${error?.message || ""}`)) throw error;
+        // A quota rejection leaves the previous receipt intact. Replace it with
+        // fresh metadata, without clipping the transcript or claiming expiry.
+        // A delayed failure must not overwrite a newer receipt from this page.
+        if (!instanceActive || writeId !== latestTransferStatsWriteId) return;
+        delete stats.rawScrapedText;
+        delete stats.rawScrapedTextExpiresAt;
+        stats.rawScrapedTextOmitted = "storage_limit";
+        await storage.set({ [LAST_TRANSFER_STATS_STORAGE_KEY]: stats });
+      }
     } catch {
       console.debug("[Context Generator] Could not save latest analysis stats.");
     }

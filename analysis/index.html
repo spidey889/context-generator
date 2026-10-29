@@ -827,6 +827,9 @@
           ${metric("Paste time", formatDuration(stats.destinationTiming?.pasteMs), `Page: ${formatDuration(stats.destinationTiming?.pageLoadMs)} · Composer wait: ${formatDuration(stats.destinationTiming?.composerWaitMs)}`, "accent-teal")}
         </section>
 
+        ${!rawText && stats.rawScrapedTextOmitted === "storage_limit"
+          ? '<p class="raw-note" role="status">Chat text too large to save locally.</p>' : ""}
+
         <section class="raw-panel" id="rawScrapePanel" hidden>
           <div class="section-head">
             <h2>Raw scraped text</h2>
