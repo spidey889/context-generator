@@ -891,6 +891,8 @@ clockTest("destination paste progress survives a lost paste reply and a sparse t
   await background.ack(event(1, { destinationPlatform: "gemini", lastStage: "paste_started" }));
   await background.settled();
   const pending = startOwnedPaste(background, { stalled: true });
+  // The real tab is checked for login redirects before paste is dispatched.
+  await new Promise(setImmediate);
   for (const [checkpoint, diagnostics] of [
     ["received", { paste_ms: 0 }],
     ["editor_found", { paste_ms: 10, editor_seen: true, editor_kind: "contenteditable" }],
