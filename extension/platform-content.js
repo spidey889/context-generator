@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-toolbar-login-notice-v215";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-claude-handoff-orb-v216";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -7770,8 +7770,7 @@
     if (destinationBackdropCutoutFrame) return;
     const follow = () => {
       destinationBackdropCutoutFrame = null;
-      const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
-      if (!backdrop || backdrop.style.display !== "block") return;
+      if (!getOrbBackdrops().some(backdrop => backdrop.style.display === "block")) return;
       updateDestinationBackdropCutout();
       const bubble = document.getElementById(BUBBLE_ID);
       // Follow only the live transform, including dismissal while the scrim
@@ -7783,14 +7782,19 @@
     destinationBackdropCutoutFrame = requestAnimationFrame(follow);
   }
 
+  function getOrbBackdrops() {
+    return [DESTINATION_SHEET_BACKDROP_ID, ...(currentPlatform.id === "claude" ? [HANDOFF_SCRIM_ID] : [])]
+      .map(id => document.getElementById(id)).filter(Boolean);
+  }
+
   function updateDestinationBackdropCutout() {
     const bubble = document.getElementById(BUBBLE_ID);
-    const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+    const backdrops = getOrbBackdrops().filter(backdrop => backdrop.style.display === "block");
     // aria-expanded flips before the closing animation ends; its visible
     // backdrop must keep following the orb until the fade actually finishes.
-    if (!bubble || !backdrop || backdrop.style.display !== "block") return;
-    if (!bubble.isConnected || !isVisible(bubble) || bubble.style.display === "none" || bubble.style.visibility === "hidden") {
-      backdrop.style.clipPath = "";
+    if (!backdrops.length) return;
+    if (!bubble || !bubble.isConnected || !isVisible(bubble) || bubble.style.display === "none" || bubble.style.visibility === "hidden") {
+      for (const backdrop of backdrops) backdrop.style.clipPath = "";
       return;
     }
     const rect = (bubble.querySelector("img") || bubble).getBoundingClientRect();
@@ -7803,7 +7807,9 @@
     // of moving/cloning it or lifting the native composer's controls above blur.
     // Unlike a CSS mask, this hole also lets pointer clicks reach the orb.
     const clip = `path(evenodd, "M0 0 H${window.innerWidth} V${window.innerHeight} H0 Z M${x - radius} ${y} a${radius} ${radius} 0 1 0 ${radius * 2} 0 a${radius} ${radius} 0 1 0 ${-radius * 2} 0 Z")`;
-    if (backdrop.style.clipPath !== clip) backdrop.style.clipPath = clip;
+    for (const backdrop of backdrops) {
+      if (backdrop.style.clipPath !== clip) backdrop.style.clipPath = clip;
+    }
   }
 
   function releaseDestinationSheetBackdrop({ immediate = false } = {}) {
@@ -7897,7 +7903,9 @@
   }
 
   function refreshClaudePickerBackdrop() {
-    if (!shouldPreserveClaudePicker()) return;
+    const handoffVisible = currentPlatform.id === "claude" &&
+      document.getElementById(HANDOFF_SCRIM_ID)?.style.display === "block";
+    if (!shouldPreserveClaudePicker() && !handoffVisible) return;
     const bubble = document.getElementById(BUBBLE_ID);
     // Keep the picker locked at its opening coordinates. Only the orb's
     // click-through hole follows Claude's reflow or composer replacement.
@@ -7905,8 +7913,7 @@
       updateDestinationBackdropCutout();
       return;
     }
-    const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
-    if (backdrop) backdrop.style.clipPath = "";
+    for (const backdrop of getOrbBackdrops()) backdrop.style.clipPath = "";
   }
 
   function positionDestinationSheet() {
@@ -9198,10 +9205,18 @@
     if (bubble) {
       bubble.disabled = true;
       bubble.setAttribute("aria-expanded", "false");
-      bubble.style.opacity = "0";
-      bubble.style.transform = "translate3d(0,0,0) scale(0.82)";
+      // Keep Claude's real inline orb clear; its native ancestors trap z-index,
+      // so the handoff scrim uses the same artwork cutout as the picker.
+      const keepOrbVisible = currentPlatform.id === "claude";
+      bubble.style.opacity = keepOrbVisible ? "1" : "0";
+      if (keepOrbVisible) bubble.style.filter = "none";
+      bubble.style.transform = keepOrbVisible ? "translate3d(0,0,0) scale(1)" : "translate3d(0,0,0) scale(0.82)";
       bubble.style.cursor = "not-allowed";
       bubble.style.pointerEvents = "none";
+      if (keepOrbVisible) {
+        updateDestinationBackdropCutout();
+        trackDestinationBackdropCutout();
+      }
     }
   }
 
