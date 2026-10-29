@@ -112,7 +112,7 @@ async function run() {
     assert.equal(await destination.evaluate("window.__signInCopied", destinationContext), carry);
     assert.equal(await destination.evaluate('Boolean(document.getElementById("context-generator-sign-in-backdrop"))'), false, "Remove page blur after copying so the user can sign in.");
     assert.match(await destination.evaluate('document.getElementById("context-generator-error-text").textContent', destinationContext), /Sign in to Claude, then paste/);
-    assert.equal(await destination.evaluate('document.getElementById("context-generator-error-overlay").contextGeneratorHideTimer', destinationContext), null, "Copying must not start an expiry timer.");
+    assert.notEqual(await destination.evaluate('document.getElementById("context-generator-error-overlay").contextGeneratorHideTimer', destinationContext), null, "Successful copying starts the short confirmation timer.");
     await destination.evaluate('document.getElementById("context-generator-error-copy-again").click()', destinationContext);
     await waitFor(() => destination.evaluate('document.getElementById("context-generator-error-copy-again").textContent === "Copied again!"', destinationContext), "Copy again");
     assert.equal(await destination.evaluate("window.__signInCopied", destinationContext), carry);

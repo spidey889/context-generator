@@ -9698,8 +9698,8 @@
   function showErrorOverlay(error, copiedContext = null) {
     const message = getUserFacingTransferErrorMessage(error);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    // Sign-in recovery remains available until Dismiss, including after copying.
-    const noticeDurationMs = copiedContext?.signInRequired ? null : copiedContext ? 16000 : 8000;
+    // Keep recovery until copying succeeds; allow a short read before its exit.
+    const noticeDurationMs = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
     const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
@@ -9817,7 +9817,7 @@
 
     const title = document.getElementById("context-generator-error-title");
     if (title) {
-      title.textContent = copiedContext?.signInRequired ? `Sign in to ${copiedContext.destinationName}` : copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
+      title.textContent = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? `Sign in to ${copiedContext.destinationName}` : "Summary copied to your clipboard") : copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
         ? CHATGPT_LOGGED_OUT_ERROR_TITLE
         : isNoConversationError
           ? NO_CONVERSATION_ERROR_TITLE
@@ -9874,9 +9874,13 @@
             errorDiv.contextGeneratorPageBlur?.remove();
             errorDiv.contextGeneratorPageBlur = null;
             copyAgain.textContent = firstCopy ? "Copied!" : "Copied again!";
-            if (firstCopy && textSpan) textSpan.textContent = `Your summary is copied. Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`;
+            if (copiedContext.signInRequired) {
+              if (title) title.textContent = "Summary copied to your clipboard";
+              if (textSpan) textSpan.textContent = `Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`;
+            }
             clearTimeout(errorDiv.contextGeneratorHideTimer);
-            errorDiv.contextGeneratorHideTimer = noticeDurationMs === null ? null : setTimeout(() => hideErrorOverlay(errorDiv), noticeDurationMs);
+            const copiedDurationMs = copiedContext.signInRequired ? 2500 : noticeDurationMs;
+            errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), copiedDurationMs);
           } catch {
             if (!ownsNotice()) return;
             recordRecoveryCheckpoint(copiedContext.recovery, "copy_failed", "copy_notice", "clipboard");
@@ -10286,7 +10290,7 @@
             if (!modal.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
             closeModal();
             showErrorOverlay(copiedContext.signInRequired
-              ? `Your summary is copied. Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`
+              ? `Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`
               : "Ready to paste. Copy again here if needed.", copiedContext);
           };
           if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) finish();
