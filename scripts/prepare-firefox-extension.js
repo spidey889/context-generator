@@ -10,10 +10,14 @@ function prepareFirefoxExtension(root = path.resolve(__dirname, "..")) {
   // A combined manifest loads, but Chromium reports the Firefox scripts as an
   // MV2 warning. Keep the unpacked/Store source Chromium-only and derive Firefox.
   manifest.background = { scripts: ["transfer-diagnostics.js", "large-transfer.js", manifest.background.service_worker] };
+  // Latest Run retains chat text locally, so private-window operation is not supported.
+  manifest.incognito = "not_allowed";
   manifest.browser_specific_settings = {
     gecko: {
       id: "{8f4d7c20-9f3b-4b7e-9c11-2f4cbe2d41a9}",
-      data_collection_permissions: { required: ["personalCommunications"] }
+      // Content-script access to adoptedStyleSheets requires Firefox 153.
+      strict_min_version: "153.0",
+      data_collection_permissions: { required: ["personalCommunications"], optional: ["technicalAndInteraction"] }
     }
   };
 

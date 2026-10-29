@@ -6,6 +6,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-29
 
+- **Prepare the Firefox 1.4.36 catch-up release with real data consent.** The generated Firefox package kept the existing Gecko identity but declared only chat transmission, while shared worker code sent installation-linked usage diagnostics automatically.
+  - Add Firefox's optional `technicalAndInteraction` declaration and honor the current choice before diagnostic recording, queue delivery and telemetry envelopes on ordinary and large-summary requests. Declining diagnostics preserves transfer functionality and local Latest Run.
+  - Drop old queued/active diagnostic reports when consent is absent and abort pending diagnostic POSTs on revocation. Recheck consent for every large-summary part and final request; changing only the standalone telemetry endpoint would still leak identifiers through summaries.
+  - The owner approved desktop Firefox 153+ because the UI uses content-script constructed stylesheets, and private-window execution is disabled because Latest Run persists captured text locally. Keep Chromium's manifest, hosts and existing analytics behavior.
+  - Add a folder-only submission preparation command, readable reviewer sources with exact-byte rebuild verification, release/reviewer text and owner upload instructions. The owner handles ZIP creation and Mozilla authentication; neither a branch push nor a generated folder publishes an AMO update.
+  - Regular and slow release checks pass, and Mozilla's validator reports no errors or warnings. Native Firefox fixture evidence and remaining signed-update checks are recorded in [the release guide](docs/firefox-release-1.4.36.md); live signed-in AI sites and AMO distribution remain separate verification boundaries.
+
 - **Land the 4M route with matching production telemetry.** [PR #10](https://github.com/spidey889/context-generator/pull/10) merged the bounded large-chat flow, local benchmark and copy-dialog focus fix.
   - Final branch-only reviews and required CI found no confirmed code defect. The older production deployment lacked `/api/large-summary`; a new large-chat client against that deployment could enter complete-text local recovery. This does not establish the cause of any individual reported attempt.
   - Read-only production checks found NVIDIA missing from the live transfer writer, attribution constraint, failure validator and Edge catalogs. A completed NVIDIA summary could otherwise remain unrecorded.

@@ -43,7 +43,7 @@ function profile(local = {}, session = {}) {
   return { local: structuredClone(local), session: structuredClone(session) };
 }
 
-function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6") {
+function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6", consent = null) {
   const listeners = {};
   const alarms = [];
   // Scoped timer tests supply a live clock; restart/retry fixtures can still
@@ -68,11 +68,17 @@ function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6") {
     crypto: { randomUUID: () => id(uuidSequence++) },
     performance: { now: () => clock.now }, fetch: fetchImpl,
     chrome: {
+      ...(consent ? { permissions: {
+        getAll: () => consent.getAll ? consent.getAll() : Promise.resolve({ data_collection: consent.granted ? ["technicalAndInteraction"] : [] }),
+        onRemoved: addEvent("permissionRemoved")
+      } } : {}),
       action: { onClicked: addEvent("click"), setBadgeBackgroundColor: async () => {}, setBadgeText: async () => {} },
       alarms: { onAlarm: addEvent("alarm"), clear: async () => true, create: (name, options) => alarms.push({ name, ...options }) },
       runtime: {
         id: "fixture-extension",
-        getManifest: () => ({ version }), onInstalled: addEvent("installed"),
+        getManifest: () => ({ version, ...(consent ? { browser_specific_settings: { gecko: {
+          data_collection_permissions: { required: ["personalCommunications"], optional: ["technicalAndInteraction"] }
+        } } } : {}) }), onInstalled: addEvent("installed"),
         onStartup: addEvent("startup"), onMessage: addEvent("message")
       },
       scripting: { executeScript: async () => {} },
@@ -125,6 +131,45 @@ function startOwnedPaste(background, { stalled = false } = {}) {
   pending.catch(() => {});
   return pending;
 }
+
+test("Firefox declined diagnostics discard old queues and do not record new attempts", async () => {
+  const consent = { granted: false };
+  const shared = profile({ [OUTBOX]: [{ payload: payload(), deliveryId: id(44) }] });
+  const background = worker(() => assert.fail("opted-out telemetry must not leave the browser"), shared, NOW, "1.4.36", consent);
+  await background.settled();
+  assert.equal((await background.ack(event())).ok, false);
+  await background.settled();
+  assert.deepEqual(shared.local[OUTBOX], []);
+  assert.deepEqual(shared.local[ACTIVE], {});
+  assert.equal(shared.local[INSTALL], undefined);
+  assert.equal(background.evaluate("preparedSummaryTelemetry.size"), 0);
+});
+
+test("Firefox consent revocation aborts delivery and drops retries without breaking the worker", async () => {
+  const consent = { granted: true };
+  let requestSignal;
+  const background = worker((_url, options) => new Promise((resolve, reject) => {
+    requestSignal = options.signal;
+    options.signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+  }), profile(), NOW, "1.4.36", consent);
+  await background.settled();
+  await background.ack(event());
+  for (let index = 0; index < 20 && !requestSignal; index++) await new Promise(setImmediate);
+  assert.ok(requestSignal);
+  consent.granted = false;
+  background.listeners.permissionRemoved({ data_collection: ["technicalAndInteraction"] });
+  await background.settled();
+  assert.equal(requestSignal.aborted, true);
+  assert.deepEqual(background.shared.local[OUTBOX], []);
+  assert.equal((await background.ack(event(2))).ok, false);
+});
+
+test("Firefox diagnostics fail closed if the browser cannot read consent", async () => {
+  const background = worker(() => assert.fail("unknown consent cannot transmit"), profile(), NOW, "1.4.36",
+    { getAll: async () => { throw new Error("unavailable"); } });
+  await background.settled();
+  assert.equal((await background.ack(event())).ok, false);
+});
 
 function recoveryCheckpoint(background, checkpoint, options = {}, sender = {}) {
   return new Promise(resolve => background.listeners.message({ type: "RECORD_RECOVERY_CHECKPOINT", transferId: id(1),

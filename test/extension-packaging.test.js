@@ -30,9 +30,11 @@ test("Chromium loads only its worker; Firefox packaging preserves identity and c
   assert.deepEqual(firefox.background, { scripts: ["transfer-diagnostics.js", "large-transfer.js", "background.js"] });
   assert.deepEqual(firefox.browser_specific_settings, { gecko: {
     id: "{8f4d7c20-9f3b-4b7e-9c11-2f4cbe2d41a9}",
-    data_collection_permissions: { required: ["personalCommunications"] }
+    strict_min_version: "153.0",
+    data_collection_permissions: { required: ["personalCommunications"], optional: ["technicalAndInteraction"] }
   } });
-  const { background, browser_specific_settings, ...firefoxShared } = firefox;
+  assert.equal(firefox.incognito, "not_allowed");
+  const { background, browser_specific_settings, incognito, ...firefoxShared } = firefox;
   const { background: worker, ...chromiumShared } = chromium;
   assert.deepEqual(firefoxShared, chromiumShared, "permissions, version and injection wiring stay aligned");
   for (const file of fs.readdirSync(output, { recursive: true })) {

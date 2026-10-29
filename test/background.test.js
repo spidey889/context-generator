@@ -13,7 +13,7 @@ const compiledTransferBackground = new vm.Script(`${source}\n;globalThis.__backg
   filename: "extension/background.js"
 });
 
-function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, cssCalls = [], cssError = false, onMessage = () => {}, clock = Date, progressMessages = [], importScripts } = {}) {
+function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, cssCalls = [], cssError = false, onMessage = () => {}, clock = Date, progressMessages = [], importScripts, consent = null } = {}) {
   let messageListener = null;
   let tabRemovedListener;
   const closedTabs = new Set();
@@ -31,6 +31,7 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
     performance: { now: () => clock.now() },
     setTimeout,
     chrome: {
+      ...(consent ? { permissions: { getAll: async () => ({ data_collection: consent.granted ? ["technicalAndInteraction"] : [] }) } } : {}),
       action: {
         onClicked: event,
         setBadgeBackgroundColor: async () => {},
@@ -43,6 +44,9 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
       },
       runtime: {
         id: "cap-context-test",
+        ...(consent ? { getManifest: () => ({ browser_specific_settings: { gecko: {
+          data_collection_permissions: { optional: ["technicalAndInteraction"] }
+        } } }) } : {}),
         onInstalled: event,
         onStartup: event,
         onMessage: {
@@ -102,6 +106,7 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
     { type: "CANCEL_TRANSFER", transferId: `summary-${id}` },
     { id: "cap-context-test", frameId: 0, tab: { id }, ...sender }, resolve));
   sendSummary.backendError = response => sandbox.createSummaryBackendError(response);
+  sendSummary.seedTelemetry = value => { sandbox.getPreparedSummaryTelemetry = () => value; };
   return sendSummary;
 }
 
@@ -111,6 +116,23 @@ test("production worker never imports the absent local preview dependency", () =
     importScripts(file) { imports.push(file); throw new Error("file missing"); }
   });
   assert.deepEqual(imports, [], "Chromium must not discover a nonexistent preview dependency at installation.");
+});
+
+test("Firefox summaries still work after declining diagnostics and omit even a prepared identity", async () => {
+  const requests = [];
+  const consent = { granted: true };
+  const send = loadBackgroundForSummaryTest(async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ summary: "Complete summary without analytics." }) };
+  }, { consent });
+  send.seedTelemetry({ install_id: "private-install", attempt_id: "private-attempt" });
+  consent.granted = false;
+  const result = await send("Conversation for the Firefox consent fixture.");
+  assert.equal(result.ok, true);
+  assert.equal(result.summary, "Complete summary without analytics.");
+  assert.equal(requests.length, 1);
+  assert.equal(Object.hasOwn(requests[0], "telemetry"), false);
+  assert.doesNotMatch(JSON.stringify(requests), /private-install|private-attempt/);
 });
 
 function loadBackgroundForTransferTest({

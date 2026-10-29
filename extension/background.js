@@ -347,6 +347,37 @@ function getRawTranscriptExpiryEpoch(stats) {
   return Number.isFinite(completedAt) ? completedAt + RAW_TRANSCRIPT_RETENTION_MS : Date.now();
 }
 
+// Firefox's built-in switch covers both analytics POSTs and the optional
+// identity envelope attached to summary requests. Chromium has no such switch.
+async function hasTelemetryConsent() {
+  let timer;
+  try {
+    const optional = chrome.runtime.getManifest?.().browser_specific_settings?.gecko?.data_collection_permissions?.optional;
+    if (!optional?.includes("technicalAndInteraction")) return true;
+    const permissions = await Promise.race([
+      chrome.permissions.getAll(),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 1000); })
+    ]);
+    return permissions?.data_collection?.includes("technicalAndInteraction") === true;
+  } catch { return false; }
+  finally { clearTimeout(timer); }
+}
+
+async function clearUnconsentedTelemetry() {
+  preparedSummaryTelemetry.clear();
+  activeTransferTelemetry.clear();
+  activeTransferSourceTabs.clear();
+  await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: [], [TELEMETRY_ACTIVE_STORAGE_KEY]: {} });
+  await chrome.alarms.clear(TELEMETRY_RETRY_ALARM);
+}
+
+const activeTelemetryRequests = new Set();
+chrome.permissions?.onRemoved?.addListener(permissions => {
+  if (!permissions.data_collection?.includes("technicalAndInteraction")) return;
+  for (const controller of activeTelemetryRequests) controller.abort();
+  initializeTelemetryDelivery();
+});
+
 function initializeTelemetryDelivery() {
   telemetryDeliveryRequested = true;
   if (telemetryDeliveryRunning) return;
@@ -356,6 +387,10 @@ function initializeTelemetryDelivery() {
   telemetryDeliveryChain = (async () => {
     do {
       telemetryDeliveryRequested = false;
+      if (!await hasTelemetryConsent()) {
+        await enqueueTelemetryWork(clearUnconsentedTelemetry);
+        continue;
+      }
       let recoveryUnavailable = false;
       await enqueueTelemetryWork(async () => {
         await getOrCreateTelemetryInstallId();
@@ -402,6 +437,7 @@ function enqueueTelemetryWork(work) {
 async function recordTransferTelemetry(event, sourceTabId = null) {
   const sanitizedEvent = sanitizeTransferTelemetryEvent(event);
   if (!sanitizedEvent) return false;
+  if (!await hasTelemetryConsent()) return false;
   // Once capture has resolved the durable identity, later progress can update
   // its memory snapshot without waiting behind unrelated storage writes.
   updatePreparedSummaryTelemetry(sanitizedEvent);
@@ -432,6 +468,7 @@ async function recordTransferTelemetry(event, sourceTabId = null) {
 }
 
 async function queueActiveTransferTelemetry(payload, attemptId) {
+  if (!await hasTelemetryConsent()) return false;
   let queued = false;
   try {
     queued = await appendTelemetryOutbox(payload);
@@ -956,6 +993,10 @@ async function flushTelemetryOutbox() {
     }
 
     const result = await deliverTelemetryPayload(next.payload);
+    if (result.kind === "suppressed") {
+      await enqueueTelemetryWork(clearUnconsentedTelemetry);
+      return;
+    }
     if (result.kind === "retry" || result.kind === "configuration") {
       await enqueueTelemetryWork(() => scheduleTelemetryRetry(result));
       return;
@@ -1112,7 +1153,9 @@ async function scheduleTelemetryRetry(result) {
 }
 
 async function deliverTelemetryPayload(payload) {
+  if (!await hasTelemetryConsent()) return { kind: "suppressed" };
   const controller = new AbortController();
+  activeTelemetryRequests.add(controller);
   const timeout = setTimeout(() => controller.abort(), TELEMETRY_REQUEST_TIMEOUT_MS);
 
   try {
@@ -1151,6 +1194,7 @@ async function deliverTelemetryPayload(payload) {
   } catch {
     return { kind: "retry" };
   } finally {
+    activeTelemetryRequests.delete(controller);
     clearTimeout(timeout);
   }
 }
@@ -1691,7 +1735,10 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
         };
         try {
           check();
-          const body = JSON.stringify({ ...payload, ...(telemetry ? { telemetry } : {}) });
+          // Recheck each part: consent may change during a long transfer.
+          const requestTelemetry = await hasTelemetryConsent() ? telemetry : null;
+          check();
+          const body = JSON.stringify({ ...payload, ...(requestTelemetry ? { telemetry: requestTelemetry } : {}) });
           if (new TextEncoder().encode(body).length > 3000000)
             throw Object.assign(new Error("Large-chat part exceeds the request bound."), { code: "request_too_large" });
           const fetchedAt = nowMs();
@@ -1790,7 +1837,7 @@ async function fetchSummaryFromBackendOnce(conversationText, transferId = null, 
   try {
     // Capture normally prepares this identity before the AI request. A cold
     // worker/legacy attempt still gets the bounded storage recovery path.
-    const telemetry = getPreparedSummaryTelemetry(transferId) || await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
+    let telemetry = getPreparedSummaryTelemetry(transferId) || await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
       await restoreActiveTransferTelemetry();
       const active = activeTransferTelemetry.get(transferId);
       if (!active || active.status !== "started") return null;
@@ -1803,6 +1850,7 @@ async function fetchSummaryFromBackendOnce(conversationText, transferId = null, 
       updatePreparedSummaryTelemetry(active, installId);
       return getPreparedSummaryTelemetry(transferId);
     }), controller.signal);
+    if (!await hasTelemetryConsent()) telemetry = null;
     checkSummaryDeadline();
     const requestBody = JSON.stringify({ ...payload, ...(telemetry ? { telemetry } : {}) });
     if (new TextEncoder().encode(requestBody).byteLength > SUMMARY_MAX_REQUEST_BYTES) {

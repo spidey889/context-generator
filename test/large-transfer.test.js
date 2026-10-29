@@ -78,7 +78,7 @@ test("large cancellation, malformed part receipts and expired work never reach f
   error => error.code === "summary_invalid_response");
 });
 
-function backgroundFixture(fetchImpl) {
+function backgroundFixture(fetchImpl, consent = () => true) {
   const source = fs.readFileSync(path.join(__dirname, "../extension/background.js"), "utf8");
   const code = source.slice(source.indexOf("function localPreviewAuthHeaders("), source.indexOf("// Opening a page after removal")) +
     source.slice(source.indexOf("async function summarizeLargeWithBackend("), source.indexOf("async function fetchSummaryFromBackend("));
@@ -89,7 +89,7 @@ function backgroundFixture(fetchImpl) {
   const sandbox = { AbortController, TextEncoder, Date, URL, setTimeout, clearTimeout,
     CapLargeTransfer: large, SUMMARY_BACKEND_URL: "https://context-generator-five.vercel.app/api/summarize", SUMMARY_CLIENT_HEADER: "cap-context-extension/1",
     isUuid: value => value === transferId, nowMs: Date.now, startSummaryServiceWorkerKeepAlive: () => () => {},
-    getPreparedSummaryTelemetry: () => telemetry, getOrCreateTelemetryInstallId: async () => "install",
+    getPreparedSummaryTelemetry: () => telemetry, getOrCreateTelemetryInstallId: async () => "install", hasTelemetryConsent: async () => consent(),
     waitForSummaryTelemetry: work => work, enqueueTelemetryWork: work => work(), restoreActiveTransferTelemetry: async () => {}, updatePreparedSummaryTelemetry() {},
     checkTransferOperation: op => op.controller.signal.throwIfAborted(), checkTransferDeadline() {}, checkTransferSource: async () => {},
     readSummaryResponse: response => response.json(), fetch: fetchImpl,
@@ -104,7 +104,7 @@ function backgroundFixture(fetchImpl) {
     chrome: { tabs: { sendMessage: async (tabId, message) => progress.push({ tabId, message }) } }
   };
   vm.createContext(sandbox); new vm.Script(code).runInContext(sandbox);
-  return { run: () => sandbox.summarizeLargeWithBackend("x".repeat(1000001), transferId, null, operation), queued, proofs, progress };
+  return { run: (conversation = "x".repeat(1000001)) => sandbox.summarizeLargeWithBackend(conversation, transferId, null, operation), queued, proofs, progress };
 }
 
 test("background uses only the separate endpoint and persists only a complete final receipt", async () => {
@@ -141,4 +141,24 @@ test("background cannot count completed parts after final summary failure", asyn
   await assert.rejects(state.run(), error => error.code === "summary_failed");
   assert.equal(state.queued.length, 0);
   assert.equal(state.proofs.size, 0);
+});
+
+test("large Firefox transfers recheck consent for each part and the final request", async () => {
+  let granted = true;
+  const requests = [];
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    requests.push(payload);
+    if (payload.large.phase === "part") {
+      granted = false;
+      return { ok: true, json: async () => ({ summary: "part", receipt: `part-${payload.large.index}` }) };
+    }
+    return { ok: true, json: async () => ({ summary: "Complete large summary." }) };
+  }, () => granted);
+  const result = await state.run("x".repeat(2000000));
+  assert.equal(result.summary, "Complete large summary.");
+  assert.ok(requests.some(request => request.telemetry));
+  assert.ok(requests.some(request => request.large.phase === "part" && !Object.hasOwn(request, "telemetry")));
+  assert.equal(Object.hasOwn(requests.at(-1), "telemetry"), false);
+  assert.equal(requests.length, 5);
 });

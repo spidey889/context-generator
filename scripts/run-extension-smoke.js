@@ -944,8 +944,7 @@ async function startFixtureServer() {
       const summaryTelemetry = state.summaryRequests.at(-1)?.telemetry;
       // UI-only modes also accept an unattributed summary: optional
       // initial storage may time out without blocking the actual transfer.
-      const receipt = (EARLY_HANDOFF_SMOKE || process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1") && !summaryTelemetry
-        ? {} : await telemetryFixture.signSummary(summaryTelemetry);
+      const receipt = !summaryTelemetry ? {} : await telemetryFixture.signSummary(summaryTelemetry);
       const streaming = request.headers.accept === "application/x-ndjson";
       response.writeHead(200, {
         "Access-Control-Allow-Origin": "*",
@@ -3917,4 +3916,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort, getTargets, waitFor };
+module.exports = { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort, getTargets, waitFor,
+  startFixtureServer, expectedChatGptConversation, SUMMARY_TEXT };
