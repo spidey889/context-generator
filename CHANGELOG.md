@@ -6,6 +6,14 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-29
 
+- **Land the 4M route with matching production telemetry.** [PR #10](https://github.com/spidey889/context-generator/pull/10) merged the bounded large-chat flow, local benchmark and copy-dialog focus fix.
+  - Final branch-only reviews and required CI found no confirmed code defect. The older production deployment lacked `/api/large-summary`; a new large-chat client against that deployment could enter complete-text local recovery. This does not establish the cause of any individual reported attempt.
+  - Read-only production checks found NVIDIA missing from the live transfer writer, attribution constraint, failure validator and Edge catalogs. A completed NVIDIA summary could otherwise remain unrecorded.
+  - Verified an encrypted application backup and local restore, then applied only `20261029050000_nvidia_large_summary_model` using the database’s recorded migration history. No history repair, reset, tables or columns were added.
+  - Deployed matching `transfer-telemetry` version 27 with its existing private authentication and `verify_jwt=false`. NVIDIA acceptance is now present in all SQL and Edge catalogs; row hashes, user sequence and function/table access fingerprints stayed unchanged.
+  - Vercel production deployment for merge `eb5a645` is READY; API GET guards and retained privacy/analysis routes passed. Chrome Web Store publication remains separate; unpacked clients need an extension reload and chat refresh.
+
+
 - **Keep production worker dependencies present.** The merged 4M browser check captured the chat but made no summary or telemetry request, leaving only local copy recovery.
   - The worker statically referenced ignored `local-preview-auth.js`, which is absent from a normal installation.
   - Chromium's worker dependency discovery rejected startup despite the surrounding JavaScript `try/catch`; VM tests had incorrectly treated a caught import error as proof of browser startup.
