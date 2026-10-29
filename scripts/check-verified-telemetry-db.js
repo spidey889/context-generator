@@ -420,13 +420,20 @@ async function main() {
         checks += await require("./check-transfer-flow-diagnostics-db.js").checkTransferFlowDiagnostics(db, sql);
       } else if (name.endsWith("_nvidia_large_summary_model.sql")) {
         checks += await require("./check-nvidia-large-model-db.js").checkNvidiaLargeModel(db, sql);
+      } else if (name.endsWith("_rejected_capture_character_count.sql")) {
+        checks += await require("./check-rejected-capture-count-db.js").checkRejectedCaptureCount(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
     // One default restore at the complete current schema covers file-size
     // reasons and provider evidence together, including the later validators.
+    // Backup JSON tooling may reorder nested object keys; array order and all
+    // values must still survive the real restore and retained-row comparison.
+    const reverseObjectKeys = value => Array.isArray(value) ? value.map(reverseObjectKeys)
+      : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().reverse()
+        .map(key => [key, reverseObjectKeys(value[key])])) : value;
     equal((await checkSnapshot({
-      transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => value.row),
+      transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => reverseObjectKeys(value.row)),
       users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
       migrations: appliedMigrations,
       users_sequence: await one("select last_value::text,is_called from public.users_user_no_seq")
