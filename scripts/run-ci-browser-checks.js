@@ -16,6 +16,7 @@ function getBrowserChecks(extended = false) {
     check("handoff-palette", "Handoff palette under strict CSP", 60, { CAP_CONTEXT_HANDOFF_PALETTE_SMOKE: "1", CAP_CONTEXT_HANDOFF_CSP_SMOKE: "1" }),
     check("chatgpt-paste", "ChatGPT long paste stays in the editor once", 120, { CAP_CONTEXT_CHATGPT_PASTE_SMOKE: "1" }),
     check("draft-transfer", "First draft opens both copy dialogs", 120, { CAP_CONTEXT_DRAFT_TRANSFER_SMOKE: "1", CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),
+    { ...check("sign-in-recovery", "Login redirect, full copy recovery and sign-in reminder", 90), script: "scripts/run-sign-in-recovery-smoke.js" },
     check("chatgpt-reload", "ChatGPT reload, expired-token cancellation and Gemini delivery", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_CHATGPT_RELOAD_SMOKE: "1", CAP_CONTEXT_TOOLBAR_SMOKE: "1", CAP_CONTEXT_CHATGPT_AUTH_SMOKE: "paste401", CAP_CONTEXT_GEMINI_DESTINATION_SMOKE: "1" }),
     check("json-retry", "JSON retry after offline picker capture", 120, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_JSON_RETRY_SMOKE: "1" }),
     check("source-reload", "Source reload and tab closure retain their database reports", 120, { CAP_CONTEXT_SOURCE_RELOAD_SMOKE: "1", CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),

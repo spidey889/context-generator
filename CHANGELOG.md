@@ -6,6 +6,14 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-29
 
+- **Offer the ready transfer when a destination requires sign-in.** A DeepSeek-to-Claude transfer captured and summarized correctly but ended on Claude's login page; a later attempt succeeded on its new-chat page.
+  - Login redirects previously used generic paste failure and could open another destination that repeated the redirect. The first sign-in guard also ran before normal tab activation, leaving the login tab in the background; no extra permission was needed to reveal it.
+  - Recognize supported login routes and external auth hosts before dispatch, bring the existing tab forward, skip fresh-tab recovery, and preserve the original diagnosis.
+  - Show "Sign in to [destination]" in the compact warm glass notice with Copy summary/Dismiss; it stays until dismissed, including after copying. At the owner's request, place it upper-left with a left-side slide and a separate page-wide blur, clear of Chrome's upper-right account chooser. Clear that blur after successful copying or dismissal so the user can sign in. Keep the full text box on the source; clipboard failure opens it on the destination too. Only actual clipboard success changes the notice to copied.
+  - Return an already-handled login failure directly and let the worker show the notice once; duplicate recovery could otherwise refocus the tab and invalidate an in-flight clipboard action.
+  - Preserve login fields, ordinary draft protection, uncertain-paste warnings and clipboard failure recovery; do not automatically resume insertion after sign-in.
+  - Focused checks and isolated Brave verify one destination, tab activation, unchanged sign-in fields, the complete carry, notice styling/actions and explicit dismissal. Keep existing permissions, site matches and database reporting; external auth pages use source recovery when extension UI is unavailable.
+
 - **Keep Latest Run current when captured text exceeds browser storage.** Some admitted 4M transcripts exceed the extension's shared 10 MB local quota, leaving analysis on the previous transfer.
   - The receipt bundled metadata and full captured text in one write, and silently ignored rejected writes.
   - Isolated Brave confirmed that 4M CJK characters require about 12 MB and cannot fit; JSON escaping can also exceed the quota.
@@ -21,6 +29,7 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
   - Add owner-requested TokenHarbor DeepSeek backup for a failed NVIDIA piece or final merge, keeping successful pieces. One attempt per provider shares the existing 75-second request: NVIDIA gets at most 45 seconds when backup is configured; DeepSeek gets the remaining time. Missing/disabled providers are skipped, cancellation wins, and the final proof names the actual serving model. Focused tests cover mixed-provider receipts, HTTP/refusal/truncation fallback, total deadlines, cancellation and both-provider failure; the ≤1M route stays unchanged.
   - If both providers fail for a piece, stop sibling work and offer every captured character for manual copying. Do not inject a 4M fallback automatically or report a completed summary/paste.
   - Regression coverage exercises exact 4M capture, byte escaping, receipt tampering/expiry, cancellation and failed-part recovery. The revised live NVIDIA trial summarized a varied synthetic 4M transcript in 68.8 seconds through eight pieces plus a final merge; all 13 seeded fact checks passed and manual review retained the latest proposal-only request, both unresolved retry choices and exact configuration/comment. Installed-Brave success/recovery checks use a synthetic upstream model; real-user summary fidelity and free-provider availability remain beta limitations. This branch is not a production deployment or Store release.
+
 
 ## 2026-10-28
 

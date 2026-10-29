@@ -3495,6 +3495,80 @@ clockTest("source draft recovery keeps its original copy dialog and prepared car
   }
 });
 
+clockTest("sign-in recovery retains the complete transfer and uses the existing copy-notice flow", async () => {
+  const summary = "Full prepared transfer\nwith every character retained.";
+  const registerDialog = hooks => {
+    const elements = {};
+    for (const id of ["modal", "title", "desc", "text"]) {
+      elements[id] = new FakeElement({ tag: id === "text" ? "textarea" : "div" });
+      hooks.registerElementId(`context-generator-fallback-${id}`, elements[id]);
+    }
+    return elements;
+  };
+  const hooks = loadPlatformContent([], "chatgpt.com");
+  const source = registerDialog(hooks);
+  hooks.showContextTransferFailure({ code: "paste_failed", diagnostics: { version: 1,
+    error_code: "destination_not_new_chat", destination_auth_prompt: true } },
+  { stage: "paste", destinationId: "claude", summary });
+  assert.equal(source.title.textContent, "Sign in to Claude");
+  assert.match(source.desc.textContent, /You're not signed in to Claude/);
+  assert.equal(source.text.value, summary);
+  assert.equal(source.modal.contextGeneratorDestinationCopy, true);
+  assert.equal(source.modal.contextGeneratorSignInRequired, true);
+  const loginInput = new FakeElement({ tag: "input" });
+  loginInput.value = "Existing sign-in field";
+  const destination = loadPlatformContent([loginInput], "claude.ai", { pathname: "/login",
+    clipboardWrite: async () => { throw new Error("clipboard denied"); } });
+  destination.document.createElement = () => {
+    const element = new FakeElement();
+    element.remove = () => { element.isConnected = false; };
+    return element;
+  };
+  const recovery = registerDialog(destination);
+  const notice = {};
+  for (const id of ["overlay", "title", "text", "mark", "dismiss", "copy-again"]) {
+    notice[id] = new FakeElement();
+    notice[id].style.setProperty = function (name, value) { this[name] = value; };
+    destination.registerElementId(`context-generator-error-${id}`, notice[id]);
+  }
+  await assert.rejects(destination.pasteIntoPlatform(summary, "claude"), error => {
+    assert.equal(error.diagnostics.destination_auth_prompt, true);
+    return true;
+  });
+  assert.equal(loginInput.value, "Existing sign-in field");
+  let reply;
+  const listener = destination.runtimeMessageListeners[0];
+  listener({ type: "SHOW_SIGN_IN_RECOVERY", text: summary, destination: "gemini" }, {}, value => { reply = value; });
+  assert.equal(reply.ok, false, "The copy UI belongs to the selected destination only.");
+  listener({ type: "SHOW_SIGN_IN_RECOVERY", text: summary, destination: "claude" }, {}, value => { reply = value; });
+  assert.equal(reply.ok, true);
+  assert.equal(notice.title.textContent, "Sign in to Claude");
+  assert.equal(notice["copy-again"].textContent, "Copy summary");
+  assert.equal(notice.mark.textContent, "i", "Do not claim copying before the user clicks.");
+  assert.equal(recovery.text.value, "", "The destination starts with the compact notice, not the full text box.");
+  await destination.delay(1);
+  assert.equal(notice.overlay.style.left, "20px");
+  assert.equal(notice.overlay.style.right, "auto");
+  assert.equal(notice.overlay.style.top, "80px");
+  assert.equal(notice.overlay.style.transform, "translate3d(-24px,0,0)");
+  const backdrop = notice.overlay.contextGeneratorPageBlur;
+  assert.ok(backdrop?.isConnected, "The page behind the sign-in notice is blurred.");
+  assert.match(backdrop.style.cssText, /backdrop-filter:blur\(6px\)/);
+  await destination.delay(16001);
+  assert.equal(notice.overlay.getAttribute("aria-hidden"), "false", "The sign-in notice must survive the old expiry time.");
+  assert.equal(notice.overlay.contextGeneratorHideTimer, null);
+  await notice["copy-again"].onclick();
+  assert.equal(backdrop.isConnected, false, "Opening manual copy must release the notice's page blur.");
+  assert.equal(recovery.text.value, summary, "A failed compact copy keeps the full text box available.");
+  assert.equal(recovery.modal.contextGeneratorSignInRequired, true);
+  destination.showContextTransferFailure(new Error("Another transfer failed."));
+  await destination.delay(1);
+  assert.equal(notice.overlay.style.top, "80px", "Reusing the node for ordinary errors restores their placement.");
+  assert.equal(notice.overlay.style.bottom, "auto");
+  assert.equal(notice.overlay.style.left, "auto");
+  assert.equal(notice.overlay.style.right, "20px");
+});
+
 clockTest("destinations show the draft copy box on the first check without touching input text", async () => {
   for (const [hostname, destination] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"],
     ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {

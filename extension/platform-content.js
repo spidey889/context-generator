@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-latest-run-storage-v208";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-large-chat-master-v218";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -742,6 +742,7 @@
       DESTINATION_SHEET_STYLE_ID,
       "context-generator-styles",
       "context-generator-error-overlay",
+      "context-generator-sign-in-backdrop",
       "context-generator-error-mark",
       "context-generator-fallback-modal"
     ].forEach((id) => document.getElementById(id)?.remove());
@@ -866,6 +867,17 @@
       return false;
     }
 
+    if (message?.type === "SHOW_SIGN_IN_RECOVERY") {
+      const allowed = message.destination === currentPlatform.id && !cancelledTransferIds.has(message.transferId)
+        && observeDestinationAuthPrompt() === true && typeof message.text === "string" && Boolean(message.text.trim());
+      if (allowed) {
+        endDestinationWaitingStatus(message.transferId);
+        showSignInRecoveryNotice(message.text, currentPlatform.name,
+          { transferId: message.transferId, destination: message.destination });
+      }
+      sendResponse({ ok: allowed });
+      return false;
+    }
     if (message?.type === "PASTE_CONTEXT") {
       if (cancelledTransferIds.has(message.transferId)) {
         sendResponse({ ok: false, code: "user_cancelled", error: "Transfer cancelled." });
@@ -883,7 +895,7 @@
         })
         .catch((error) => {
           const draftPresent = error?.diagnostics?.error_code === "editor_has_draft";
-          finishStatus(error.code === "user_cancelled" || draftPresent ? null : false);
+          finishStatus(error.code === "user_cancelled" || draftPresent || isSignInRecovery(error) ? null : false);
           sendResponse({ ok: false, error: error.message, code: error.code || null, diagnostics: error.diagnostics || null });
         });
 
@@ -892,6 +904,13 @@
 
     if (message?.type === "OPEN_DESTINATION_PICKER") {
       if (!isRunning) {
+        // A guest composer is usable even when the page offers Sign in.
+        if (globalThis.CapTransferDiagnostics?.authPromptFromUrl(window.location.href) === true
+          || (!findPlatformInput() && observeDestinationAuthPrompt() === true)) {
+          showErrorOverlay(`Sign in to ${currentPlatform.name} first, then open a chat to use Cap Context.`);
+          sendResponse({ ok: true });
+          return false;
+        }
         // Reinjection registers this receiver before its first placement frame.
         // Establish the owner now so that frame cannot dismiss the new picker.
         if (!isDestinationSheetOpen()) ensureFloatingButton("toolbar");
@@ -1193,7 +1212,8 @@
       if (transferTrace.expired || transferTrace.cancelled) return;
       recordTransferFailureDiagnostics(transferTrace, error);
       const draftPresent = transferStage === "paste" && transferTrace.diagnostics?.error_code === "editor_has_draft";
-      if (draftPresent && summary) {
+      const signInRequired = transferStage === "paste" && isSignInRecovery(error);
+      if ((draftPresent || signInRequired) && summary) {
         try {
           transferTrace.copyBoxShown = showContextTransferFailure(error, { destinationId, stage: transferStage, summary,
             transferId: transferTrace.id }) === true;
@@ -1203,14 +1223,14 @@
         }
       }
       if (transferTrace.copyBoxShown) {
-        globalThis.CapTransferDiagnostics?.event(transferTrace.diagnostics, "local_fallback", Math.round(getNow() - transferTrace.startedAt), "events", "editor_has_draft");
+        globalThis.CapTransferDiagnostics?.event(transferTrace.diagnostics, "local_fallback", Math.round(getNow() - transferTrace.startedAt), "events", draftPresent ? "editor_has_draft" : "destination_not_new_chat");
         markTransferTrace(transferTrace, "copy box shown");
       } else {
         markTransferTrace(transferTrace, `failed: ${error.message}`);
       }
       finishTransferTrace(transferTrace, getSafeTelemetryFailureReason(error, transferStage));
       resetRunningFlag();
-      if (!draftPresent) showContextTransferFailure(error, {
+      if (!draftPresent && !signInRequired) showContextTransferFailure(error, {
         destinationId,
         stage: transferStage,
         summary,
@@ -1218,6 +1238,11 @@
       });
       if (!transferTrace.copyBoxShown) await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }).catch(() => {});
     }
+  }
+
+  function isSignInRecovery(error) {
+    return error?.diagnostics?.destination_auth_prompt === true
+      && ["destination_not_new_chat", "editor_missing", "conversation_changed"].includes(error.diagnostics.error_code);
   }
 
   function showContextTransferFailure(error, details = {}) {
@@ -1238,7 +1263,8 @@
       // Source recovery keeps its original copy dialog. The destination owns
       // the draft-specific explanation where the existing input is visible.
       return showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed", false,
-        { recovery: { transferId: details.transferId, destination: details.destinationId } });
+        { destinationCopy: isSignInRecovery(error), signInRequired: isSignInRecovery(error),
+          recovery: { transferId: details.transferId, destination: details.destinationId } });
     }
 
     showErrorOverlay(error || "Transfer failed. Please try again.");
@@ -3208,6 +3234,8 @@
         showFallbackModal(text, getPlatform(destinationId)?.name || "the destination", false, false, true,
           { destinationCopy: true, recovery: { transferId, destination: destinationId } });
       }
+      // The worker reveals login recovery once, after activating this tab.
+      // Showing it here as well could replace a pending clipboard click.
       throw error;
     }
   }
@@ -7811,8 +7839,7 @@
     if (destinationBackdropCutoutFrame) return;
     const follow = () => {
       destinationBackdropCutoutFrame = null;
-      const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
-      if (!backdrop || backdrop.style.display !== "block") return;
+      if (!getOrbBackdrops().some(backdrop => backdrop.style.display === "block")) return;
       updateDestinationBackdropCutout();
       const bubble = document.getElementById(BUBBLE_ID);
       // Follow only the live transform, including dismissal while the scrim
@@ -7824,14 +7851,19 @@
     destinationBackdropCutoutFrame = requestAnimationFrame(follow);
   }
 
+  function getOrbBackdrops() {
+    return [DESTINATION_SHEET_BACKDROP_ID, HANDOFF_SCRIM_ID]
+      .map(id => document.getElementById(id)).filter(Boolean);
+  }
+
   function updateDestinationBackdropCutout() {
     const bubble = document.getElementById(BUBBLE_ID);
-    const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+    const backdrops = getOrbBackdrops().filter(backdrop => backdrop.style.display === "block");
     // aria-expanded flips before the closing animation ends; its visible
     // backdrop must keep following the orb until the fade actually finishes.
-    if (!bubble || !backdrop || backdrop.style.display !== "block") return;
-    if (!bubble.isConnected || !isVisible(bubble) || bubble.style.display === "none" || bubble.style.visibility === "hidden") {
-      backdrop.style.clipPath = "";
+    if (!backdrops.length) return;
+    if (!bubble || !bubble.isConnected || !isVisible(bubble) || bubble.style.display === "none" || bubble.style.visibility === "hidden") {
+      for (const backdrop of backdrops) backdrop.style.clipPath = "";
       return;
     }
     const rect = (bubble.querySelector("img") || bubble).getBoundingClientRect();
@@ -7844,7 +7876,9 @@
     // of moving/cloning it or lifting the native composer's controls above blur.
     // Unlike a CSS mask, this hole also lets pointer clicks reach the orb.
     const clip = `path(evenodd, "M0 0 H${window.innerWidth} V${window.innerHeight} H0 Z M${x - radius} ${y} a${radius} ${radius} 0 1 0 ${radius * 2} 0 a${radius} ${radius} 0 1 0 ${-radius * 2} 0 Z")`;
-    if (backdrop.style.clipPath !== clip) backdrop.style.clipPath = clip;
+    for (const backdrop of backdrops) {
+      if (backdrop.style.clipPath !== clip) backdrop.style.clipPath = clip;
+    }
   }
 
   function releaseDestinationSheetBackdrop({ immediate = false } = {}) {
@@ -7937,17 +7971,17 @@
       sheet?.style.display === "block" && sheet.getAttribute("aria-hidden") !== "true";
   }
 
-  function refreshClaudePickerBackdrop() {
-    if (!shouldPreserveClaudePicker()) return;
+  function refreshOrbBackdropCutouts() {
+    const handoffVisible = document.getElementById(HANDOFF_SCRIM_ID)?.style.display === "block";
+    if (!shouldPreserveClaudePicker() && !handoffVisible) return;
     const bubble = document.getElementById(BUBBLE_ID);
     // Keep the picker locked at its opening coordinates. Only the orb's
-    // click-through hole follows Claude's reflow or composer replacement.
+    // cutout follows native reflow or composer replacement on every platform.
     if (bubble) {
       updateDestinationBackdropCutout();
       return;
     }
-    const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
-    if (backdrop) backdrop.style.clipPath = "";
+    for (const backdrop of getOrbBackdrops()) backdrop.style.clipPath = "";
   }
 
   function positionDestinationSheet() {
@@ -8714,6 +8748,7 @@
       statusText.setAttribute("aria-atomic", "true");
       statusText.style.cssText = [
         "position:relative",
+        "top:8px",
         "z-index:1",
         "display:flex",
         "min-height:42px",
@@ -9239,10 +9274,15 @@
     if (bubble) {
       bubble.disabled = true;
       bubble.setAttribute("aria-expanded", "false");
-      bubble.style.opacity = "0";
-      bubble.style.transform = "translate3d(0,0,0) scale(0.82)";
+      // Native ancestors can trap z-index. Keep the real orb clear using the
+      // same artwork cutout as the picker, without enabling another transfer.
+      bubble.style.opacity = "1";
+      bubble.style.filter = "none";
+      bubble.style.transform = "translate3d(0,0,0) scale(1)";
       bubble.style.cursor = "not-allowed";
       bubble.style.pointerEvents = "none";
+      updateDestinationBackdropCutout();
+      trackDestinationBackdropCutout();
     }
   }
 
@@ -9738,10 +9778,16 @@
     hideHandoffReassurance();
   }
 
+  function showSignInRecoveryNotice(text, destinationName, recovery) {
+    showErrorOverlay(`Your summary is ready. Copy it, sign in, then paste it into a new chat.`,
+      { text, destinationName, recovery, signInRequired: true, pendingCopy: true });
+  }
+
   function showErrorOverlay(error, copiedContext = null) {
     const message = getUserFacingTransferErrorMessage(error);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const noticeDurationMs = copiedContext ? 16000 : 8000;
+    // Keep recovery until copying succeeds; allow a short read before its exit.
+    const noticeDurationMs = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
     const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
@@ -9750,6 +9796,7 @@
     // Reopening the picker cancels this reveal, so an old error cannot flash back.
     if (sourceSurface && sourceSurface === sheet) hideDestinationSheet({ restoreFocus: false });
     if (sourceSurface && sourceSurface === handoff) hideOverlay();
+    const isToolbarSignInNotice = message === `Sign in to ${currentPlatform.name} first, then open a chat to use Cap Context.`;
     const isNoConversationError = message === NO_CONVERSATION_ERROR_MESSAGE;
     // Guest /uc chats use a separate transcript layout. Explain the missing
     // login only when the active native composer explicitly marks this state.
@@ -9859,18 +9906,18 @@
 
     const title = document.getElementById("context-generator-error-title");
     if (title) {
-      title.textContent = copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
+      title.textContent = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? `Sign in to ${copiedContext.destinationName}` : "Summary copied to your clipboard") : copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
         ? CHATGPT_LOGGED_OUT_ERROR_TITLE
         : isNoConversationError
           ? NO_CONVERSATION_ERROR_TITLE
           : isSummaryRetryError
             ? SUMMARY_RETRY_ERROR_TITLE
-            : "Transfer failed";
+            : isToolbarSignInNotice ? `Sign in to ${currentPlatform.name}` : "Transfer failed";
     }
 
     const mark = document.getElementById("context-generator-error-mark");
     if (mark) {
-      mark.textContent = copiedContext ? "✓" : isNoConversationError || isSummaryRetryError ? "i" : "!";
+      mark.textContent = copiedContext?.pendingCopy ? "i" : copiedContext ? "✓" : isNoConversationError || isSummaryRetryError || isToolbarSignInNotice ? "i" : "!";
     }
 
     const textSpan = document.getElementById("context-generator-error-text");
@@ -9896,7 +9943,7 @@
     }
     if (copyAgain) {
       copyAgain.style.display = copiedContext ? "block" : "none";
-      copyAgain.textContent = "Copy again";
+      copyAgain.textContent = copiedContext?.pendingCopy ? "Copy summary" : "Copy again";
       copyAgain.disabled = false;
       if (copiedContext) {
         const owner = errorDiv.contextGeneratorCopyNoticeOwner = {};
@@ -9911,15 +9958,24 @@
             await navigator.clipboard.writeText(copiedContext.text);
             if (!ownsNotice()) return;
             recordRecoveryCheckpoint(copiedContext.recovery, "copy_succeeded", "copy_notice", "clipboard");
-            copyAgain.textContent = "Copied again!";
+            const firstCopy = copiedContext.pendingCopy === true;
+            copiedContext.pendingCopy = false;
+            errorDiv.contextGeneratorPageBlur?.remove();
+            errorDiv.contextGeneratorPageBlur = null;
+            copyAgain.textContent = firstCopy ? "Copied!" : "Copied again!";
+            if (copiedContext.signInRequired) {
+              if (title) title.textContent = "Summary copied to your clipboard";
+              if (textSpan) textSpan.textContent = `Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`;
+            }
             clearTimeout(errorDiv.contextGeneratorHideTimer);
-            errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), noticeDurationMs);
+            const copiedDurationMs = copiedContext.signInRequired ? 2500 : noticeDurationMs;
+            errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), copiedDurationMs);
           } catch {
             if (!ownsNotice()) return;
             recordRecoveryCheckpoint(copiedContext.recovery, "copy_failed", "copy_notice", "clipboard");
             hideErrorOverlay(errorDiv, { immediate: true });
             showFallbackModal(copiedContext.text, copiedContext.destinationName, false, false,
-              copiedContext.draftPresent, { destinationCopy: true, recovery: copiedContext.recovery });
+              copiedContext.draftPresent, { destinationCopy: true, signInRequired: copiedContext.signInRequired, recovery: copiedContext.recovery });
           } finally {
             if (ownsNotice()) copyAgain.disabled = false;
           }
@@ -9993,16 +10049,29 @@
       }
     }
     errorDiv.style.transition = reducedMotion ? "none" : "opacity 260ms ease,transform 260ms ease";
-    errorDiv.style.transform = "translate3d(24px,0,0)";
+    errorDiv.contextGeneratorSlideFromLeft = Boolean(copiedContext?.signInRequired);
+    errorDiv.style.transform = errorDiv.contextGeneratorSlideFromLeft ? "translate3d(-24px,0,0)" : "translate3d(24px,0,0)";
     const reveal = () => {
       errorDiv.contextGeneratorEnterTimer = null;
       errorDiv.style.display = "flex";
       errorDiv.setAttribute("aria-hidden", "false");
-      // Every notice enters from the same point, including reused error nodes.
-      errorDiv.style.right = "20px";
+      // Browser-owned account choosers cover the upper-right on login pages;
+      // a page z-index cannot raise our sign-in recovery above that browser UI.
+      errorDiv.style.right = copiedContext?.signInRequired ? "auto" : "20px";
       errorDiv.style.bottom = "auto";
-      errorDiv.style.left = "auto";
+      errorDiv.style.left = copiedContext?.signInRequired ? "20px" : "auto";
       errorDiv.style.top = "80px";
+      if (copiedContext?.signInRequired && copiedContext.pendingCopy) {
+        // Blur the page, not just the glass card. Leave login controls usable
+        // and remove this layer as soon as copying succeeds or the notice ends.
+        const backdrop = document.createElement("div");
+        backdrop.id = "context-generator-sign-in-backdrop";
+        backdrop.dataset.contextGeneratorOwned = "true";
+        backdrop.setAttribute("aria-hidden", "true");
+        backdrop.style.cssText = "position:fixed;inset:0;z-index:9999998;pointer-events:none;background:rgba(0,0,0,0.08);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)";
+        document.body.appendChild(backdrop);
+        errorDiv.contextGeneratorPageBlur = backdrop;
+      }
       const settle = () => {
         errorDiv.contextGeneratorAnimationFrame = null;
         errorDiv.style.opacity = "1";
@@ -10013,13 +10082,15 @@
         void errorDiv.offsetWidth;
         errorDiv.contextGeneratorAnimationFrame = requestAnimationFrame(settle);
       }
-      errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), noticeDurationMs);
+      errorDiv.contextGeneratorHideTimer = noticeDurationMs === null ? null : setTimeout(() => hideErrorOverlay(errorDiv), noticeDurationMs);
     };
     if (sourceSurface && !reducedMotion) errorDiv.contextGeneratorEnterTimer = setTimeout(reveal, exitMs);
     else reveal();
   }
 
   function releaseCopyNotice(errorDiv) {
+    errorDiv.contextGeneratorPageBlur?.remove();
+    errorDiv.contextGeneratorPageBlur = null;
     // Release the local carry when this notice expires or another notice wins.
     errorDiv.contextGeneratorCopyNoticeOwner = null;
     const copyAgain = errorDiv.querySelector("#context-generator-error-copy-again");
@@ -10036,7 +10107,7 @@
     cancelAnimationFrame(errorDiv.contextGeneratorAnimationFrame);
     errorDiv.setAttribute("aria-hidden", "true");
     errorDiv.style.opacity = "0";
-    errorDiv.style.transform = "translate3d(24px,0,0)";
+    errorDiv.style.transform = errorDiv.contextGeneratorSlideFromLeft ? "translate3d(-24px,0,0)" : "translate3d(24px,0,0)";
     if (immediate || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) errorDiv.style.display = "none";
     else errorDiv.contextGeneratorDisplayTimer = setTimeout(() => {
       errorDiv.style.display = "none";
@@ -10044,7 +10115,7 @@
   }
 
   function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false,
-    { destinationCopy = false, recovery = null, largeTranscript = false } = {}) {
+    { destinationCopy = false, recovery = null, largeTranscript = false, signInRequired = false } = {}) {
     // A new destination recovery owns the carry. A pending Copy again from an
     // older notice must not reopen its text over this dialog after rejection.
     const copyNotice = document.getElementById("context-generator-error-overlay");
@@ -10303,11 +10374,14 @@
         copyBtn.style.setProperty("color", draftPresent ? "#173e27" : "#07150d", "important");
 
         if (modal.contextGeneratorDestinationCopy) {
-          const copiedContext = { text: currentText, destinationName: modal.contextGeneratorDestinationName, draftPresent, recovery };
+          const copiedContext = { text: currentText, destinationName: modal.contextGeneratorDestinationName, draftPresent, recovery,
+            signInRequired: modal.contextGeneratorSignInRequired };
           const finish = () => {
             if (!modal.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
             closeModal();
-            showErrorOverlay("Ready to paste. Copy again here if needed.", copiedContext);
+            showErrorOverlay(copiedContext.signInRequired
+              ? `Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`
+              : "Ready to paste. Copy again here if needed.", copiedContext);
           };
           if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) finish();
           else {
@@ -10403,17 +10477,20 @@
     modal.contextGeneratorCopyOwner = {};
     modal.contextGeneratorRecovery = recovery;
     modal.contextGeneratorDestinationCopy = destinationCopy;
+    modal.contextGeneratorSignInRequired = signInRequired;
     modal.contextGeneratorDestinationName = destinationName;
     modal.contextGeneratorResetCopyFeedback?.();
     modal.style.opacity = "1";
     modal.contextGeneratorPreviousFocus = document.activeElement;
 
     const title = document.getElementById("context-generator-fallback-title");
-    if (title) title.textContent = draftPresent ? "Your draft is safe" : pasteUnconfirmed ? "Check your destination tab" : isBackup ? "In case the paste didn't work" : "Context is ready to copy";
+    if (title) title.textContent = signInRequired ? `Sign in to ${destinationName}` : draftPresent ? "Your draft is safe" : pasteUnconfirmed ? "Check your destination tab" : isBackup ? "In case the paste didn't work" : "Context is ready to copy";
 
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
-      desc.textContent = largeTranscript
+      desc.textContent = signInRequired
+        ? `You're not signed in to ${destinationName}, so we couldn't paste here. Your summary is ready to copy. Sign in, then paste it into a new chat.`
+        : largeTranscript
         ? "We couldn’t summarize this large chat. Your complete conversation is safe here to copy."
         : draftPresent
         ? "We noticed your text box has text in it. Here’s your conversation, ready to be copied."
@@ -11189,7 +11266,7 @@
       if (isDestinationSheetOpen() && !shouldPreserveClaudePicker() && !invalidateInlinePicker(recalculationReason)) return;
       try {
         ensureFloatingButton(recalculationReason);
-        refreshClaudePickerBackdrop();
+        refreshOrbBackdropCutouts();
         updateClaudeLimitNudge();
       } catch (error) {
         if (isExtensionContextInvalidated(error)) {

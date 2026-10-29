@@ -1190,19 +1190,43 @@ test("Claude recovery preserves the rejected prepared page and observes the acti
   assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
 });
 
-test("DeepSeek recovery keeps the prepared login clue separate from the replacement", async () => {
-  for (const fresh of [undefined, false]) {
+test("known sign-in redirects offer the ready transfer without dispatching paste or opening another tab", async () => {
+  for (const [destination, url] of [["deepseek", "https://chat.deepseek.com/a/sign_in?token=PRIVATE"],
+    ["claude", "https://claude.ai/login"], ["chatgpt", "https://auth.openai.com/log-in"],
+    ["gemini", "https://accounts.google.com/v3/signin/identifier"], ["grok", "https://accounts.x.ai/sign-in"]]) {
     const harness = loadBackgroundForTransferTest({
-      preparedTab: { id: 41, url: "https://chat.deepseek.com/a/sign_in?token=PRIVATE" },
-      sendMessageImpl: async (_tabId, message) => message.type === "PASTE_CONTEXT"
-        ? { ok: false, diagnostics: { version: 1, error_code: "editor_missing",
-          ...(fresh === undefined ? {} : { destination_auth_prompt: fresh }) } } : { ok: true }
+      preparedTab: { id: 41, url }, tabUpdateImpl: async id => ({ id, windowId: 1, url }),
+      sendMessageImpl: async () => ({ ok: true })
     });
-    const response = await harness.sendTransfer("deepseek", 41);
-    assert.equal(response.diagnostics.prepared_diagnostics.destination_auth_prompt, true);
-    assert.equal(response.diagnostics.destination_auth_prompt, fresh);
-    assert.equal(harness.operations.created.length, 1);
+    const response = await harness.sendTransfer(destination, 41);
+    assert.equal(response.ok, false);
+    assert.equal(response.diagnostics.destination_auth_prompt, true);
+    assert.equal(response.diagnostics.error_code, "destination_not_new_chat");
+    assert.equal(harness.operations.created.length, 0);
+    assert.equal(harness.operations.sent.filter(item => item.message.type === "PASTE_CONTEXT").length, 0);
+    assert.equal(harness.operations.sent.filter(item => item.message.type === "SHOW_SIGN_IN_RECOVERY").length,
+      ["claude", "deepseek"].includes(destination) ? 1 : 0, "Only existing AI hosts can show injected recovery UI.");
+    assert.ok(harness.operations.updated.some(item => item.tabId === 41 && item.options.active === true));
+    assert.equal(harness.operations.errors.length, 0);
+    assert.ok(!harness.operations.badges.includes("ERR"));
     assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE|sign_in/);
+  }
+});
+
+test("a destination that redirects on activation stops before paste, and a reported login never triggers fresh recovery", async () => {
+  for (const onActivation of [true, false]) {
+    const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url: "https://claude.ai/new" },
+      tabUpdateImpl: async id => ({ id, windowId: 1, url: onActivation ? "https://claude.ai/login" : "https://claude.ai/new" }),
+      sendMessageImpl: async (_tabId, message) => message.type === "PASTE_CONTEXT"
+        ? { ok: false, diagnostics: { version: 1, error_code: "destination_not_new_chat", destination_auth_prompt: true } }
+        : { ok: true } });
+    const response = await harness.sendTransfer("claude", 41);
+    assert.equal(response.ok, false);
+    assert.equal(response.diagnostics.destination_auth_prompt, true);
+    assert.equal(harness.operations.created.length, 0);
+    assert.equal(harness.operations.sent.filter(item => item.message.type === "PASTE_CONTEXT").length, onActivation ? 0 : 1);
+    assert.equal(harness.operations.sent.filter(item => item.message.type === "SHOW_SIGN_IN_RECOVERY").length, 1, "The same login must not replace its recovery notice twice.");
+    assert.ok(!harness.operations.badges.includes("ERR"));
   }
 });
 
@@ -1413,7 +1437,7 @@ test("prepared destination is reused only while it remains on the selected platf
   const response = await harness.sendTransfer("chatgpt", 41);
 
   assert.equal(response.ok, true);
-  assert.deepEqual(harness.operations.gotten, [41]);
+  assert.deepEqual(harness.operations.gotten, [41, 100], "Recheck the fresh tab for a login redirect before dispatch.");
   assert.equal(harness.operations.created.length, 1);
   assert.equal(harness.operations.sent.some(({ tabId }) => tabId === 41), false);
   assert.deepEqual(harness.operations.sent.map(({ tabId }) => tabId), [100]);
