@@ -9691,7 +9691,7 @@
   }
 
   function showSignInRecoveryNotice(text, destinationName, recovery) {
-    showErrorOverlay(`Your summary is ready. Copy it, sign in, then paste into a new chat.`,
+    showErrorOverlay(`Your summary is ready. Copy it, sign in, then paste it into a new chat.`,
       { text, destinationName, recovery, signInRequired: true, pendingCopy: true });
   }
 
