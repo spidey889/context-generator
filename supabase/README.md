@@ -1,6 +1,6 @@
 # Telemetry database operations
 
-Migration `20261013092328` removes `transfers.file_size_failure_reason` and stores
+Migration `20261013092328`, applied to hosted Supabase on October 29, removes `transfers.file_size_failure_reason` and stores
 the specific cause in the existing `failure_reason` as `file_size_limit`. SQL
 normalizes the installed client's `conversation_too_large` report only when its
 exact capture detail is `attachment_size_limit` and this is the first failed
@@ -97,6 +97,8 @@ CI installs the locked development dependencies, including PGlite 0.5.8, then ru
 The formatting follow-up narrows the active pool to 40 famous characters and shortens/reorders the visible columns without resetting users again. The historical fifteen-migration gate passed 166 checks, including nonempty users/count/sequence preservation, unchanged original cutoff, famous-name reassignment, capacity rollback, compatibility aliases and renamed-column ingestion/daily reset. PostgreSQL has no direct column-reorder operation, so users was copied/swapped atomically; no staging table remains.
 
 Local verification caches an empty PGlite engine image once per process, entirely in memory. Every suite or backup restore receives its own database with separate tables, roles and session state; all migrations and restore comparisons still run.
+
+Backup row hashes compare JSONB objects by their values, independent of key order, while preserving array order. Hosted and local PostgreSQL or intermediate JSON tools can serialize the same diagnostic object differently. On Windows, if the npm `.cmd` wrapper loses multiline SQL arguments, pass the native Supabase executable to `backup-telemetry.ps1 -Supabase`; keep backups outside the repository.
 
 Backup verification restores only the snapshot's recorded migrations/data by default. It no longer automatically applies future migrations that might intentionally reset users. Captured function/view definitions are restored too, preserving the original reset timestamp rather than inventing a new reporting boundary when replaying the migration. Historical preservation tests explicitly opt into a bounded upgrade through migration thirteen. Reapplying the users reset to a restored pre-reset snapshot is an intentional destructive operation, not a backup integrity check.
 

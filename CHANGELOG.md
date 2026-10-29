@@ -6,6 +6,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-29
 
+- **Remove the redundant hosted file-size label.** Apply the previously prepared `20261013092328` migration to `cap-context-telemetry` after owner approval; the generated `file_size_failure_reason` column was still deployed despite the earlier repository change.
+  - Preserve all 109 transfers and 41 users; move the five exact failed attachment-size reports into `failure_reason = file_size_limit`. Original diagnostics and other outcomes remain intact.
+  - Verify an encrypted recovery export and local restore, then rehearse the cleanup in a rolled-back live transaction before applying it. Record the original migration SQL atomically with the schema change.
+  - Verify retained row values, counters, user sequence, permissions, other functions, triggers, indexes and cron inside the transaction; roll back synthetic new/duplicate report probes without retaining test rows.
+  - The real backup exposed a false restore mismatch caused only by nested JSONB object key order. Canonicalize those objects for hashing while preserving array order and values; exercise reordered keys in the existing restore check.
+  - An independent committed-state query confirms the column is absent, the five specific causes remain and the migration is recorded. This database-only cleanup needs no extension, Edge or Vercel release.
+
 - **Land the 4M route with matching production telemetry.** [PR #10](https://github.com/spidey889/context-generator/pull/10) merged the bounded large-chat flow, local benchmark and copy-dialog focus fix.
   - Final branch-only reviews and required CI found no confirmed code defect. The older production deployment lacked `/api/large-summary`; a new large-chat client against that deployment could enter complete-text local recovery. This does not establish the cause of any individual reported attempt.
   - Read-only production checks found NVIDIA missing from the live transfer writer, attribution constraint, failure validator and Edge catalogs. A completed NVIDIA summary could otherwise remain unrecorded.
