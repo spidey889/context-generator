@@ -6,6 +6,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-29
 
+- **Keep production worker dependencies present.** The merged 4M browser check captured the chat but made no summary or telemetry request, leaving only local copy recovery.
+  - The worker statically referenced ignored `local-preview-auth.js`, which is absent from a normal installation.
+  - Chromium's worker dependency discovery rejected startup despite the surrounding JavaScript `try/catch`; VM tests had incorrectly treated a caught import error as proof of browser startup.
+  - Removing only that import in an isolated Brave copy restored exact-4M capture, all nine part/final requests, and final paste; forced upstream failure retained the complete local carry.
+  - Production no longer imports the preview file. The preview helper writes the file before adding its import and removes the import when restoring production.
+  - Packaging now checks that static worker dependencies exist, and preview round-trip checks require the import only with its local authentication file. Focused startup checks and the canonical isolated-Brave exact-4M success/failure paths passed; the merged sign-in recovery fixture passed too. These checks use synthetic upstream responses and do not establish live model availability.
+
 - **Offer the ready transfer when a destination requires sign-in.** A DeepSeek-to-Claude transfer captured and summarized correctly but ended on Claude's login page; a later attempt succeeded on its new-chat page.
   - Login redirects previously used generic paste failure and could open another destination that repeated the redirect. The first sign-in guard also ran before normal tab activation, leaving the login tab in the background; no extra permission was needed to reveal it.
   - Recognize supported login routes and external auth hosts before dispatch, bring the existing tab forward, skip fresh-tab recovery, and preserve the original diagnosis.

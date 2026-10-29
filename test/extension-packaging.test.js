@@ -14,6 +14,10 @@ test("Chromium loads only its worker; Firefox packaging preserves identity and c
   const chromium = JSON.parse(original);
   assert.equal(chromium.manifest_version, 3);
   assert.deepEqual(chromium.background, { service_worker: "background.js" });
+  const workerSource = fs.readFileSync(path.join(source, chromium.background.service_worker), "utf8");
+  for (const match of workerSource.matchAll(/importScripts\("([^"\n]+)"\)/g)) {
+    assert.ok(fs.existsSync(path.join(source, match[1])), `Worker dependency must be packaged: ${match[1]}`);
+  }
   assert.equal(Object.hasOwn(chromium, "browser_specific_settings"), false);
 
   const output = prepareFirefoxExtension(root);

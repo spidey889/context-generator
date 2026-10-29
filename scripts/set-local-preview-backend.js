@@ -8,6 +8,7 @@ const backgroundPath = path.join(root, "background.js");
 const manifestPath = path.join(root, "manifest.json");
 const authPath = path.join(root, "local-preview-auth.js");
 const production = "https://context-generator-five.vercel.app";
+const previewImport = 'if (typeof importScripts === "function") importScripts("local-preview-auth.js");';
 
 function configure(host) {
   if (host !== production && !/^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app$/.test(host)) {
@@ -23,6 +24,10 @@ function configure(host) {
     authSource = `globalThis.CapLocalPreviewAuth = ${JSON.stringify({ origin: host, expiresAt: expiry, token })};\n`;
   }
   let background = fs.readFileSync(backgroundPath, "utf8");
+  // Chromium caches worker dependencies during installation: even a caught
+  // import of a missing file can prevent startup. Include it only with authSource.
+  background = background.replace(previewImport + "\r\n", "").replace(previewImport + "\n", "");
+  if (authSource) background = previewImport + (background.includes("\r\n") ? "\r\n" : "\n") + background;
   let manifestText = fs.readFileSync(manifestPath, "utf8");
   const summary = /const SUMMARY_BACKEND_URL = "https:\/\/[a-z0-9.-]+\/api\/summarize";/g;
   const telemetry = /const TELEMETRY_ENDPOINT_URL = "https:\/\/[a-z0-9.-]+\/api\/telemetry";/g;

@@ -16,12 +16,15 @@ try {
   const backgroundPath = path.join(temp, "extension", "background.js");
   const manifestPath = path.join(temp, "extension", "manifest.json");
   const originalBackground = fs.readFileSync(backgroundPath, "utf8");
+  assert.doesNotMatch(originalBackground, /importScripts\("local-preview-auth\.js"\)/);
   const originalManifest = fs.readFileSync(manifestPath, "utf8");
   const token = `e30.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 600 })).toString("base64url")}.test`;
   const origin = "https://test-preview.vercel.app";
   execFileSync(process.execPath, [script, origin], { env: { ...process.env, VERCEL_OIDC_TOKEN: token } });
   assert.throws(() => prepareFirefoxExtension(temp), /Restore the production backend/);
   const worker = fs.readFileSync(backgroundPath, "utf8");
+  assert.match(worker, /importScripts\("local-preview-auth\.js"\)/);
+  assert.ok(fs.existsSync(path.join(temp, "extension/local-preview-auth.js")));
   const helper = worker.match(/function localPreviewAuthHeaders\(url\) \{[\s\S]*?\n\}/)[0];
   const context = { URL, Date, CapLocalPreviewAuth: { origin, token, expiresAt: Date.now() + 10000 } };
   vm.runInNewContext(`${helper}; globalThis.result = localPreviewAuthHeaders;`, context);

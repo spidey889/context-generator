@@ -105,12 +105,12 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
   return sendSummary;
 }
 
-test("worker starts normally when the optional local preview file is absent", () => {
+test("production worker never imports the absent local preview dependency", () => {
   const imports = [];
   loadBackgroundForSummaryTest(() => { throw new Error("unexpected fetch"); }, {
     importScripts(file) { imports.push(file); throw new Error("file missing"); }
   });
-  assert.deepEqual(imports, ["local-preview-auth.js"]);
+  assert.deepEqual(imports, [], "Chromium must not discover a nonexistent preview dependency at installation.");
 });
 
 function loadBackgroundForTransferTest({

@@ -2,8 +2,6 @@ if (!globalThis.CapTransferDiagnostics && typeof importScripts === "function") i
 // MV3 must discover worker dependencies during startup, before an event tries
 // to use them. Importing a new script lazily from a transfer event can fail.
 if (!globalThis.CapLargeTransfer && typeof importScripts === "function") importScripts("large-transfer.js");
-// This optional, ignored file exists only during an owner-run preview test.
-if (typeof importScripts === "function") { try { importScripts("local-preview-auth.js"); } catch {} }
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 function localPreviewAuthHeaders(url) {
   const auth = globalThis.CapLocalPreviewAuth;
