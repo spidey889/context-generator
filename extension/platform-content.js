@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-persistent-sign-in-notice-v214";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-toolbar-login-notice-v215";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -881,6 +881,13 @@
 
     if (message?.type === "OPEN_DESTINATION_PICKER") {
       if (!isRunning) {
+        // A guest composer is usable even when the page offers Sign in.
+        if (globalThis.CapTransferDiagnostics?.authPromptFromUrl(window.location.href) === true
+          || (!findPlatformInput() && observeDestinationAuthPrompt() === true)) {
+          showErrorOverlay(`Sign in to ${currentPlatform.name} first, then open a chat to use Cap Context.`);
+          sendResponse({ ok: true });
+          return false;
+        }
         // Reinjection registers this receiver before its first placement frame.
         // Establish the owner now so that frame cannot dismiss the new picker.
         if (!isDestinationSheetOpen()) ensureFloatingButton("toolbar");
@@ -9708,6 +9715,7 @@
     // Reopening the picker cancels this reveal, so an old error cannot flash back.
     if (sourceSurface && sourceSurface === sheet) hideDestinationSheet({ restoreFocus: false });
     if (sourceSurface && sourceSurface === handoff) hideOverlay();
+    const isToolbarSignInNotice = message === `Sign in to ${currentPlatform.name} first, then open a chat to use Cap Context.`;
     const isNoConversationError = message === NO_CONVERSATION_ERROR_MESSAGE;
     // Guest /uc chats use a separate transcript layout. Explain the missing
     // login only when the active native composer explicitly marks this state.
@@ -9823,12 +9831,12 @@
           ? NO_CONVERSATION_ERROR_TITLE
           : isSummaryRetryError
             ? SUMMARY_RETRY_ERROR_TITLE
-            : "Transfer failed";
+            : isToolbarSignInNotice ? `Sign in to ${currentPlatform.name}` : "Transfer failed";
     }
 
     const mark = document.getElementById("context-generator-error-mark");
     if (mark) {
-      mark.textContent = copiedContext?.pendingCopy ? "i" : copiedContext ? "✓" : isNoConversationError || isSummaryRetryError ? "i" : "!";
+      mark.textContent = copiedContext?.pendingCopy ? "i" : copiedContext ? "✓" : isNoConversationError || isSummaryRetryError || isToolbarSignInNotice ? "i" : "!";
     }
 
     const textSpan = document.getElementById("context-generator-error-text");
