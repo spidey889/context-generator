@@ -31,7 +31,9 @@ function setup(t, fetchImpl) {
   const env = { ...process.env }, originalFetch = global.fetch;
   process.env.TELEMETRY_SIGNING_KEY = secret;
   process.env.OPENROUTER_API_KEY = "test-primary";
-  process.env.TOKENHARBOR_API_KEY = "test-other-provider-must-not-run";
+  delete process.env.TOKENHARBOR_API_KEY;
+  delete process.env.TOKENHARBOR_BACKUP_API_KEY;
+  delete process.env.TOKENHARBOR_ENABLED;
   delete process.env.LARGE_SUMMARY_ENABLED;
   delete process.env.OPENROUTER_ENABLED;
   delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
@@ -148,18 +150,156 @@ test("forged final receipts stop before any provider work", async t => {
   assert.equal(res.statusCode, 400); assert.equal(res.body.code, "invalid_parts"); assert.equal(calls, 0);
 });
 
-test("large beta disablement and missing OpenRouter credentials cannot route elsewhere", async t => {
+test("large beta disablement and absence of enabled provider credentials stop before provider work", async t => {
   let calls = 0; setup(t, async () => { calls++; throw new Error("No provider work allowed"); });
   const body = { conversation: "a".repeat(600000), large: metadata };
+  process.env.TOKENHARBOR_API_KEY = "test-backup";
   process.env.LARGE_SUMMARY_ENABLED = "false";
   const disabled = response(); await handler(request(body), disabled); assert.equal(disabled.statusCode, 503);
   delete process.env.LARGE_SUMMARY_ENABLED;
   process.env.OPENROUTER_ENABLED = "false";
+  process.env.TOKENHARBOR_ENABLED = "false";
   const gatewayDisabled = response(); await handler(request(body), gatewayDisabled); assert.equal(gatewayDisabled.statusCode, 503);
   delete process.env.OPENROUTER_ENABLED;
   delete process.env.OPENROUTER_API_KEY;
   const missing = response(); await handler(request(body), missing); assert.equal(missing.statusCode, 503);
-  assert.equal(calls, 0, "Configured TokenHarbor credentials cannot substitute for NVIDIA.");
+  assert.equal(calls, 0, "Disabled TokenHarbor credentials cannot substitute for NVIDIA.");
+});
+
+test("a failed NVIDIA part falls back once to DeepSeek with the same complete input", async t => {
+  const calls = [];
+  setup(t, async (url, options) => {
+    calls.push({ url, options, body: JSON.parse(options.body) });
+    return calls.length === 1 ? new Response("private provider error", { status: 429 })
+      : new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }));
+  });
+  process.env.TOKENHARBOR_API_KEY = "test-backup";
+  process.env.TOKENHARBOR_BACKUP_API_KEY = "must-not-try-another-key";
+  const res = response(), conversation = "a".repeat(600000);
+  await handler(request({ conversation, large: metadata, telemetry }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].url, "https://tokenharbor.ai/v1/chat/completions");
+  assert.equal(calls[1].options.headers.Authorization, "Bearer test-backup");
+  assert.equal(calls[1].body.model, "deepseek-v4.1-flash:free");
+  assert.deepEqual(calls[1].body.messages, calls[0].body.messages);
+  assert.equal(calls[1].body.provider, undefined, "OpenRouter-specific policy must not leak into TokenHarbor.");
+  assert.equal(calls[1].body.max_tokens, calls[0].body.max_tokens + 8192);
+  assert.equal(calls[1].body.temperature, 0.1);
+  assert.equal(calls[1].body.stream, true);
+  assert.ok(res.body.receipt);
+  assert.equal(res.body.summaryProofV3, undefined);
+  assert.deepEqual(res.body.timing.modelsTried, [calls[0].body.model, calls[1].body.model]);
+  assert.deepEqual(res.body.timing.tokenharborModelsTried, [calls[1].body.model]);
+  assert.equal(res.body.timing.fallback.used, true);
+  assert.equal(res.body.timing.provider, "tokenharbor");
+  assert.equal(JSON.stringify(res.body).includes("private provider error"), false);
+});
+
+test("mixed-provider parts remain verifiable and a DeepSeek final proof binds the actual serving model", async t => {
+  const calls = [];
+  setup(t, async (_url, options) => {
+    calls.push(JSON.parse(options.body));
+    // First part needs backup, second succeeds on NVIDIA, final needs backup.
+    return [1, 4].includes(calls.length) ? new Response("", { status: 503 })
+      : new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }));
+  });
+  process.env.TOKENHARBOR_API_KEY = "test-backup";
+  const parts = [];
+  for (const index of [0, 1]) {
+    const res = response();
+    await handler(request({ conversation: (index ? "b" : "a").repeat(600000),
+      large: { ...metadata, index, offset: index * 600000 }, telemetry }), res);
+    assert.equal(res.statusCode, 200);
+    parts.push({ summary: res.body.summary, receipt: res.body.receipt });
+  }
+  const body = finalBody(parts), res = response();
+  assert.equal(protocol.verifyParts(body, secret), true);
+  await handler(request(body), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(calls.length, 5, "Successful parts must not be sent again.");
+  assert.deepEqual(calls[3].messages, calls[4].messages);
+  assert.equal(res.body.summaryModel, "deepseek-v4.1-flash:free");
+  const { verifySummaryReceipt } = await import("../supabase/functions/_shared/summary-proof.mjs");
+  const receipt = { ...telemetry, summary_proof: res.body.summaryProofV3, summary_confirmed_at: res.body.summaryConfirmedAt };
+  assert.deepEqual(await verifySummaryReceipt({ ...receipt, model: res.body.summaryModel }, secret), { model: res.body.summaryModel });
+  assert.equal(await verifySummaryReceipt({ ...receipt, model: "nvidia/nemotron-3.5-super-vl:free" }, secret), null);
+});
+
+test("NVIDIA success never calls DeepSeek; absent or disabled NVIDIA can use the configured DeepSeek key", async t => {
+  const calls = [];
+  setup(t, async (_url, options) => {
+    calls.push({ body: JSON.parse(options.body), auth: options.headers.Authorization });
+    return new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }));
+  });
+  process.env.TOKENHARBOR_BACKUP_API_KEY = "test-backup-slot";
+  const body = { conversation: "a".repeat(600000), large: metadata };
+  const primary = response(); await handler(request(body), primary);
+  assert.equal(primary.statusCode, 200); assert.equal(calls.length, 1);
+  assert.equal(primary.body.timing.model, "nvidia/nemotron-3.5-super-vl:free");
+  delete process.env.OPENROUTER_API_KEY;
+  const missing = response(); await handler(request(body), missing);
+  assert.equal(missing.statusCode, 200); assert.equal(calls[1].body.model, "deepseek-v4.1-flash:free");
+  assert.equal(calls[1].auth, "Bearer test-backup-slot");
+  process.env.OPENROUTER_API_KEY = "test-primary";
+  process.env.OPENROUTER_ENABLED = "false";
+  const disabled = response(); await handler(request(body), disabled);
+  assert.equal(disabled.statusCode, 200); assert.equal(calls[2].body.model, "deepseek-v4.1-flash:free");
+});
+
+test("rejected or truncated NVIDIA output falls back, while two failures produce no receipt or extra retry", async t => {
+  let calls = 0;
+  setup(t);
+  process.env.TOKENHARBOR_API_KEY = "test-backup";
+  process.env.TOKENHARBOR_BACKUP_API_KEY = "must-not-retry";
+  const body = { conversation: "a".repeat(600000), large: metadata };
+  for (const rejected of [
+    { message: { content: "I cannot help with this request." }, finish_reason: "stop" },
+    { message: { content: usefulSummary }, finish_reason: "length" }
+  ]) {
+    global.fetch = async () => {
+      calls++;
+      return new Response(JSON.stringify({ choices: [calls % 2 ? rejected : { message: { content: usefulSummary }, finish_reason: "stop" }] }));
+    };
+    const res = response(); await handler(request(body), res);
+    assert.equal(res.statusCode, 200); assert.equal(res.body.timing.provider, "tokenharbor");
+  }
+  assert.equal(calls, 4);
+  global.fetch = async () => { calls++; return new Response("private failure", { status: 503 }); };
+  const failed = response(); await handler(request(body), failed);
+  assert.equal(calls, 6); assert.equal(failed.statusCode, 502);
+  assert.equal(failed.body.receipt, undefined); assert.equal(failed.body.summaryProofV3, undefined);
+});
+
+clockTest("NVIDIA timeout reserves backup time inside the same 75-second deadline", { tickMs: 1000, maxElapsedMs: 80000 }, async t => {
+  const calls = [];
+  setup(t, async (url, options) => {
+    calls.push({ url, signal: options.signal, at: Date.now() });
+    if (calls.length === 1) return new Promise((_resolve, reject) => options.signal.addEventListener("abort",
+      () => reject(new DOMException("Timeout", "AbortError")), { once: true }));
+    return new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }));
+  });
+  process.env.TOKENHARBOR_API_KEY = "test-backup";
+  const res = response(), start = Date.now();
+  await handler(request({ conversation: "a".repeat(600000), large: metadata }), res);
+  assert.equal(res.statusCode, 200); assert.equal(calls.length, 2);
+  assert.equal(calls[0].signal.aborted, true);
+  assert.ok(calls[1].at - start >= 45000 && calls[1].at - start < 50000);
+  assert.ok(Date.now() - start < 75000);
+});
+
+clockTest("two silent models cannot exceed the shared deadline or certify partial work", { tickMs: 1000, maxElapsedMs: 80000 }, async t => {
+  let calls = 0;
+  setup(t, async (_url, options) => {
+    calls++;
+    return new Promise((_resolve, reject) => options.signal.addEventListener("abort",
+      () => reject(new DOMException("Timeout", "AbortError")), { once: true }));
+  });
+  process.env.TOKENHARBOR_API_KEY = "test-backup";
+  const res = response(), start = Date.now();
+  await handler(request({ conversation: "a".repeat(600000), large: metadata }), res);
+  assert.equal(calls, 2); assert.equal(res.statusCode, 504);
+  assert.equal(res.body.receipt, undefined); assert.ok(Date.now() - start <= 75000);
 });
 
 test("provider failure and refusal never become signed partial summaries or retries", async t => {
@@ -172,17 +312,19 @@ test("provider failure and refusal never become signed partial summaries or retr
   assert.equal(refused.statusCode, 502); assert.equal(calls, 2); assert.equal(refused.body.receipt, undefined);
 });
 
-test("native client cancellation aborts the sole upstream request without a part receipt", async t => {
-  let signal, started;
+test("native client cancellation aborts upstream work without starting a configured backup", async t => {
+  let signal, started, calls = 0;
   const pending = new Promise(resolve => { started = resolve; });
   setup(t, async (_url, options) => {
-    signal = options.signal; started();
+    calls++; signal = options.signal; started();
     return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true }));
   });
+  process.env.TOKENHARBOR_API_KEY = "test-backup";
   const res = response();
   const work = handler(request({ conversation: "a".repeat(600000), large: metadata }), res);
   await pending; res.destroyed = true; res.emit("close"); await work;
   assert.equal(signal.aborted, true); assert.equal(res.body?.receipt, undefined);
+  assert.equal(calls, 1);
 });
 
 test("truncated provider output cannot certify complete coverage of a conversation part", async t => {
