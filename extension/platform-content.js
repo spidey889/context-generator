@@ -9691,7 +9691,7 @@
   }
 
   function showSignInRecoveryNotice(text, destinationName, recovery) {
-    showErrorOverlay(`Your transfer is ready. Copy it, sign in, then paste into a new chat.`,
+    showErrorOverlay(`Your summary is ready. Copy it, sign in, then paste into a new chat.`,
       { text, destinationName, recovery, signInRequired: true, pendingCopy: true });
   }
 
@@ -9874,7 +9874,7 @@
             errorDiv.contextGeneratorPageBlur?.remove();
             errorDiv.contextGeneratorPageBlur = null;
             copyAgain.textContent = firstCopy ? "Copied!" : "Copied again!";
-            if (firstCopy && textSpan) textSpan.textContent = `Your transfer is copied. Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`;
+            if (firstCopy && textSpan) textSpan.textContent = `Your summary is copied. Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`;
             clearTimeout(errorDiv.contextGeneratorHideTimer);
             errorDiv.contextGeneratorHideTimer = noticeDurationMs === null ? null : setTimeout(() => hideErrorOverlay(errorDiv), noticeDurationMs);
           } catch {
@@ -10286,7 +10286,7 @@
             if (!modal.isConnected || modal.contextGeneratorCopyOwner !== copyOwner) return;
             closeModal();
             showErrorOverlay(copiedContext.signInRequired
-              ? `Your transfer is copied. Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`
+              ? `Your summary is copied. Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`
               : "Ready to paste. Copy again here if needed.", copiedContext);
           };
           if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) finish();
@@ -10395,7 +10395,7 @@
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
       desc.textContent = signInRequired
-        ? `You're not signed in to ${destinationName}, so we couldn't paste here. Your transfer is ready to copy. Sign in, then paste it into a new chat.`
+        ? `You're not signed in to ${destinationName}, so we couldn't paste here. Your summary is ready to copy. Sign in, then paste it into a new chat.`
         : draftPresent
         ? "We noticed your text box has text in it. Here’s your conversation, ready to be copied."
         : pasteUnconfirmed
