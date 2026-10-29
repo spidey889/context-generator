@@ -6,6 +6,7 @@
 - At the beginning of every new chat, always read `AGENTS.md`, `LOGIC.md`, `CHANGELOG.md` and `To-do.md` when they exist. Create missing `LOGIC.md` or `CHANGELOG.md` when needed.
 - `To-do.md` is the local source of truth for pending tasks. When the owner asks "What's next?", including at the start of a new session, answer from this file. If it is empty, say no tasks are listed; if missing, create an empty list. Do not repopulate it from old trackers or remembered tasks unless asked. Reading the list does not authorize automatically executing its tasks. Keep this file local and Git-ignored; never commit or push its contents.
 - Keep work lean: inspect the relevant files, use focused checks and avoid unrelated changes. Preserve other work already present in the checkout.
+- Do not use subagents without the owner's explicit permission.
 - Unless the owner explicitly specifies another base, always create new branches from up-to-date `master`, never from the current feature branch.
 - Ask the owner before making a major design decision, such as adding/removing database tables or columns, changing the architecture, or replacing an existing approach. Explain the proposed change simply and wait for approval. Routine work within an already approved decision can proceed.
 
