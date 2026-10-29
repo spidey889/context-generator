@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-claude-handoff-orb-v216";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-handoff-orb-v217";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -7783,7 +7783,7 @@
   }
 
   function getOrbBackdrops() {
-    return [DESTINATION_SHEET_BACKDROP_ID, ...(currentPlatform.id === "claude" ? [HANDOFF_SCRIM_ID] : [])]
+    return [DESTINATION_SHEET_BACKDROP_ID, HANDOFF_SCRIM_ID]
       .map(id => document.getElementById(id)).filter(Boolean);
   }
 
@@ -7902,13 +7902,12 @@
       sheet?.style.display === "block" && sheet.getAttribute("aria-hidden") !== "true";
   }
 
-  function refreshClaudePickerBackdrop() {
-    const handoffVisible = currentPlatform.id === "claude" &&
-      document.getElementById(HANDOFF_SCRIM_ID)?.style.display === "block";
+  function refreshOrbBackdropCutouts() {
+    const handoffVisible = document.getElementById(HANDOFF_SCRIM_ID)?.style.display === "block";
     if (!shouldPreserveClaudePicker() && !handoffVisible) return;
     const bubble = document.getElementById(BUBBLE_ID);
     // Keep the picker locked at its opening coordinates. Only the orb's
-    // click-through hole follows Claude's reflow or composer replacement.
+    // cutout follows native reflow or composer replacement on every platform.
     if (bubble) {
       updateDestinationBackdropCutout();
       return;
@@ -9205,18 +9204,15 @@
     if (bubble) {
       bubble.disabled = true;
       bubble.setAttribute("aria-expanded", "false");
-      // Keep Claude's real inline orb clear; its native ancestors trap z-index,
-      // so the handoff scrim uses the same artwork cutout as the picker.
-      const keepOrbVisible = currentPlatform.id === "claude";
-      bubble.style.opacity = keepOrbVisible ? "1" : "0";
-      if (keepOrbVisible) bubble.style.filter = "none";
-      bubble.style.transform = keepOrbVisible ? "translate3d(0,0,0) scale(1)" : "translate3d(0,0,0) scale(0.82)";
+      // Native ancestors can trap z-index. Keep the real orb clear using the
+      // same artwork cutout as the picker, without enabling another transfer.
+      bubble.style.opacity = "1";
+      bubble.style.filter = "none";
+      bubble.style.transform = "translate3d(0,0,0) scale(1)";
       bubble.style.cursor = "not-allowed";
       bubble.style.pointerEvents = "none";
-      if (keepOrbVisible) {
-        updateDestinationBackdropCutout();
-        trackDestinationBackdropCutout();
-      }
+      updateDestinationBackdropCutout();
+      trackDestinationBackdropCutout();
     }
   }
 
@@ -11196,7 +11192,7 @@
       if (isDestinationSheetOpen() && !shouldPreserveClaudePicker() && !invalidateInlinePicker(recalculationReason)) return;
       try {
         ensureFloatingButton(recalculationReason);
-        refreshClaudePickerBackdrop();
+        refreshOrbBackdropCutouts();
         updateClaudeLimitNudge();
       } catch (error) {
         if (isExtensionContextInvalidated(error)) {
