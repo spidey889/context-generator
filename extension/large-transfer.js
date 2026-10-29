@@ -9,10 +9,10 @@
     { code, diagnosticCode: code });
   const wireBytes = value => encoder.encode(JSON.stringify(value)).length;
 
-  function split(conversation) {
+  function* partition(conversation) {
     if (typeof conversation !== "string" || conversation.length <= 1000000 || conversation.length > MAX_CHARS
         || encoder.encode(conversation).length > MAX_BYTES) throw failure("conversation_too_large");
-    const parts = [];
+    let count = 0;
     for (let offset = 0; offset < conversation.length;) {
       let end = Math.min(conversation.length, offset + PART_CHARS);
       for (;;) {
@@ -29,15 +29,16 @@
         end = offset + Math.floor((end - offset) / 2);
         if (end <= offset) throw failure("request_too_large");
       }
-      parts.push({ offset, conversation: conversation.slice(offset, end) });
-      if (parts.length > MAX_PARTS) throw failure("request_too_large");
+      if (++count > MAX_PARTS) throw failure("request_too_large");
+      yield { offset, conversation: conversation.slice(offset, end) };
       offset = end;
     }
-    return parts;
   }
 
+  function split(conversation) { return [...partition(conversation)]; }
+
   async function summarize({ conversation, transferId, post, signal, deadlineAt = Infinity, onProgress = () => {} }) {
-    const parts = split(conversation);
+    const parts = [];
     const controller = new AbortController();
     const cancelled = () => controller.abort(signal.reason);
     signal?.addEventListener("abort", cancelled, { once: true });
@@ -76,6 +77,14 @@
     };
     try {
       check();
+      // Wire-size preparation can occupy an MV3 worker before its first fetch.
+      // Yield real tasks between bounded pieces so keepalive/cancellation timers
+      // can run; a resolved Promise alone would still starve those timers.
+      for (const part of partition(conversation)) {
+        parts.push(part);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        check();
+      }
       notify(0, "parts");
       await Promise.all(Array.from({ length: Math.min(3, parts.length) }, worker));
       if (firstFailure) throw firstFailure;

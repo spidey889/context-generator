@@ -79,6 +79,21 @@ test("large cancellation, malformed part receipts and expired work never reach f
   error => error.code === "summary_invalid_response");
 });
 
+test("cancellation queued during large-chat preparation stops before any backend request", async () => {
+  const controller = new AbortController();
+  const cancelled = Object.assign(new Error("Source cancelled during preparation"), { code: "user_cancelled" });
+  const timer = setTimeout(() => controller.abort(cancelled), 0);
+  let requests = 0;
+  try {
+    await assert.rejects(large.summarize({ conversation: "x".repeat(4000000), transferId, signal: controller.signal,
+      async post(payload) {
+        requests++;
+        return { summary: "Synthetic handoff", receipt: "synthetic-receipt" };
+      } }), error => error.code === "user_cancelled");
+    assert.equal(requests, 0);
+  } finally { clearTimeout(timer); }
+});
+
 function backgroundFixture(fetchImpl, consent = () => true) {
   const source = fs.readFileSync(path.join(__dirname, "../extension/background.js"), "utf8");
   const code = source.slice(source.indexOf("function localPreviewAuthHeaders("), source.indexOf("// Opening a page after removal")) +

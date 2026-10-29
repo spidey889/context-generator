@@ -11,6 +11,9 @@ const { fixtures } = require("../test/network-json-fixtures");
 const { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort,
   getTargets, waitFor } = require("./run-extension-smoke");
 const largeHandler = require("../api/large-summary");
+// Keep this mode free of worker debugging: attaching a debugger changes MV3
+// lifetime and masked the zero-request preparation failure in investigation.
+const slowProviderMs = process.env.CAP_CONTEXT_LARGE_SLOW_SMOKE === "1" ? 35000 : 0;
 const finalSummary = 'Verified final handoff: preserve the accepted implementation, all decisions and unresolved work. '
   + 'Continue the latest request by testing the complete transfer before any release.\n\nNext step:\n\n'
   + 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
@@ -37,6 +40,7 @@ async function scenario(failPart, failTransport = false) {
   global.fetch = async (input, options) => {
     if (String(input) === "https://openrouter.ai/api/v1/chat/completions") {
       providerCalls++;
+      if (slowProviderMs) await new Promise(resolve => setTimeout(resolve, slowProviderMs));
       if (failPart) return new Response("synthetic provider rejection", { status: 503 });
       return new Response(JSON.stringify({ choices: [{ message: { content: finalSummary }, finish_reason: "stop" }] }), { status: 200 });
     }
@@ -96,7 +100,7 @@ async function scenario(failPart, failTransport = false) {
     const context = await waitFor(() => source.getExtensionContextId(), "4M source extension");
     await waitFor(() => source.evaluate('typeof window.__capSmokeStartDomTransfer === "function"', context), "transfer helper");
     await source.evaluate("window.__capSmokeStartDomTransfer()", context);
-    const terminal = await waitFor(() => reports.find(r => ["failed", "succeeded"].includes(r.status)), "4M terminal report", 60000);
+    const terminal = await waitFor(() => reports.find(r => ["failed", "succeeded"].includes(r.status)), "4M terminal report", slowProviderMs ? 220000 : 60000);
     assert.equal(terminal.status, failPart ? "failed" : "succeeded", `Unexpected transfer outcome: ${terminal.failure_reason}`);
     assert.equal(terminal.character_count, transcript.length);
     assert.ok(requests.length >= 1);
@@ -156,5 +160,8 @@ async function scenario(failPart, failTransport = false) {
     await fs.rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
   }
 }
-async function run() { await scenario(false); await scenario(true); await scenario(true, true); }
+async function run() {
+  await scenario(false);
+  if (!slowProviderMs) { await scenario(true); await scenario(true, true); }
+}
 if (require.main === module) run().catch(error => { console.error(error); process.exitCode = 1; });

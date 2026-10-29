@@ -6,6 +6,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-30
 
+- **Yield while preparing large-chat requests.** A 3,903,349-character ChatGPT-to-Claude transfer captured successfully but lost its worker reply, with no request-failure record or observed OpenRouter request.
+  - Isolated Brave reproduced the same local-recovery outcome with synthetic 4M and 1.1M transcripts and zero summary HTTP requests; the source retained a closed asynchronous-message channel error.
+  - Temporary dispatch markers reached chunk preparation. Pausing the worker located its stack in `wireBytes` inside `split`; attaching the worker debugger let the same 4M flow complete, so ordinary debugger-attached success was insufficient evidence.
+  - Preparation serialized/encoded every piece synchronously before installing its own deadline and cancellation handling. That uninterrupted work could starve the worker keepalive and queued cancellation before dispatch.
+  - Reuse one partition iterator, but consume it with real timer-task yields in the runtime flow. Start its existing deadline/signal handling before preparation; retain exact text, part order, wire bounds, provider routing and the synchronous partition-check API.
+  - A queued-cancellation regression failed before the fix and now stops before any HTTP request. All 113 focused checks pass. The previously failing isolated 4M flow completes all nine requests and the final paste without a worker debugger, including 35-second synthetic provider waits across multiple request batches under the same transfer deadline. These reproductions identify a code defect matching the historical symptom, rather than proving why a particular historical worker stopped.
+
 - **Retain request failures on the large-chat route.** User 2's 2,004,376-character DeepSeek-to-Claude attempt captured successfully but offered complete-text local recovery after about 90 seconds with only `unknown_error` recorded. The owner observed no OpenRouter requests; the saved evidence cannot establish where that historical request stopped.
   - The separate above-1M worker transport bypassed the ordinary transport's response diagnostics, local debug record and independent outbox checkpoint. A lost page-to-worker reply could also become a generic error.
   - Reuse the existing closed failure contract for the first failing large HTTP request: fetch/headers, observed status, service rejection, elapsed timeout, body/stream parsing and part/final result validation. Stop sibling cancellation from overwriting the initiating cause.
