@@ -1349,7 +1349,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [], diagnostics: result?.diagnostics || null }))
       .catch((error) => {
         const draftPresent = [error?.code, error?.diagnosticCode, error?.diagnostics?.error_code].includes("editor_has_draft");
-        if (error.code !== "user_cancelled" && !draftPresent) {
+        if (error.code !== "user_cancelled" && !draftPresent && !isSignInRecovery(error.diagnostics)) {
           console.error("[Context Generator Relay]", error);
           setBadge("ERR", "#b42318", 5000);
         }
@@ -2021,11 +2021,18 @@ async function transferToDestinationObserved(
       );
     } catch (error) {
       checkTransferOperation(operation);
-      if (["user_cancelled", "paste_unconfirmed"].includes(error?.code)) throw error;
+      // Sign-in recovery already owns the notice. Rebuilding it would refocus
+      // the tab and invalidate a copy click still awaiting its clipboard result.
+      if (["user_cancelled", "paste_unconfirmed"].includes(error?.code) || isSignInRecovery(error?.diagnostics)) throw error;
       pasteResult = { ok: false, error: error?.message || "Prepared destination paste failed.",
         code: error.code, diagnosticCode: error.diagnosticCode, diagnostics: error.diagnostics };
     }
   } else if (preparedTabId) {
+    if (trace.diagnostics.destination_auth_prompt === true) {
+      await checkTransferSource(operation);
+      checkTransferDeadline(deadlineAt);
+      throw await createSignInRecoveryError(preparedTabId, destinationId, trimmedText, transferId, trace);
+    }
     // These checks describe the rejected prepared tab, not its replacement.
     if (typeof trace.diagnostics.destination_platform_match === "boolean") {
       trace.diagnostics.prepared_diagnostics = { version: 1, diagnostics_revision: 3, claude_page: trace.diagnostics.claude_page,
@@ -2047,7 +2054,10 @@ async function transferToDestinationObserved(
   // A draft is intentional user state. Report the first rejection directly so
   // the source can offer its copy dialog without opening a second destination.
   const pasteErrorCode = pasteResult?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult);
-  if (!pasteResult?.ok && pasteErrorCode !== "editor_has_draft") {
+  if (!pasteResult?.ok && isSignInRecovery(pasteResult?.diagnostics)) {
+    throw await createSignInRecoveryError(destinationTabId, destinationId, trimmedText, transferId, trace);
+  }
+  if (!pasteResult?.ok && pasteErrorCode !== "editor_has_draft" && !isSignInRecovery(pasteResult?.diagnostics)) {
     if (pasteResult?.code === "user_cancelled") throw createTransferCancelledError();
     await checkTransferSource(operation);
     checkTransferDeadline(deadlineAt);
@@ -2102,6 +2112,9 @@ async function transferToDestinationObserved(
 
   if (!pasteResult?.ok) {
     if (pasteResult?.code === "user_cancelled") throw createTransferCancelledError();
+    if (isSignInRecovery(pasteResult?.diagnostics)) {
+      throw await createSignInRecoveryError(destinationTabId, destinationId, trimmedText, transferId, trace);
+    }
     const error = new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
     error.code = "paste_failed";
     error.diagnosticCode = pasteResult?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult) || "unknown_error";
@@ -2149,7 +2162,7 @@ async function isPreparedDestinationTabUsable(tabId, destinationId, operation = 
     catch { /* An invalid URL is unusable; observing it must not cancel a live tab. */ }
     globalThis.CapTransferDiagnostics?.update(diagnostics, {
       destination_platform_match: platformMatches, destination_route_allowed: routeAllowed,
-      destination_auth_prompt: globalThis.CapTransferDiagnostics?.authPromptFromUrl(currentOrPendingUrl)
+      destination_auth_prompt: isDestinationSignInUrl(currentOrPendingUrl, destinationId)
     });
     return platformMatches && routeAllowed;
   } catch {
@@ -2157,6 +2170,50 @@ async function isPreparedDestinationTabUsable(tabId, destinationId, operation = 
     checkTransferOperation(operation);
     return false;
   }
+}
+
+function isDestinationSignInUrl(url, destinationId) {
+  if (getPlatformFromUrl(url) === destinationId
+      && globalThis.CapTransferDiagnostics?.authPromptFromUrl(url) === true) return true;
+  try {
+    // External identity pages cannot receive our content script. Observe only
+    // the selected platform's known auth host; no new host permission is needed.
+    const parsed = new URL(url);
+    const hosts = { chatgpt: ["auth.openai.com", "auth0.openai.com"], gemini: ["accounts.google.com"], grok: ["accounts.x.ai"] };
+    return parsed.protocol === "https:" && Boolean(hosts[destinationId]?.includes(parsed.hostname));
+  } catch { return false; }
+}
+
+function isSignInRecovery(diagnostics) {
+  return diagnostics?.destination_auth_prompt === true
+    && ["destination_not_new_chat", "editor_missing", "conversation_changed"].includes(diagnostics.error_code);
+}
+
+async function createSignInRecoveryError(tabId, destinationId, text, transferId, trace) {
+  globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { destination_auth_prompt: true,
+    error_code: "destination_not_new_chat", error_origin: "destination" });
+  // This message can only open our copy UI. Never dispatch PASTE_CONTEXT to a
+  // known sign-in page or open another tab that would repeat the same redirect.
+  try {
+    // This recovery intentionally allows the already-open login tab. The normal
+    // destination activation guard requires a new chat and cannot serve it.
+    const tab = await activateDestinationTab(tabId, trace.deadlineAt, trace.operation);
+    const url = tab?.pendingUrl || tab?.url;
+    if (getPlatformFromUrl(url) === destinationId) {
+      // Existing host access covers native login pages. External identity pages
+      // keep source recovery; never inject into them or request broader access.
+      const deadlineAt = Math.min(Date.now() + 3000, trace.deadlineAt || Infinity);
+      await sendMessageWhenReady(tabId, { type: "SHOW_SIGN_IN_RECOVERY", destination: destinationId,
+        text, transferId, deadlineAt }, 3000, DESTINATIONS[destinationId].name, trace);
+    }
+  } catch (error) {
+    checkTransferOperation(trace.operation);
+    if (["user_cancelled", "transfer_timeout"].includes(error?.code)) throw error;
+    // Source copy recovery remains available if the tab closes or its UI is inaccessible.
+  }
+  return Object.assign(new Error(`Sign in to ${DESTINATIONS[destinationId].name} before pasting your transfer.`),
+    { code: "paste_failed", diagnosticCode: "destination_not_new_chat",
+      diagnostics: globalThis.CapTransferDiagnostics?.snapshot(trace.diagnostics) || null });
 }
 
 async function pasteIntoDestinationWithActivation(
@@ -2175,8 +2232,11 @@ async function pasteIntoDestinationWithActivation(
   // ordinary callers sequence the source completion cue first.
   if ((destination.focusBeforePaste || trace?.localDirect) && trace?.operation?.earlyRevealedTabId !== tabId) {
     markBackgroundTrace(trace, "tab activate before paste start", { tabId });
-    await activateDestinationTab(tabId, trace?.deadlineAt, trace?.operation, trace?.operation,
+    const activatedTab = await activateDestinationTab(tabId, trace?.deadlineAt, trace?.operation, trace?.operation,
       destinationId === "claude" ? trace?.diagnostics : null);
+    if (isDestinationSignInUrl(activatedTab?.pendingUrl || activatedTab?.url, destinationId)) {
+      throw await createSignInRecoveryError(tabId, destinationId, text, transferId, trace);
+    }
     markBackgroundTrace(trace, "tab activate before paste done", { tabId });
     if (destination.activationSettleMs) {
       markBackgroundTrace(trace, "tab activation settle start", { tabId, settleMs: destination.activationSettleMs });
@@ -2326,6 +2386,7 @@ async function activateDestinationTab(tabId, deadlineAt = null, operation = null
     operation?.onTabActivated?.(tabId);
     recordDestinationObservation(completionOperation, "destination_activate", { activation_ms: Math.round(nowMs() - activatedAt) },
       { tabId, site: "destination_activated" });
+    return tab;
   } catch (error) {
     checkTransferOperation(completionOperation);
     if (["transfer_timeout", "user_cancelled"].includes(error?.code)) throw error;
@@ -2432,6 +2493,15 @@ async function pasteIntoDestinationTab(
   transferId = null,
   trace = null
 ) {
+  // Navigation can redirect after preparation or activation. Recheck the real
+  // tab immediately before dispatch, including destinations pasted while hidden.
+  const currentTab = await chrome.tabs.get(tabId);
+  checkTransferOperation(trace?.operation);
+  checkTransferDeadline(trace?.deadlineAt);
+  if (isDestinationSignInUrl(currentTab?.pendingUrl || currentTab?.url, destinationId)) {
+    await checkTransferSource(trace?.operation);
+    throw await createSignInRecoveryError(tabId, destinationId, text, transferId, trace);
+  }
   if (trace?.operation) trace.operation.pasteCheckpoint = {
     tabId, destinationId, trace, textChars: text.length, startedAt: Date.now(), seen: new Set(), lastIndex: -1, events: []
   };

@@ -4,6 +4,16 @@ Decisions, important regressions and replaced approaches worth remembering. [LOG
 
 Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spidey889/context-generator/blob/9b663fdfbe98204803ec5526f91be2c01c61d62e/CHANGELOG.md) remains in Git with detailed experiments, rollout evidence and superseded iterations.
 
+## 2026-10-29
+
+- **Offer the ready transfer when a destination requires sign-in.** A DeepSeek-to-Claude transfer captured and summarized correctly but ended on Claude's login page; a later attempt succeeded on its new-chat page.
+  - Login redirects previously used generic paste failure and could open another destination that repeated the redirect. The first sign-in guard also ran before normal tab activation, leaving the login tab in the background; no extra permission was needed to reveal it.
+  - Recognize supported login routes and external auth hosts before dispatch, bring the existing tab forward, skip fresh-tab recovery, and preserve the original diagnosis.
+  - Show "Sign in to [destination]" in the compact warm glass notice with Copy summary/Dismiss; it stays until dismissed, including after copying. At the owner's request, place it upper-left with a left-side slide and a separate page-wide blur, clear of Chrome's upper-right account chooser. Clear that blur after successful copying or dismissal so the user can sign in. Keep the full text box on the source; clipboard failure opens it on the destination too. Only actual clipboard success changes the notice to copied.
+  - Return an already-handled login failure directly and let the worker show the notice once; duplicate recovery could otherwise refocus the tab and invalidate an in-flight clipboard action.
+  - Preserve login fields, ordinary draft protection, uncertain-paste warnings and clipboard failure recovery; do not automatically resume insertion after sign-in.
+  - Focused checks and isolated Brave verify one destination, tab activation, unchanged sign-in fields, the complete carry, notice styling/actions and explicit dismissal. Keep existing permissions, site matches and database reporting; external auth pages use source recovery when extension UI is unavailable.
+
 ## 2026-10-28
 
 - **Keep transfer failures diagnosable through lost replies and manual recovery.** A DeepSeek-to-Gemini attempt prepared a 457,957-character full-chat fallback, then timed out waiting for the paste reply; its saved record had no destination paste observations. A whole-flow audit also found missing early-request, destination-preparation and copy-recovery facts.

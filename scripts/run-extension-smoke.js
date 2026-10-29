@@ -397,7 +397,7 @@ async function createSmokeExtension(tempRoot, origin) {
   );
   if (!LIVE_TELEMETRY_SMOKE) backgroundSource = replaceOnce(
     backgroundSource,
-    'const TELEMETRY_ENDPOINT_URL = "https://context-generator-five.vercel.app/api/telemetry";',
+    backgroundSource.match(/^const TELEMETRY_ENDPOINT_URL = "[^"\r\n]+";$/m)?.[0] || "missing telemetry endpoint declaration",
     `const TELEMETRY_ENDPOINT_URL = ${JSON.stringify(`${origin}/api/telemetry`)};`,
     "the telemetry backend URL"
   );
