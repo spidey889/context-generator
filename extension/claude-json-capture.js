@@ -207,8 +207,8 @@
     if (!hasText) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts.", "incomplete");
     const text = `Claude conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     metrics?.set({ selected_turns: turns.length });
-    if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) {
-      throw captureError("Conversation exceeds the supported 1,000,000 character / 4 MB limit.", "size_limit", "size_limit");
+    if (metrics ? !metrics.transcript(text) : text.length > 4000000 || new TextEncoder().encode(text).length > 16000000) {
+      throw captureError("Conversation exceeds the supported 4,000,000 character / 16 MB limit.", "size_limit", "size_limit");
     }
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort(),
       ...(skippedFiles.size ? { skippedFiles: [...skippedFiles.values()] } : {}) };
@@ -232,9 +232,9 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.type === "pong" && reply.id === id
-            && reply.version !== 17) metrics?.set({ hook_status: "version_mismatch" });
+            && reply.version !== 18) metrics?.set({ hook_status: "version_mismatch" });
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 17) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 18) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -278,7 +278,7 @@
         }
       }
       if (signal?.aborted) throw new Error("Size check cancelled.");
-      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 17 });
+      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 18 });
       if (changed || location.pathname !== expectedPath) throw changedError("The Claude conversation changed during capture.");
       metrics.checkpoint("route", "history");
       return await new Promise((resolve, reject) => {

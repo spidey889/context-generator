@@ -731,9 +731,9 @@ function networkSmokeFixture(platform) {
   fixture.data.data.biz_data.chat_messages.push({ message_id: 9999, parent_id: 1, role: "ASSISTANT",
     fragments: [{ type: "RESPONSE", content: "UNUSED_BRANCH_SENTINEL" + "x".repeat(13000000) }] });
   if (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE) {
-    // Match the real incident: a valid ~1 MB text file passes download limits,
-    // then exceeds the 1,000,000-character transcript cap. DOM omits this file.
-    const text = "x".repeat(999998);
+    // A supported text file passes the unchanged 4.1 MB download limit,
+    // then exceeds the 4M-character transcript cap. DOM omits this file.
+    const text = "x".repeat(3999998);
     fixture.files[fixture.file.id] = text;
     fixture.file.file_size = Buffer.byteLength(text);
     return fixture;
@@ -748,8 +748,8 @@ function networkSmokeFixture(platform) {
       file.file_size = 1;
     }
     if (DEEPSEEK_DOM_SIZE_SMOKE && i === 1) {
-      fixture.files[file.id] = "x".repeat(1000001);
-      file.file_size = 1000001;
+      fixture.files[file.id] = "x".repeat(4000001);
+      file.file_size = 4000001;
     }
     fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push(file);
     extraBodies.push(`Attachment: ${JSON.stringify(file.file_name)}` + (DEEPSEEK_BAD_FILE_SMOKE && i === 1 ? ""
@@ -1750,7 +1750,13 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   assert.equal(state.destinationRequests, 1, "A draft must never create or reload a second destination.");
   assert.equal(state.summaryRequests.length, 1);
   assert.equal(await destination.evaluate("document.getElementById('context-generator-destination-status')"), null, "The draft box replaces the paste failure banner.");
-  await telemetryFixture.verifyDraftOutcome(terminal);
+  // Both recovery surfaces report asynchronously after the first terminal
+  // event. Compare SQL with the complete signed report, not that early event.
+  const completeDraft = await waitFor(() => state.telemetryRequests.findLast(payload =>
+    payload.attempt_id === terminal.attempt_id && payload.status === "failed" && payload.summary_proof &&
+    ["source", "destination"].every(side => payload.diagnostics?.recovery_events?.some(event => event.event === "box_shown" && event.side === side))),
+  "the signed draft report with both recovery boxes");
+  await waitFor(() => telemetryFixture.verifyDraftOutcome(completeDraft).then(() => true), "the saved complete draft report");
   process.stdout.write("✓ The native login/signup clue reached the saved diagnosis without page text or URLs.\n");
   // Source copying keeps the modal and existing feedback; only destination
   // recovery fades into the copied notice.
@@ -3416,7 +3422,7 @@ async function run() {
         notice: Boolean(document.getElementById("context-generator-capture-notice")),
         error: document.getElementById("context-generator-error-text").textContent
       })`);
-      assert.match(result.error, /1,000,000/);
+      assert.match(result.error, /4,000,000/);
       assert.ok(state.jsonRequests - jsonRequestsBeforeTransfer >= 3, "Capture, retry and independent DOM count must each fetch fresh history.");
       assert.equal(state.summaryRequests.length, 0, "Oversized DOM recovery must stop before summary or paste.");
       const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the DOM size-limit telemetry");
@@ -3426,7 +3432,7 @@ async function run() {
       assert.ok(terminal.diagnostics.json_fallback_code, "The transfer must actually enter DOM recovery.");
       assert.equal(terminal.diagnostics.json_attempts.length, 2, "The background measurement is not another JSON transfer attempt.");
       assert.equal(terminal.diagnostics.error_code, "conversation_too_large");
-      process.stdout.write("✓ Fresh background count included a healthy 1M text file despite a broken file and stopped DOM recovery before summary/paste.\n");
+      process.stdout.write("✓ Fresh background count included a healthy 4M text file despite a broken file and stopped DOM recovery before summary/paste.\n");
       return;
     }
     if (JSON_FALLBACK_SMOKE) {
@@ -3467,7 +3473,7 @@ async function run() {
         assert.equal(terminal.diagnostics.json_attempts[0].http_status, 403);
       }
       if (SIZE_CAPTURE_SMOKE) {
-        assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /too large.*limit is 1,000,000 characters/ : /too large.*limit is [\d,]+ bytes/);
+        assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /too large.*limit is 4,000,000 characters/ : /too large.*limit is [\d,]+ bytes/);
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the terminal size rejection");
         assert.equal(terminal.last_stage, "capture_started", "Size rejection must stop before summary or paste.");
         assert.equal(terminal.failure_reason, "conversation_too_large");
@@ -3476,12 +3482,13 @@ async function run() {
         assert.ok(!failedCapture.error.includes(observedSize.toLocaleString("en-US")), "The user's measured size stays in diagnostics, outside the error message.");
         if (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE) {
           assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "transcript_char_limit");
-          assert.ok(terminal.diagnostics.json_attempts[0].failure_value > 1000000);
+          assert.ok(terminal.diagnostics.json_attempts[0].failure_value > 4000000);
         }
       }
       if (TELEMETRY_DATABASE_SMOKE) {
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the installed worker's failed capture telemetry");
-        await telemetryFixture.verifyFailureOutcome(terminal, SIZE_CAPTURE_SMOKE);
+        // Receiving the HTTP report precedes its asynchronous relay/SQL commit.
+        await waitFor(() => telemetryFixture.verifyFailureOutcome(terminal, SIZE_CAPTURE_SMOKE).then(() => true), "the saved capture failure");
         if (LIVE_TELEMETRY_SMOKE) process.stdout.write(`✓ LIVE transfer record: ${terminal.attempt_id}; JSON checks: ${JSON.stringify(terminal.diagnostics.json_attempts)}\n`);
         assert.equal(terminal.diagnostics.failure_site, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE || CHATGPT_FAILURE_SMOKE === "partial" ? "capture_serialize" : "capture_history");
         if (CHATGPT_FAILURE_SMOKE === "ranged") assert.equal(terminal.diagnostics.capture_http_status, 206);

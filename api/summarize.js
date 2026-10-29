@@ -478,6 +478,9 @@ function createLongSummaryResponse(res, options = {}) {
 
 module.exports = handler;
 module.exports.__test = {
+  createSummaryWithProvider,
+  getInitialSummaryMessages,
+  getProviderRequestBody,
   createLongSummaryResponse,
   normalizeContextCarrySummary,
   validateContextCarrySummary,
@@ -864,7 +867,17 @@ function getProviderRequestBody(provider, messages, profile, model) {
     // Preserve the full transcript even if account defaults later change.
     body.plugins = [{ id: "context-compression", enabled: false }];
     body.reasoning = { enabled: false, exclude: true };
-    body.provider = { require_parameters: true, data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } };
+    // The owner approved NVIDIA's free-endpoint policy for the isolated >1M
+    // beta. Only its explicit server route can opt in; ordinary routing denies.
+    const nvidiaBeta = provider.allowNvidiaDataCollection === true && model === "nvidia/nemotron-3.5-super-vl:free";
+    if (nvidiaBeta) {
+      // NVIDIA recommends these text sampling values. The inherited 0.1
+      // produced a whitespace-only loop in the synthetic large-chat trial.
+      body.temperature = 1;
+      body.top_p = 0.95;
+    }
+    body.provider = { require_parameters: true, data_collection: nvidiaBeta ? "allow" : "deny",
+      max_price: { prompt: 0, completion: 0, request: 0 } };
   }
   return body;
 }

@@ -99,13 +99,13 @@ test("DOM fallback starts immediately alongside a fresh count and blocks excess 
     await new Promise(setImmediate);
     assert.equal(calls.dom, 1, "DOM scrolling must not wait for the fresh count.");
     assert.equal(calls.json, 1, "Size checking must not restart the ordinary capture.");
-    measurement.resolve({ characterCount: 1000001 });
+    measurement.resolve({ characterCount: 4000001 });
     await new Promise(setImmediate);
     scrolling.resolve();
     await transfer;
     assert.equal(measurements, 1);
     assert.equal(calls.flows.length, 0);
-    assert.match(calls.errors[0], /1,000,000/);
+    assert.match(calls.errors[0], /4,000,000/);
     assert.equal(calls.finished[0].diagnostics.error_code, "conversation_too_large");
     assert.equal(context.isRunning, false);
   }
@@ -116,12 +116,12 @@ test("DOM count failures, exact-cap results and late replies never delay or repl
     const { context, calls } = harness("deepseek");
     const measurement = deferred();
     context.window.__capMeasureNetworkJson = () => scenario === "failed" ? Promise.reject(new Error("private"))
-      : scenario === "exact cap" ? Promise.resolve({ characterCount: 1000000 }) : measurement.promise;
+      : scenario === "exact cap" ? Promise.resolve({ characterCount: 4000000 }) : measurement.promise;
     context.prepareSourceForCapture = async () => context.startDomCaptureSizeCheck(context.activeTransferTrace);
     await context.start("claude");
     assert.equal(calls.flows.length, 1, scenario);
     assert.equal(calls.flows[0].text, "DOM transcript");
-    measurement.resolve({ characterCount: 1000001 });
+    measurement.resolve({ characterCount: 4000001 });
     await new Promise(setImmediate);
     assert.equal(calls.errors.length, 0, "A late count must not affect a completed DOM capture.");
     assert.equal(calls.flows[0].trace.domSizeCheck.active, false);
@@ -684,7 +684,7 @@ test("size failures stop all five platforms without partial DOM transfer, includ
     const transcriptLimit = platform === "deepseek";
     error.jsonCapture = { outcome: "failed", mode: "fresh",
       failure_check: transcriptLimit ? "transcript_char_limit" : "raw_total_stream_limit",
-      failure_value: transcriptLimit ? 1003622 : 32000001, failure_limit: transcriptLimit ? 1000000 : 32000000 };
+      failure_value: transcriptLimit ? 4003622 : 32000001, failure_limit: transcriptLimit ? 4000000 : 32000000 };
     const { context, calls } = harness(platform);
     context.isSourceReplyInProgress = () => ["grok", "chatgpt"].includes(platform);
     context.window[captureKeyFor(platform)] = async () => { calls.json++; throw error; };
@@ -697,8 +697,8 @@ test("size failures stop all five platforms without partial DOM transfer, includ
     assert.equal(calls.prepare + calls.dom + calls.notice + calls.flows.length, 0, "Never substitute the smaller visible history for rejected full content.");
     assert.equal(calls.destination, 1);
     assert.equal(calls.errors.length, 1);
-    assert.match(calls.errors[0], transcriptLimit ? /too large.*limit is 1,000,000 characters/ : /too large.*limit is 32,000,000 bytes/);
-    assert.doesNotMatch(calls.errors[0], /1,003,622|32,000,001/);
+    assert.match(calls.errors[0], transcriptLimit ? /too large.*limit is 4,000,000 characters/ : /too large.*limit is 32,000,000 bytes/);
+    assert.doesNotMatch(calls.errors[0], /4,003,622|32,000,001/);
     assert.equal(context.isRunning, false);
     const diagnostics = calls.finished[0].diagnostics;
     assert.equal(diagnostics.error_code, "conversation_too_large");
@@ -711,7 +711,7 @@ test("size failures stop all five platforms without partial DOM transfer, includ
 });
 
 test("attachment and transcript byte rejections show their own numeric limits", async () => {
-  for (const [check, detail, limit] of [["supported_files_limit", "attachment_size_limit", 4100000], ["transcript_byte_limit", "size_limit", 4000000]]) {
+  for (const [check, detail, limit] of [["supported_files_limit", "attachment_size_limit", 4100000], ["transcript_byte_limit", "size_limit", 16000000]]) {
     const { context, calls } = harness("deepseek");
     const error = transientError("size_limit", detail);
     error.jsonCapture = { outcome: "failed", failure_check: check, failure_value: limit + 1, failure_limit: limit };
@@ -1321,14 +1321,14 @@ test("rough progress reaches the owning DOM handoff before the final count and n
   context.scrapeConversationTextWhenReady = async () => { await finishDom.promise; context.checkTransferDeadline(context.activeTransferTrace); return "DOM transcript"; };
   const transfer = context.start("claude"); await ready.promise;
   const trace = context.activeTransferTrace;
-  callback({ messageTurnCount: 200, estimatedCharacterCount: 1000001 });
+  callback({ messageTurnCount: 200, estimatedCharacterCount: 4000001 });
   assert.ok(trace.domSizeCheck.estimateMs > 0);
   assert.equal(trace.domSizeCheck.error, null, "Estimated excess never rejects an otherwise valid DOM capture.");
   finishDom.resolve(); await transfer;
   assert.equal(calls.flows.length, 1);
   const deadline = trace.deadlineAt;
   callback({ messageTurnCount: 10000, estimatedCharacterCount: 30000000 });
-  final.resolve({ characterCount: 1000001 }); await new Promise(setImmediate);
+  final.resolve({ characterCount: 4000001 }); await new Promise(setImmediate);
   assert.equal(trace.deadlineAt, deadline, "Late progress cannot extend completed capture.");
   assert.equal(calls.errors.length, 0);
 });

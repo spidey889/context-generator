@@ -13,7 +13,7 @@ const compiledTransferBackground = new vm.Script(`${source}\n;globalThis.__backg
   filename: "extension/background.js"
 });
 
-function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, cssCalls = [], cssError = false, onMessage = () => {}, clock = Date, progressMessages = [] } = {}) {
+function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, cssCalls = [], cssError = false, onMessage = () => {}, clock = Date, progressMessages = [], importScripts } = {}) {
   let messageListener = null;
   let tabRemovedListener;
   const closedTabs = new Set();
@@ -23,6 +23,7 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
     TextDecoder,
     TextEncoder,
     Date: clock,
+    ...(importScripts ? { importScripts, CapLargeTransfer: {} } : {}),
     URL,
     clearTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
@@ -103,6 +104,14 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
   sendSummary.backendError = response => sandbox.createSummaryBackendError(response);
   return sendSummary;
 }
+
+test("production worker never imports the absent local preview dependency", () => {
+  const imports = [];
+  loadBackgroundForSummaryTest(() => { throw new Error("unexpected fetch"); }, {
+    importScripts(file) { imports.push(file); throw new Error("file missing"); }
+  });
+  assert.deepEqual(imports, [], "Chromium must not discover a nonexistent preview dependency at installation.");
+});
 
 function loadBackgroundForTransferTest({
   preparedTab,

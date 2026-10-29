@@ -1,4 +1,18 @@
-# Manual Dots 500k and 1M experiments
+# Manual capacity experiments
+
+## Single-request versus chunked large-chat summaries
+
+Compare saved Harbor Atlas runs offline; this makes no API calls:
+
+```powershell
+node evaluation/capacity/compare-large-chat.cjs .test-artifacts/comparison-3p5m/direct-report.json .test-artifacts/key-two-chunks-3p5m-authorized/chunks-report.json
+```
+
+Each `*-report.json` needs its matching `*-summary.txt`. An optional third argument saves a new JSON comparison without overwriting previous results. Both methods receive the same 13 content checks plus explicit checks for proposal-only scope, undecided retries, unreported testing, owner identity, the first pending step and no deployment. Separate review flags identify archive references promoted into open questions, unsupported testing-approval claims, the observed damaged curl JSON quotes and possible identity/testing-state mistakes. These are targeted lexical checks for this synthetic fixture, not a semantic judge; read the summaries too. A quoted hostile marker alone is not a failure.
+
+Reports must confirm completion and matching input hashes, character counts and models before the tool labels the pair comparable; failed runs never receive scores from leftover summary files. Missing hashes remain unverified. Exit code 1 means the pair cannot be compared; content omissions and review flags remain visible in the JSON for review. Compare timing with attention to cache state and different deadlines. Run focused checks with `node --test --test-timeout=30000 test/large-chat-benchmark.test.js`.
+
+## Existing Dots 500k and 1M experiments
 
 Run only when the owner authorizes live testing:
 

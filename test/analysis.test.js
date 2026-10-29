@@ -6,6 +6,31 @@ const vm = require("node:vm");
 
 const ANALYSIS_SOURCE = fs.readFileSync(path.join(__dirname, "..", "analysis", "index.html"), "utf8");
 
+test("analysis shows the latest metadata and a visible notice when raw text exceeded storage", () => {
+  const elements = new Map([['rawScrapedText', {}], ['rawScrapePanel', {}]]);
+  const context = { app: { innerHTML: "" }, copyDetailsButton: {},
+    rawScrapeButton: { setAttribute() {} }, rawScrapeOpen: true,
+    document: { getElementById: id => elements.get(id) },
+    numberFormatter: new Intl.NumberFormat("en-US"), dateFormatter: new Intl.DateTimeFormat("en-US") };
+  const start = ANALYSIS_SOURCE.indexOf("function renderStats(stats)");
+  vm.runInNewContext(ANALYSIS_SOURCE.slice(start, ANALYSIS_SOURCE.indexOf("</script>", start)), context);
+  const receipt = { transferId: "newest-run", status: "completed", totalMs: 50,
+    completedAt: "2026-10-29T12:00:00.000Z", capture: { sentChars: 4000000 }, rawScrapedTextOmitted: "storage_limit" };
+  context.renderStats(receipt);
+  assert.match(context.app.innerHTML, /newest-run/);
+  assert.match(context.app.innerHTML, /4,000,000/);
+  assert.match(context.app.innerHTML, /<p class="raw-note" role="status">Chat text too large to save locally\.<\/p>/);
+  assert.equal(context.copyDetailsButton.disabled, false);
+  assert.equal(context.rawScrapeButton.disabled, true);
+  assert.equal(elements.get('rawScrapePanel').hidden, true);
+  context.renderStats({ ...receipt, rawScrapedTextOmitted: undefined, rawScrapedText: "Exact <captured> text" });
+  assert.doesNotMatch(context.app.innerHTML, /Chat text too large/);
+  assert.equal(context.rawScrapeButton.disabled, false);
+  assert.equal(elements.get('rawScrapedText').textContent, "Exact <captured> text");
+  context.renderStats({ ...receipt, rawScrapedTextOmitted: undefined });
+  assert.doesNotMatch(context.app.innerHTML, /Chat text too large/);
+});
+
 test("analysis receipt shows the served model and does not report it as failed", () => {
   const { getModelFallbackLabel, formatModelDisplayName, formatBackendLabel } = loadModelHelpers();
   const summary = {
@@ -18,6 +43,7 @@ test("analysis receipt shows the served model and does not report it as failed",
   for (const [model, label] of [
     ["claude-haiku-5.5:free", "Haiku 5.5 (free)"],
     ["deepseek-v4.1-flash:free", "DeepSeek V4.1 Flash (Free)"],
+    ["nvidia/nemotron-3.5-super-vl:free", "NVIDIA Nemotron 3.5 Super VL (Free)"],
     ["qwen/qwen3.8-27b:free", "Qwen3.8 27B"],
     ["dots-studio/dots-3-note-preview:free", "Dots3-Note Preview"],
     ["google/gemma-4-26b-a4b-it:free", "Gemma 4 26B A4B"],

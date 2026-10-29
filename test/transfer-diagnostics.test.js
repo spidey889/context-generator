@@ -315,8 +315,8 @@ test("skipped files retain their cause while later validation owns the terminal 
   const m=context.CapJsonCaptureMetrics.create();m.checkpoint("read","attachment_body");m.fail("invalid_utf8","attachment_body",undefined,undefined,undefined,200,{failure_decode_stage:"chunk"});
   m.recoverFile();m.checkpoint("complete","serialize",{history_checked:true});
   assert.equal(m.finish().step,"complete");assert.equal(m.finish().history_checked,true);assert.equal(m.finish().skipped_file_check,"invalid_utf8");
-  m.transcript("x".repeat(1000001));const d=m.finish({captureDetail:"size_limit",captureRequestStage:"serialize"});
-  assert.equal(d.failure_check,"transcript_char_limit");assert.equal(d.failure_value,1000001);assert.equal(d.failure_stage,"serialize");
+  m.transcript("x".repeat(4000001));const d=m.finish({captureDetail:"size_limit",captureRequestStage:"serialize"});
+  assert.equal(d.failure_check,"transcript_char_limit");assert.equal(d.failure_value,4000001);assert.equal(d.failure_stage,"serialize");
   assert.equal(d.failure_decode_stage,undefined);assert.equal(d.skipped_file_check,"invalid_utf8");assert.equal(d.files_skipped,1);
 });
 

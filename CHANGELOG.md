@@ -6,6 +6,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-29
 
+- **Keep production worker dependencies present.** The merged 4M browser check captured the chat but made no summary or telemetry request, leaving only local copy recovery.
+  - The worker statically referenced ignored `local-preview-auth.js`, which is absent from a normal installation.
+  - Chromium's worker dependency discovery rejected startup despite the surrounding JavaScript `try/catch`; VM tests had incorrectly treated a caught import error as proof of browser startup.
+  - Removing only that import in an isolated Brave copy restored exact-4M capture, all nine part/final requests, and final paste; forced upstream failure retained the complete local carry.
+  - Production no longer imports the preview file. The preview helper writes the file before adding its import and removes the import when restoring production.
+  - Packaging now checks that static worker dependencies exist, and preview round-trip checks require the import only with its local authentication file. Focused startup checks and the canonical isolated-Brave exact-4M success/failure paths passed; the merged sign-in recovery fixture passed too. These checks use synthetic upstream responses and do not establish live model availability.
+
 - **Offer the ready transfer when a destination requires sign-in.** A DeepSeek-to-Claude transfer captured and summarized correctly but ended on Claude's login page; a later attempt succeeded on its new-chat page.
   - Login redirects previously used generic paste failure and could open another destination that repeated the redirect. The first sign-in guard also ran before normal tab activation, leaving the login tab in the background; no extra permission was needed to reveal it.
   - Recognize supported login routes and external auth hosts before dispatch, bring the existing tab forward, skip fresh-tab recovery, and preserve the original diagnosis.
@@ -13,6 +20,23 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
   - Return an already-handled login failure directly and let the worker show the notice once; duplicate recovery could otherwise refocus the tab and invalidate an in-flight clipboard action.
   - Preserve login fields, ordinary draft protection, uncertain-paste warnings and clipboard failure recovery; do not automatically resume insertion after sign-in.
   - Focused checks and isolated Brave verify one destination, tab activation, unchanged sign-in fields, the complete carry, notice styling/actions and explicit dismissal. Keep existing permissions, site matches and database reporting; external auth pages use source recovery when extension UI is unavailable.
+
+- **Keep Latest Run current when captured text exceeds browser storage.** Some admitted 4M transcripts exceed the extension's shared 10 MB local quota, leaving analysis on the previous transfer.
+  - The receipt bundled metadata and full captured text in one write, and silently ignored rejected writes.
+  - Isolated Brave confirmed that 4M CJK characters require about 12 MB and cannot fit; JSON escaping can also exceed the quota.
+  - Retry quota failures once with current metadata, omit raw text and its expiry, and show "Chat text too large to save locally."
+  - Keep ordinary raw text exact, preserve transfer/telemetry completion, and prevent a late quota retry from replacing a newer receipt from the same page.
+  - Focused checks passed for normal saves, quota recovery, storage outages, overlapping writes and analysis rendering. Isolated Brave verified an actual quota rejection, fresh metadata through the storage bridge, the visible notice and successful transfer; metadata storage remains best-effort if the browser rejects both writes.
+
+- **Prepare a separate 4M-character beta on `codex/large-chat-4m`.** Repeated oversized attempts showed that this affects several users. Keep every existing transfer route through 1M unchanged; raise only capture/transfer admission and add a separate path for larger verified transcripts.
+  - A single 4M request can exceed provider upload/context bounds. Split into bounded ordered pieces, then combine their summaries after checking signed receipts for complete original coverage. Count both JSON encodings, preserve Unicode/CRLF and never clip the source.
+  - At the owner’s request, use NVIDIA Nemotron 3.5 Super VL (free) through OpenRouter, with reasoning off, zero-price caps, bounded concurrency/time and no same-provider retry. Super VL was preferable to Ultra in the earlier 500k synthetic test (about 22 seconds versus a 180-second stall). The owner accepted NVIDIA’s free-endpoint data policy for this beta; that exception cannot change ordinary OpenRouter requests. Existing file, raw-history, completeness and identity guards remain.
+  - Live synthetic trials exposed a non-substantive 10,000-token output at the inherited temperature 0.1. Pin NVIDIA’s recommended text sampling (temperature 1, top_p 0.95) and use 500k pieces; keep the existing 75-second attempt and overall deadlines.
+  - Only the final response can authenticate summary work. Part results stay transient; extend only existing model allowlists for accurate NVIDIA receipts/failure logs. Preserve rows, counters and privileges; no tables, columns, permissions or transcript logging are added.
+  - Add owner-requested TokenHarbor DeepSeek backup for a failed NVIDIA piece or final merge, keeping successful pieces. One attempt per provider shares the existing 75-second request: NVIDIA gets at most 45 seconds when backup is configured; DeepSeek gets the remaining time. Missing/disabled providers are skipped, cancellation wins, and the final proof names the actual serving model. Focused tests cover mixed-provider receipts, HTTP/refusal/truncation fallback, total deadlines, cancellation and both-provider failure; the ≤1M route stays unchanged.
+  - If both providers fail for a piece, stop sibling work and offer every captured character for manual copying. Do not inject a 4M fallback automatically or report a completed summary/paste.
+  - Regression coverage exercises exact 4M capture, byte escaping, receipt tampering/expiry, cancellation and failed-part recovery. The revised live NVIDIA trial summarized a varied synthetic 4M transcript in 68.8 seconds through eight pieces plus a final merge; all 13 seeded fact checks passed and manual review retained the latest proposal-only request, both unresolved retry choices and exact configuration/comment. Installed-Brave success/recovery checks use a synthetic upstream model; real-user summary fidelity and free-provider availability remain beta limitations. This branch is not a production deployment or Store release.
+
 
 ## 2026-10-28
 

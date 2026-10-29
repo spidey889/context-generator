@@ -373,6 +373,9 @@
 (function (root) {
   const contract = root.CapTransferDiagnostics;
   const clock = () => Date.now();
+  // The complete transcript may be summarized in bounded pieces later. Keep
+  // capture capacity separate from request-body and native file-download caps.
+  const transcriptCharLimit = 4000000, transcriptByteLimit = 16000000;
   function create(initial = {}, onProgress) {
     const started = clock();
     const data = { outcome: "succeeded", mode: "fresh", history_request_sent: false, history_response_read: false, history_parsed: false, history_checked: false };
@@ -445,11 +448,11 @@
       try { return fn(); } finally { add(key, clock() - began); }
     };
     const transcript = text => {
-      set({ transcript_chars: text.length, transcript_char_limit: 1000000, transcript_byte_limit: 4000000 });
-      if (text.length > 1000000) { fail("transcript_char_limit", "serialize", "string_length", text.length, 1000000); return false; }
+      set({ transcript_chars: text.length, transcript_char_limit: transcriptCharLimit, transcript_byte_limit: transcriptByteLimit });
+      if (text.length > transcriptCharLimit) { fail("transcript_char_limit", "serialize", "string_length", text.length, transcriptCharLimit); return false; }
       const bytes = new TextEncoder().encode(text).length;
       set({ transcript_bytes: bytes });
-      if (bytes > 4000000) { fail("transcript_byte_limit", "serialize", "utf8_bytes", bytes, 4000000); return false; }
+      if (bytes > transcriptByteLimit) { fail("transcript_byte_limit", "serialize", "utf8_bytes", bytes, transcriptByteLimit); return false; }
       return true;
     };
     const ignored = (type, image = false) => {

@@ -61,11 +61,11 @@ test("DeepSeek distinguishes a streamed raw excess from an oversized selected tr
     return true;
   });
   const f = fixtures("deepseek", "smoke", 2);
-  f.data.data.biz_data.chat_messages.at(-1).fragments[0].content = "x".repeat(1000001);
+  f.data.data.biz_data.chat_messages.at(-1).fragments[0].content = "x".repeat(4000001);
   const transcript = setup("deepseek", f); await transcript.observe();
   await assert.rejects(transcript.window.__capCaptureNetworkJson(), error => {
     assert.equal(error.jsonCapture.failure_check, "transcript_char_limit");
-    assert.equal(error.jsonCapture.failure_limit, 1000000);
+    assert.equal(error.jsonCapture.failure_limit, 4000000);
     assert.equal(error.jsonCapture.failure_value, error.jsonCapture.transcript_chars);
     assert.equal(error.jsonCapture.transcript_bytes, undefined, "The existing char guard must still short circuit encoding.");
     assert.ok(error.jsonCapture.raw_bytes < 32000000);
@@ -75,8 +75,8 @@ test("DeepSeek distinguishes a streamed raw excess from an oversized selected tr
 
 test("DeepSeek: fresh size check keeps downloading healthy files after another file fails", async () => {
   const f = deepseekUploads(2);
-  f.files[f.uploads[1].id] = "x".repeat(1000001);
-  f.uploads[1].file_size = 1000001;
+  f.files[f.uploads[1].id] = "x".repeat(4000001);
+  f.uploads[1].file_size = 4000001;
   let historyReads = 0;
   const h = setup("deepseek", f, { fetchImpl: request => {
     if (request.url.pathname.includes("history_messages")) { historyReads++; return Response.json(f.data); }
@@ -88,7 +88,7 @@ test("DeepSeek: fresh size check keeps downloading healthy files after another f
   await assert.rejects(h.window.__capCaptureNetworkJson());
   const result = await h.window.__capMeasureNetworkJson();
   assert.equal(historyReads, 2, "Size checking must fetch again, not reuse the failed capture's history.");
-  assert.ok(result.characterCount > 1000000, "The successfully downloaded file must contribute to the count.");
+  assert.ok(result.characterCount > 4000000, "The successfully downloaded file must contribute to the count.");
   assert.deepEqual(Object.keys(result), ["characterCount", "messageTurnCount"]);
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE|SENTINEL|source-/);
 });
@@ -112,19 +112,39 @@ test("DeepSeek: measurement and ordinary capture both retain healthy files despi
   assert.equal((await h.window.__capCaptureNetworkJson()).text, healthyOnly.text);
 });
 
-test("DeepSeek: fresh size check selects the current branch and keeps the exact 500k boundary", async () => {
+test("DeepSeek: fresh size check selects the current branch and keeps the exact 4M boundary", async () => {
   for (const extra of [0, 1]) {
     const f = fixtures("deepseek", "smoke", 1);
     const messages = f.data.data.biz_data.chat_messages;
     const prefix = "DeepSeek conversation:\n\nUser: x\n\nAssistant: ";
     messages[0].fragments = [{ type: "REQUEST", content: "x" }];
-    messages[1].fragments = [{ type: "RESPONSE", content: "a".repeat(1000000 - prefix.length + extra) }];
-    messages.push({ message_id: 100, parent_id: null, role: "ASSISTANT", fragments: [{ type: "RESPONSE", content: "z".repeat(1000001) }] });
+    messages[1].fragments = [{ type: "RESPONSE", content: "a".repeat(4000000 - prefix.length + extra) }];
+    messages.push({ message_id: 100, parent_id: null, role: "ASSISTANT", fragments: [{ type: "RESPONSE", content: "z".repeat(4000001) }] });
     const h = setup("deepseek", f); await h.observe();
     const result = await h.window.__capMeasureNetworkJson();
-    assert.equal(result.characterCount, 1000000 + extra);
+    assert.equal(result.characterCount, 4000000 + extra);
     assert.equal(h.requests.length, 1);
   }
+});
+
+test("DeepSeek measurement continues beyond the old 1M cap to include every healthy file", async () => {
+  const f = deepseekUploads(2);
+  for (const upload of f.uploads) {
+    f.files[upload.id] = "x".repeat(1200000);
+    upload.file_size = 1200000;
+  }
+  const h = setup("deepseek", f, { fetchImpl: request => request.url.pathname.includes("history_messages")
+    ? Response.json(f.data) : new Response(f.files[`file-${request.url.searchParams.get("file_id")}`],
+      { headers: { "content-type": "text/plain" } }) });
+  await h.observe();
+  const count = await h.window.__capMeasureNetworkJson();
+  assert.ok(count.characterCount > 2400000 && count.characterCount < 4000000);
+  assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 2);
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text.length, count.characterCount);
+  assert.equal(capture.jsonCapture.transcript_char_limit, 4000000);
+  assert.equal(capture.jsonCapture.transcript_byte_limit, 16000000);
+  assert.equal(capture.jsonCapture.files_limit_bytes, 4100000);
 });
 
 test("DeepSeek: bad repeated-file metadata cannot erase another readable oversized file", async () => {
@@ -921,6 +941,9 @@ test("DeepSeek: redirected original files retain exact text and byte guards", as
 test("Network: authenticated history never follows a redirect", async t => {
   let redirectedReads = 0;
   const server = http.createServer((request, response) => {
+    // Rejected fetch redirects destroy their request. Close this disposable
+    // fixture connection too, so Node's idle parser cannot outlive the test.
+    response.setHeader("Connection", "close");
     if (request.url === "/redirect-target") { redirectedReads++; response.end("{}"); return; }
     response.writeHead(302, { Location: "/redirect-target" }); response.end();
   });
@@ -992,7 +1015,7 @@ test("DeepSeek: combined text files up to 4.1 MB retain the final transcript lim
       ? Response.json(f.data) : new Response(f.files[`file-${request.url.searchParams.get("file_id")}`], { headers: { "content-type": "text/plain" } }) });
     await h.observe();
     const capture = h.window.__capCaptureNetworkJson();
-    if (characters < 1000000) {
+    if (characters < 4000000) {
       const expected = `DeepSeek conversation:\n\nUser: ${f.uploads.map(file => `Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${f.files[file.id]}\nEnd attachment: ${JSON.stringify(file.file_name)}`).join("\n\n")}\n\nAssistant: ${f.data.data.biz_data.chat_messages[1].fragments[0].content}`;
       assert.equal((await capture).text, expected);
     } else {
@@ -1045,7 +1068,7 @@ test("DeepSeek: one incomplete upload preserves siblings and a fresh capture ret
   assert.ok(!capture.text.includes(f.files[f.uploads[0].id]));
   assert.equal(h.requests.length, 7, "failure must not stop queued downloads");
   assert.equal(aborted.length, 0);
-  assert.equal(h.window.__capNetworkFetchState.version, 34);
+  assert.equal(h.window.__capNetworkFetchState.version, 35);
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
   healthy = true;
@@ -1122,10 +1145,10 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   await h.observe();
   const old = h.window.__capNetworkFetchState;
   // Open tabs may retain the preceding reader after extension reload.
-  old.version = platform === "deepseek" ? 27 : platform === "gemini" ? 16 : 19;
+  old.version = platform === "deepseek" ? 34 : platform === "gemini" ? 20 : 23;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 34 : platform === "grok" ? 23 : 20);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 35 : platform === "grok" ? 24 : 21);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -1467,7 +1490,7 @@ test("DeepSeek keeps distinct identical files and request text, deduplicating fi
   assert.equal(capture.messageTurnCount, 3);
   assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 2);
 });
-test("slow/release: Gemini, Grok and DeepSeek capture admit transcripts through 1,000,000 characters without clipping", async () => {
+test("Gemini, Grok and DeepSeek capture admit transcripts through 4,000,000 characters without clipping", async () => {
   for (const platform of ["gemini", "grok", "deepseek"]) {
     const baseline = setup(platform);
     await baseline.observe();
@@ -1476,14 +1499,14 @@ test("slow/release: Gemini, Grok and DeepSeek capture admit transcripts through 
     const originalText = platform === "gemini" ? f.pages[0].turns[0][2][0][0]
       : platform === "grok" ? f.responses[0].message : f.data.data.biz_data.chat_messages[1].fragments[0].content;
     const overhead = original.text.length - originalText.length;
-    for (const length of [350001, 1000000, 1000001]) {
+    for (const length of [350001, 1000000, 1000001, 4000000, 4000001]) {
       const f = fixtures(platform), text = "漢".repeat(length - overhead);
       if (platform === "gemini") f.pages[0].turns[0][2][0][0] = text;
       else if (platform === "grok") f.responses[0].message = text;
       else f.data.data.biz_data.chat_messages[1].fragments[0].content = text;
       const h = setup(platform, f);
       await h.observe();
-      if (length > 1000000) await assert.rejects(h.window.__capCaptureNetworkJson(), /too long/);
+      if (length > 4000000) await assert.rejects(h.window.__capCaptureNetworkJson(), /too long/);
       else assert.equal((await h.window.__capCaptureNetworkJson()).text.length, length, platform);
     }
   }
@@ -1492,16 +1515,16 @@ test("slow/release: Gemini, Grok and DeepSeek capture admit transcripts through 
 test("All adapters reject zero own text and oversize text without truncation", () => {
   const g = setup("gemini"), t = geminiTurn(0, "smoke", "", "");
   assert.throws(() => g.api.gemini([{ turns: [t], cursor: null }], "smoke"), /No usable/);
-  t[2][0][0] = "x".repeat(1000001);
+  t[2][0][0] = "x".repeat(4000001);
   assert.throws(() => g.api.gemini([{ turns: [t], cursor: null }], "smoke"), /size/);
   const k = setup("grok"); k.fixture.responses.forEach(message => { message.message = ""; });
   assert.throws(() => k.api.grok(k.fixture.nodes, k.fixture.responses), /No usable/);
-  k.fixture.responses[0].message = "x".repeat(1000001);
+  k.fixture.responses[0].message = "x".repeat(4000001);
   assert.throws(() => k.api.grok(k.fixture.nodes, k.fixture.responses), /size/);
   const d = setup("deepseek");
   d.fixture.data.data.biz_data.chat_messages.forEach(message => { message.fragments = [{ type: message.role === "USER" ? "REQUEST" : "RESPONSE", content: "" }]; });
   assert.throws(() => d.api.deepseek(d.fixture.data, "smoke"), /No usable/);
-  d.fixture.data.data.biz_data.chat_messages[0].fragments[0].content = "x".repeat(1000001);
+  d.fixture.data.data.biz_data.chat_messages[0].fragments[0].content = "x".repeat(4000001);
   assert.throws(() => d.api.deepseek(d.fixture.data, "smoke"), /size/);
 });
 test("DeepSeek captures supported original code/data uploads instead of dropping the user turn", async () => {

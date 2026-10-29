@@ -9,6 +9,7 @@ api/mcp.mjs
 extension/chrome.zip
 extension/chrome-*.zip
 extension/firefox.zip
+extension/local-preview-auth.js
 /chrome*.zip
 /.live-site-profile/
 *Backup authentication codes.txt

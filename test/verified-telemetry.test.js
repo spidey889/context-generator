@@ -294,7 +294,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
   assert.equal(allRoutes.code, 200);
   const { LEGACY_RECEIPT_MODELS } = await proofHelpers();
   assert.deepEqual(new Set([...allRoutes.body.timing.modelsTried, "local-direct"]),
-    new Set(LEGACY_RECEIPT_MODELS.filter(model => !["inclusionai/ling-3.1-flash", "claude-haiku-5.5:free"].includes(model))));
+    new Set(LEGACY_RECEIPT_MODELS.filter(model => !["inclusionai/ling-3.1-flash", "claude-haiku-5.5:free", "nvidia/nemotron-3.5-super-vl:free"].includes(model))));
   delete process.env.TELEMETRY_SIGNING_KEY;
   const res = response();
   await summarize(req, res);

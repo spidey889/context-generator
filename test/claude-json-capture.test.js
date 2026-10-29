@@ -68,12 +68,12 @@ test("Claude fresh DOM size check counts readable file text despite another inco
   const data = fixture();
   data.chat_messages[0].attachments = [
     { file_type: "txt", file_name: "", file_size: 100 },
-    { file_type: "txt", file_name: "", file_size: 1000001, extracted_content: "x".repeat(1000001) }
+    { file_type: "txt", file_name: "", file_size: 4000001, extracted_content: "x".repeat(4000001) }
   ];
   const h = setup(data, { resources: [endpoint] });
   await assert.rejects(h.window.__capCaptureClaudeJson());
   const result = await h.window.__capMeasureClaudeJson();
-  assert.ok(result.characterCount > 1000000);
+  assert.ok(result.characterCount > 4000000);
   assert.deepEqual(Object.keys(result), ["characterCount", "messageTurnCount"]);
   await assert.rejects(h.window.__capCaptureClaudeJson(), error => error.captureFailureReason === "size_limit");
 });
@@ -527,14 +527,14 @@ test("Claude JSON capture still rejects missing parents and cyclic branches", as
   }
 });
 
-test("Claude JSON capture admits transcripts through 1,000,000 characters without clipping", async () => {
+test("Claude JSON capture admits transcripts through 4,000,000 characters without clipping", async () => {
   const baseline = setup(fixture(), { resources: [endpoint] });
   const overhead = (await baseline.window.__capCaptureClaudeJson()).text.length - "Selected answer".length;
-  for (const length of [350001, 1000000, 1000001]) {
+  for (const length of [350001, 1000000, 1000001, 4000000, 4000001]) {
     const data = fixture();
     data.chat_messages[2].content[1].text = "漢".repeat(length - overhead);
     const h = setup(data, { resources: [endpoint] });
-    if (length > 1000000) await assert.rejects(h.window.__capCaptureClaudeJson(), /1,000,000/);
+    if (length > 4000000) await assert.rejects(h.window.__capCaptureClaudeJson(), /4,000,000/);
     else assert.equal((await h.window.__capCaptureClaudeJson()).text.length, length);
   }
 });
@@ -687,7 +687,7 @@ clockTest("Claude isolated bridge awaits MAIN reinstallation before requesting c
     let legacy = stale === "legacy";
     harness = setup(fixture(), { resources: [endpoint], beforeMessage: payload => {
       // Open tabs can answer probes from the previous hook until it is replaced.
-      if (legacy && payload.type === "pong") payload.version = 14;
+      if (legacy && payload.type === "pong") payload.version = 17;
     }, runtime: { sendMessage: async message => {
       assert.equal(message.type, "ENSURE_CLAUDE_JSON_HOOK");
       ensures++; legacy = false; harness.window.__capClaudeFetchState.dispose();

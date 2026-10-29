@@ -1,5 +1,5 @@
 (() => {
-  const version = 29;
+  const version = 30;
   // A large history and its original files share one bounded capture, but a
   // healthy later request must not inherit milliseconds left by earlier work.
   const captureTimeoutMs = 45000;
@@ -10,9 +10,10 @@
   const isPlainTextPaste = file => file?.is_big_paste === true && typeof file.mime_type === "string"
     && file.mime_type.split(";", 1)[0].trim().toLowerCase() === "text/plain";
   // ChatGPT's native endpoint returns every branch. This is a transport safety
-  // ceiling, not the selected transcript's 1M-character / 4 MB content limit.
+  // ceiling, not the selected transcript's 4M-character / 16 MB content limit.
   const maxCaptureBytes = 32000000;
-  // Shared across unique pasted files; the final transcript has its own limits.
+  // Shared across unique pasted files; the larger transcript cap does not raise
+  // this pool or the 32 MB native download allowance.
   const maxPastedBytes = 4100000;
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = pathname => (pathname ?? location.pathname).match(/\/c\/([^/]+)\/?$/)?.[1];
