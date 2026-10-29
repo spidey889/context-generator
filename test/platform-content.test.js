@@ -3787,6 +3787,33 @@ function installRecoveryDialogDom(hooks) {
   hooks.document.createElementNS = (_namespace, tag) => create(tag);
 }
 
+clockTest("copy dialog opens without focusing Copy and keeps forward/backward Tab inside", async (t) => {
+  const hooks = loadPlatformContent([], "claude.ai");
+  installRecoveryDialogDom(hooks);
+  const create = hooks.document.createElement;
+  hooks.document.createElement = tag => {
+    const node = create(tag);
+    node.focus = () => { hooks.document.activeElement = node; };
+    return node;
+  };
+  hooks.showContextTransferFailure({ code: "paste_unconfirmed" }, {
+    stage: "paste", destinationId: "gemini", transferId: "focus-test", summary: "Complete carry"
+  });
+  t.mock.timers.tick(1);
+  const modal = hooks.document.getElementById("context-generator-fallback-modal");
+  const copy = hooks.document.getElementById("context-generator-fallback-copy");
+  const close = hooks.document.getElementById("context-generator-fallback-dismiss");
+  assert.equal(hooks.document.activeElement, modal);
+  assert.equal(modal.tabIndex, -1);
+  for (const [start, shiftKey, expected] of [[modal, false, close], [modal, true, copy], [copy, false, close], [close, true, copy]]) {
+    hooks.document.activeElement = start;
+    let prevented = false;
+    hooks.dispatchDocumentEvent("keydown", { key: "Tab", shiftKey, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(hooks.document.activeElement, expected);
+  }
+});
+
 clockTest("copy recovery reports actual clipboard or native outcomes after the transfer has finished", async () => {
   for (const [clipboardWorks, nativeWorks, checkpoint, method] of [
     [true, false, "copy_succeeded", "clipboard"],

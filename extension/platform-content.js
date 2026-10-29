@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-large-chat-master-v218";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-copy-box-focus-v221";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -10141,6 +10141,7 @@
       modal.setAttribute("aria-modal", "true");
       modal.setAttribute("aria-labelledby", "context-generator-fallback-title");
       modal.setAttribute("aria-describedby", "context-generator-fallback-desc");
+      modal.tabIndex = -1;
       modal.style.cssText = [
         "position:fixed",
         "z-index:2147483647",
@@ -10150,6 +10151,7 @@
         "justify-content:center",
         "box-sizing:border-box",
         "padding:18px",
+        "outline:none",
         draftPresent ? "background:rgba(5,5,7,0.48)" : "background:rgba(0,0,0,0.68)",
         draftPresent ? "backdrop-filter:blur(5px)" : "backdrop-filter:blur(12px)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
@@ -10423,7 +10425,10 @@
 
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
+        if (document.activeElement === modal) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        } else if (event.shiftKey && document.activeElement === first) {
           event.preventDefault();
           last.focus();
         } else if (!event.shiftKey && document.activeElement === last) {
@@ -10516,8 +10521,11 @@
       textarea.scrollTop = 0;
     }
 
+    // Announce the dialog without automatically highlighting its Copy button.
+    // Tab still enters its controls, and a replaced/closed box cannot take focus.
+    const focusOwner = modal.contextGeneratorCopyOwner;
     setTimeout(() => {
-      document.getElementById("context-generator-fallback-copy")?.focus?.({ preventScroll: true });
+      if (modal.isConnected && modal.contextGeneratorCopyOwner === focusOwner) modal.focus?.({ preventScroll: true });
     }, 0);
     // A normal successful transfer always keeps a backup box. Record opening
     // only for recovery; a later explicit copy from any box still reports.
