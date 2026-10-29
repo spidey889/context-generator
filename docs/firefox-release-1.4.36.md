@@ -32,6 +32,8 @@ To test, open a supported chat website, create a harmless short exchange, click 
 
 ## Readiness and validation
 
+Known audit limitations at integration: revoking optional diagnostics during an above-1M transfer changes the receipt identity and the final merge rejects it as `invalid_parts`, leaving full-text local recovery. Opt-out cleanup clears local storage but leaves session-backed active reports; these can be restored and sent after consent is granted again. Both were reproduced with the real receipt protocol/worker fixtures and remain unresolved in this branch. Existing consent tests use synthetic part receipts and do not establish mid-transfer receipt compatibility.
+
 - The original packaging lacked a minimum Firefox version, optional diagnostics consent and a private-window restriction. These were corrected for the owner-approved desktop 153+ scope.
 - Regular offline tests: 969 passed. Slow release checks: 3 passed.
 - Mozilla web-ext 10.8.0 lint: zero errors, warnings or notices for the generated 1.4.36 package.

@@ -15,7 +15,7 @@ const finalSummary = 'Verified final handoff: preserve the accepted implementati
   + 'Continue the latest request by testing the complete transfer before any release.\n\nNext step:\n\n'
   + 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
 
-async function scenario(failPart) {
+async function scenario(failPart, failTransport = false) {
   const fixture = fixtures("deepseek", "smoke", 1);
   const prefix = "DeepSeek conversation:\n\nUser: ", tail = "\n\nAssistant: Keep the complete conversation and test recovery.  \r\n";
   const pattern = "  Decision: preserve source text and Unicode 世界 🕷️.\r\n";
@@ -49,6 +49,8 @@ async function scenario(failPart) {
       if (url.pathname === "/api/large-summary") {
         const chunks = []; for await (const chunk of req) chunks.push(chunk);
         if (req.method === "POST") { req.body = JSON.parse(Buffer.concat(chunks)); requests.push(req.body); }
+        // Reproduce a connection ending before the backend calls any model.
+        if (failTransport) { res.destroy(); return; }
         res.status = code => { res.statusCode = code; return res; };
         res.json = body => { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(body)); return res; };
         return await largeHandler(req, res);
@@ -80,12 +82,17 @@ async function scenario(failPart) {
     const content = await fs.readFile(contentPath, "utf8");
     await fs.writeFile(contentPath, content.replace('startDestinationTransfer("claude"); return true;', 'startDestinationTransfer("chatgpt"); return true;'));
     const url = `${origin}/a/chat/s/smoke?__cap_context_smoke_platform=deepseek`;
+    // Isolated test windows can be occluded by the owner's active window.
+    // Keep native-capture timers/frames running without changing production.
     child = spawn(findBraveExecutable(), [`--user-data-dir=${profile}`, `--disable-extensions-except=${extension}`,
       `--load-extension=${extension}`, "--remote-debugging-port=0", "--remote-allow-origins=*", "--no-first-run",
-      "--no-default-browser-check", "--disable-component-update", "--disable-background-networking", "--new-window", url], { stdio: "ignore" });
+      "--no-default-browser-check", "--disable-component-update", "--disable-background-networking",
+      "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows",
+      "--new-window", url], { stdio: "ignore" });
     const port = await readDevToolsPort(profile);
     const target = await waitFor(async () => (await getTargets(port)).find(t => t.type === "page" && t.url === url), "4M source tab");
     source = await CdpSession.connect(target.webSocketDebuggerUrl); await source.call("Runtime.enable");
+    await source.call("Page.bringToFront");
     const context = await waitFor(() => source.getExtensionContextId(), "4M source extension");
     await waitFor(() => source.evaluate('typeof window.__capSmokeStartDomTransfer === "function"', context), "transfer helper");
     await source.evaluate("window.__capSmokeStartDomTransfer()", context);
@@ -101,6 +108,14 @@ async function scenario(failPart) {
       assert.equal(finals.length, 0);
       assert.equal(terminal.failure_reason, "summary_failed");
       assert.equal(terminal.diagnostics.summary_mode, "local_fallback");
+      const failure = terminal.diagnostics.summary_response_failures?.[0];
+      assert.ok(failure, "The actual source/outbox flow must retain the large-request failure.");
+      assert.equal(failure.reason, failTransport ? "fetch_failed" : "service_rejected");
+      assert.equal(terminal.diagnostics.summary_error_code, failTransport ? "summary_transport_failed" : "summary_failed");
+      if (failTransport) {
+        assert.equal(providerCalls, 0);
+        assert.equal(failure.http_status, undefined);
+      }
       const recovery = await source.evaluate(`document.getElementById('context-generator-fallback-modal')?.contextGeneratorCopyText`, context);
       assert.ok(recovery?.includes(transcript), "Copy recovery must preserve every source character, including CRLF and surrounding whitespace.");
       // Stub only this isolated world's clipboard to avoid touching the owner's
@@ -122,12 +137,13 @@ async function scenario(failPart) {
     }
     if (destination) assert.equal(await destination.evaluate("window.sendClicks"), 0);
     assert.doesNotMatch(JSON.stringify(reports), /SYNTHETIC_TOKEN|Decision: preserve source text|Verified final handoff|receipt/);
-    console.log(`PASS 4M ${failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
+    console.log(`PASS 4M ${failTransport ? "zero-provider connection failure diagnosis" : failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
   } catch (error) {
     console.error(JSON.stringify({ requestPhases: requests.map(r => r.large.phase), providerCalls,
       reports: reports.map(r => ({ status: r.status, stage: r.last_stage, reason: r.failure_reason, diagnostics: r.diagnostics })),
       source: source ? await source.evaluate(`({ error: document.getElementById('context-generator-error-text')?.textContent,
-        fallback: Boolean(document.getElementById('context-generator-fallback-modal')) })`).catch(() => null) : null }, null, 2));
+        fallback: Boolean(document.getElementById('context-generator-fallback-modal')) })`).catch(() => null) : null,
+      browserErrors: source?.events.filter(event => event.method === "Runtime.exceptionThrown") }, null, 2));
     throw error;
   } finally {
     if (source) { try { await source.call("Browser.close", {}, 5000); } catch {} }
@@ -140,5 +156,5 @@ async function scenario(failPart) {
     await fs.rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
   }
 }
-async function run() { await scenario(false); await scenario(true); }
+async function run() { await scenario(false); await scenario(true); await scenario(true, true); }
 if (require.main === module) run().catch(error => { console.error(error); process.exitCode = 1; });

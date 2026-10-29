@@ -9,6 +9,7 @@ const SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "transfer
   + fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 // Compile once; each worker still owns a fresh context, storage and lifecycle.
 const COMPILED_WORKER = new vm.Script(SOURCE, { filename: "background.js" });
+const LARGE_TRANSFER = fs.readFileSync(path.join(__dirname, "../extension/large-transfer.js"), "utf8");
 const OUTBOX = "context-generator-telemetry-outbox-v1";
 const ACTIVE = "context-generator-active-transfers-v1";
 const DIAGNOSTICS = "context-generator-telemetry-diagnostics-v1";
@@ -63,6 +64,7 @@ function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6", con
   math.random = () => 0.5;
   const sandbox = {
     TextEncoder,
+    TextDecoder,
     AbortController, URL, Date: ClockDate, Math: math, clearTimeout, setTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
     crypto: { randomUUID: () => id(uuidSequence++) },
@@ -88,6 +90,7 @@ function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6", con
     }
   };
   vm.createContext(sandbox);
+  new vm.Script(LARGE_TRANSFER).runInContext(sandbox);
   COMPILED_WORKER.runInContext(sandbox);
   const evaluate = expression => new vm.Script(expression).runInContext(sandbox);
   return {
@@ -306,6 +309,32 @@ for (const recovered of [true, false]) test(`browser response failures survive $
   assert.deepEqual(delivered.at(-1).diagnostics.summary_response_failures, records);
   assert.equal(delivered.at(-1).status, recovered ? "succeeded" : "failed");
   assert.doesNotMatch(JSON.stringify(delivered), /PRIVATE|https:|filename|stack|"headers"|"summary"/);
+});
+
+test("large fetch failure survives local recovery, stale source reports and worker restart without source acknowledgement", async () => {
+  const background = worker(url => {
+    if (url.endsWith("/api/large-summary")) throw new TypeError("PRIVATE_CONNECTION_ERROR https://PRIVATE/file.txt");
+    return rejection(503, "temporary_unavailable");
+  });
+  await background.settled(); await background.ack(event());
+  const result = await summaryWithin(background, null, "x".repeat(2004376)).request;
+  assert.equal(result.ok, false);
+  assert.equal(result.diagnostics.error_code, "summary_transport_failed");
+  await background.settled();
+  const observed = background.shared.local[OUTBOX][0].payload.diagnostics.summary_response_failures;
+  assert.equal(observed[0].reason, "fetch_failed");
+  assert.equal(observed[0].http_status, undefined);
+  // This terminal source report deliberately has none of the worker evidence.
+  await background.ack(event(1, { status: "failed", lastStage: "summary_completed", failureReason: "summary_failed",
+    reportedModel: "local-direct", diagnostics: { version: 1, summary_mode: "local_fallback" } }));
+  await background.settled();
+  const delivered = [];
+  const restarted = worker((_url, options) => { delivered.push(JSON.parse(options.body)); return success(); },
+    background.shared, background.shared.local[DIAGNOSTICS].retry.nextAttemptAt);
+  await restarted.settled();
+  assert.deepEqual(delivered.at(-1).diagnostics.summary_response_failures, observed);
+  assert.equal(delivered.at(-1).diagnostics.summary_mode, "local_fallback");
+  assert.doesNotMatch(JSON.stringify(delivered), /PRIVATE|https:|stack|headers|receipt/);
 });
 
 test("worker queues the failed response before a retry or source reply completes", async () => {

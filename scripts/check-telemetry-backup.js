@@ -27,6 +27,16 @@ async function createVerificationDatabase() {
   }
 }
 
+// JSONB object order can differ between the hosted server, JSON tooling and
+// local PostgreSQL. Compare values canonically while preserving array order.
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalJson(value[key])]));
+  }
+  return value;
+}
+
 function digest(rows, columns) {
   const canonicalRows = rows.map(row => {
     const result = {};
@@ -39,7 +49,7 @@ function digest(rows, columns) {
           throw new Error("Snapshot bigint is outside the lossless JSON number range");
         }
         result[column] = String(value);
-      } else result[column] = value;
+      } else result[column] = type === "jsonb" ? canonicalJson(value) : value;
     }
     return JSON.stringify(result);
   }).sort();

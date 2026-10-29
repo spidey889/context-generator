@@ -4,6 +4,23 @@ Decisions, important regressions and replaced approaches worth remembering. [LOG
 
 Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spidey889/context-generator/blob/9b663fdfbe98204803ec5526f91be2c01c61d62e/CHANGELOG.md) remains in Git with detailed experiments, rollout evidence and superseded iterations.
 
+## 2026-10-30
+
+- **Retain request failures on the large-chat route.** User 2's 2,004,376-character DeepSeek-to-Claude attempt captured successfully but offered complete-text local recovery after about 90 seconds with only `unknown_error` recorded. The owner observed no OpenRouter requests; the saved evidence cannot establish where that historical request stopped.
+  - The separate above-1M worker transport bypassed the ordinary transport's response diagnostics, local debug record and independent outbox checkpoint. A lost page-to-worker reply could also become a generic error.
+  - Reuse the existing closed failure contract for the first failing large HTTP request: fetch/headers, observed status, service rejection, elapsed timeout, body/stream parsing and part/final result validation. Stop sibling cancellation from overwriting the initiating cause.
+  - Persist the failure before returning it to the source so full-text recovery, sparse source reports and worker restarts retain it. Keep part/final location and the bounded Vercel request ID in local debugging only; retain no chat, summary, response excerpts, raw errors or secrets in hosted diagnostics.
+  - Distinguish a rejected worker connection from missing or invalid replies. These observations identify the failed boundary without pretending a fetch call proves arrival at Vercel or OpenRouter.
+  - New regressions failed before the fix and verify zero-provider fetch failure, HTTP rejection, timeout, incomplete stream, malformed part receipt, message replies and durable recovery. All 970 regular tests pass. Isolated Brave verifies exact-4M success, provider-failure recovery and a broken connection with zero provider calls, retaining the diagnosis through real source/worker/outbox delivery and exact manual copy.
+  - Existing transfer limits, providers, partial-summary refusal and complete-copy behavior remain unchanged. The tests use synthetic content/upstream responses and no external model or telemetry calls. Historical cause remains unknown; installed clients need the updated extension and a chat refresh.
+
+- **Show measured sizes for rejected captures.** Two DeepSeek transfers showed NULL character counts even though diagnostics recorded 2,692,448 characters; capture had rejected them before the client populated the top-level count.
+  - Add a private SQL helper and extend the existing invariant trigger to fill only a missing count for failed transcript-size rejections at capture start. Older installed clients benefit without a new extension or relay release.
+  - Use only the last JSON attempt's integer transcript length after a serialization character/byte-limit rejection. Never substitute attachment/download bytes, earlier discarded attempts or guesses; unknown sizes remain NULL.
+  - Apply migration `20261030000000` and backfill 17 historical rejected captures, including the two reported rows. Preserve existing counts, models, outcomes, diagnostics, counters, user sequence and access; a rejected capture still has no model.
+  - Verify encrypted recovery backup/restore, a rolled-back live rehearsal, exact preservation assertions and new/duplicate report probes. All 1,386 local database checks pass across 55 repository migrations, including byte-only/attachment exclusions, retry selection, malformed values, role access and terminal-outcome protection.
+  - Independently confirm the committed counts; one older raw-download rejection remains NULL because no transcript length was measured. No size limit, capture behavior, table or column changes.
+
 ## 2026-10-29
 
 - **Prepare the Firefox 1.4.36 catch-up release with real data consent.** The generated Firefox package kept the existing Gecko identity but declared only chat transmission, while shared worker code sent installation-linked usage diagnostics automatically.
@@ -12,6 +29,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
   - The owner approved desktop Firefox 153+ because the UI uses content-script constructed stylesheets, and private-window execution is disabled because Latest Run persists captured text locally. Keep Chromium's manifest, hosts and existing analytics behavior.
   - Add a folder-only submission preparation command, readable reviewer sources with exact-byte rebuild verification, release/reviewer text and owner upload instructions. The owner handles ZIP creation and Mozilla authentication; neither a branch push nor a generated folder publishes an AMO update.
   - Regular and slow release checks pass, and Mozilla's validator reports no errors or warnings. Native Firefox fixture evidence and remaining signed-update checks are recorded in [the release guide](docs/firefox-release-1.4.36.md); live signed-in AI sites and AMO distribution remain separate verification boundaries.
+
+- **Remove the redundant hosted file-size label.** Apply the previously prepared `20261013092328` migration to `cap-context-telemetry` after owner approval; the generated `file_size_failure_reason` column was still deployed despite the earlier repository change.
+  - Preserve all 109 transfers and 41 users; move the five exact failed attachment-size reports into `failure_reason = file_size_limit`. Original diagnostics and other outcomes remain intact.
+  - Verify an encrypted recovery export and local restore, then rehearse the cleanup in a rolled-back live transaction before applying it. Record the original migration SQL atomically with the schema change.
+  - Verify retained row values, counters, user sequence, permissions, other functions, triggers, indexes and cron inside the transaction; roll back synthetic new/duplicate report probes without retaining test rows.
+  - The real backup exposed a false restore mismatch caused only by nested JSONB object key order. Canonicalize those objects for hashing while preserving array order and values; exercise reordered keys in the existing restore check.
+  - An independent committed-state query confirms the column is absent, the five specific causes remain and the migration is recorded. This database-only cleanup needs no extension, Edge or Vercel release.
 
 - **Land the 4M route with matching production telemetry.** [PR #10](https://github.com/spidey889/context-generator/pull/10) merged the bounded large-chat flow, local benchmark and copy-dialog focus fix.
   - Final branch-only reviews and required CI found no confirmed code defect. The older production deployment lacked `/api/large-summary`; a new large-chat client against that deployment could enter complete-text local recovery. This does not establish the cause of any individual reported attempt.

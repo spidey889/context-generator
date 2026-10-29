@@ -1302,7 +1302,7 @@
         });
         mergeTransferDiagnostics(trace, response?.diagnostics);
         if (!response?.summary?.trim()) {
-          throw new Error("Backup summarizer returned no summary.");
+          throw Object.assign(new Error("Backup summarizer returned no summary."), { code: "summary_empty" });
         }
         summary = response.summary.trim();
         timing = response.timing || null;
@@ -3124,9 +3124,19 @@
       if (isExtensionContextInvalidated(error)) {
         throw Object.assign(new Error("Extension was reloaded. Refresh this AI tab once, then try Cap-Context again."), { code: "extension_reloaded" });
       }
+      if (message?.type === "SUMMARIZE_WITH_BACKEND") {
+        // This is the page -> worker channel, not proof of a provider/network
+        // failure. Keep it distinct when the worker cannot return diagnostics.
+        throw Object.assign(new Error("The background connection ended before the summary reply."), { code: "message_transport_failed" });
+      }
       throw error;
     }
 
+    if (message?.type === "SUMMARIZE_WITH_BACKEND" && (!response || typeof response !== "object" || typeof response.ok !== "boolean")) {
+      throw Object.assign(new Error("The background summary reply was missing or invalid."), {
+        code: response == null ? "message_reply_missing" : "message_reply_invalid"
+      });
+    }
     if (response && response.ok === false) {
       const error = new Error(response.error || "Unknown background error");
       error.code = response.code || null;
