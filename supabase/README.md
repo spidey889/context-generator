@@ -10,6 +10,15 @@ permissions, receipt trust and RPC arguments remain intact. No extension, Edge
 or Vercel rollout is needed for this database change. Old backups still restore
 their captured schema; new backups use the existing failure-reason field.
 
+Migration `20261030000000`, applied on October 30, fills missing `character_count`
+for exact transcript-size rejections, including older installed clients and
+historical records. The private `rejected_capture_character_count(jsonb)` helper
+reads only the final JSON attempt's measured transcript length after a failed
+serialization character/byte check. It never substitutes download/file bytes,
+an earlier discarded attempt or an estimate. Existing counts, models, diagnostics,
+outcomes and counters remain unchanged; unknown lengths stay NULL. No extension,
+Edge or Vercel deployment is required.
+
 Only target **cap-context-telemetry** (`iqkzynzxbmemhtiupwwu`). The first thirteen migrations preserve existing data. Migration fifteen only reorders/shortens users columns and narrows names to 40 well-known Naruto characters, preserving user numbers, installation keys, counters, sequence state and the original reset boundary. Migration fourteen is the owner's explicit one-time **users-only reset**, clearing old user/count test data and restarting numbering at 1. It preserves all transfer-event rows/columns. Never edit recorded migrations. The archived activity-view migration was never applied and must stay outside the active migration folder.
 
 ## Migration history
@@ -39,7 +48,7 @@ The current table is `public.transfers`:
 | source_platform, destination_platform | Transfer route, also bound into signed receipts |
 | status, last_stage, failure_reason | Outcome, failure location and safe reason code |
 | diagnostics | Optional versioned closed JSONB observations, precise error codes, counts/timing and capture/summary/editor/delivery conditions; legacy NULL stays unknown |
-| character_count, extension_version | Input size and first-observed client version for debugging |
+| character_count, extension_version | Measured transcript size, including known size-rejected captures, and first-observed client version for debugging |
 | model | Observed served model from a verified v3 receipt or a bounded client report; positioned immediately after character_count |
 | model_verified | Whether the model is authenticated by a model-bound server receipt; client reports remain unverified |
 | attempted_at | Client attempt time and immutable signed-receipt identity |

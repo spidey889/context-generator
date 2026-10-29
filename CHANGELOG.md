@@ -4,6 +4,15 @@ Decisions, important regressions and replaced approaches worth remembering. [LOG
 
 Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spidey889/context-generator/blob/9b663fdfbe98204803ec5526f91be2c01c61d62e/CHANGELOG.md) remains in Git with detailed experiments, rollout evidence and superseded iterations.
 
+## 2026-10-30
+
+- **Show measured sizes for rejected captures.** Two DeepSeek transfers showed NULL character counts even though diagnostics recorded 2,692,448 characters; capture had rejected them before the client populated the top-level count.
+  - Add a private SQL helper and extend the existing invariant trigger to fill only a missing count for failed transcript-size rejections at capture start. Older installed clients benefit without a new extension or relay release.
+  - Use only the last JSON attempt's integer transcript length after a serialization character/byte-limit rejection. Never substitute attachment/download bytes, earlier discarded attempts or guesses; unknown sizes remain NULL.
+  - Apply migration `20261030000000` and backfill 17 historical rejected captures, including the two reported rows. Preserve existing counts, models, outcomes, diagnostics, counters, user sequence and access; a rejected capture still has no model.
+  - Verify encrypted recovery backup/restore, a rolled-back live rehearsal, exact preservation assertions and new/duplicate report probes. All 1,386 local database checks pass across 55 repository migrations, including byte-only/attachment exclusions, retry selection, malformed values, role access and terminal-outcome protection.
+  - Independently confirm the committed counts; one older raw-download rejection remains NULL because no transcript length was measured. No size limit, capture behavior, table or column changes.
+
 ## 2026-10-29
 
 - **Remove the redundant hosted file-size label.** Apply the previously prepared `20261013092328` migration to `cap-context-telemetry` after owner approval; the generated `file_size_failure_reason` column was still deployed despite the earlier repository change.

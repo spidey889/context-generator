@@ -420,6 +420,8 @@ async function main() {
         checks += await require("./check-transfer-flow-diagnostics-db.js").checkTransferFlowDiagnostics(db, sql);
       } else if (name.endsWith("_nvidia_large_summary_model.sql")) {
         checks += await require("./check-nvidia-large-model-db.js").checkNvidiaLargeModel(db, sql);
+      } else if (name.endsWith("_rejected_capture_character_count.sql")) {
+        checks += await require("./check-rejected-capture-count-db.js").checkRejectedCaptureCount(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
