@@ -6,6 +6,14 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-30
 
+- **Retain request failures on the large-chat route.** User 2's 2,004,376-character DeepSeek-to-Claude attempt captured successfully but offered complete-text local recovery after about 90 seconds with only `unknown_error` recorded. The owner observed no OpenRouter requests; the saved evidence cannot establish where that historical request stopped.
+  - The separate above-1M worker transport bypassed the ordinary transport's response diagnostics, local debug record and independent outbox checkpoint. A lost page-to-worker reply could also become a generic error.
+  - Reuse the existing closed failure contract for the first failing large HTTP request: fetch/headers, observed status, service rejection, elapsed timeout, body/stream parsing and part/final result validation. Stop sibling cancellation from overwriting the initiating cause.
+  - Persist the failure before returning it to the source so full-text recovery, sparse source reports and worker restarts retain it. Keep part/final location and the bounded Vercel request ID in local debugging only; retain no chat, summary, response excerpts, raw errors or secrets in hosted diagnostics.
+  - Distinguish a rejected worker connection from missing or invalid replies. These observations identify the failed boundary without pretending a fetch call proves arrival at Vercel or OpenRouter.
+  - New regressions failed before the fix and verify zero-provider fetch failure, HTTP rejection, timeout, incomplete stream, malformed part receipt, message replies and durable recovery. All 970 regular tests pass. Isolated Brave verifies exact-4M success, provider-failure recovery and a broken connection with zero provider calls, retaining the diagnosis through real source/worker/outbox delivery and exact manual copy.
+  - Existing transfer limits, providers, partial-summary refusal and complete-copy behavior remain unchanged. The tests use synthetic content/upstream responses and no external model or telemetry calls. Historical cause remains unknown; installed clients need the updated extension and a chat refresh.
+
 - **Show measured sizes for rejected captures.** Two DeepSeek transfers showed NULL character counts even though diagnostics recorded 2,692,448 characters; capture had rejected them before the client populated the top-level count.
   - Add a private SQL helper and extend the existing invariant trigger to fill only a missing count for failed transcript-size rejections at capture start. Older installed clients benefit without a new extension or relay release.
   - Use only the last JSON attempt's integer transcript length after a serialization character/byte-limit rejection. Never substitute attachment/download bytes, earlier discarded attempts or guesses; unknown sizes remain NULL.

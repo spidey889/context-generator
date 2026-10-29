@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
 const large = require("../extension/large-transfer");
+const { clockTest } = require("./helpers/clock");
 const transferId = "4bad0000-0000-4000-8000-000000000001";
 
 test("large partitions cover exact Unicode/CRLF input once and stay below both JSON wire bounds", () => {
@@ -81,30 +82,34 @@ test("large cancellation, malformed part receipts and expired work never reach f
 function backgroundFixture(fetchImpl) {
   const source = fs.readFileSync(path.join(__dirname, "../extension/background.js"), "utf8");
   const code = source.slice(source.indexOf("function localPreviewAuthHeaders("), source.indexOf("// Opening a page after removal")) +
+    source.slice(source.indexOf("async function readSummaryResponse("), source.indexOf("async function summarizeWithBackend(")) +
+    source.slice(source.indexOf("async function createSummaryBackendError("), source.indexOf("function getCachedSummaryEntry(")) +
     source.slice(source.indexOf("async function summarizeLargeWithBackend("), source.indexOf("async function fetchSummaryFromBackend("));
   const active = { attemptId: transferId, status: "started", lastStage: "summary_request_started" };
   const telemetry = { attempt_id: transferId, character_count: 1000001, status: "started", last_stage: "summary_request_started" };
-  const queued = [], proofs = new Map(), progress = [];
+  const queued = [], checkpoints = [], localDebug = {}, proofs = new Map(), progress = [];
   const operation = { sourceTabId: 42, controller: new AbortController() };
-  const sandbox = { AbortController, TextEncoder, Date, URL, setTimeout, clearTimeout,
+  const sandbox = { AbortController, TextEncoder, TextDecoder, Date, URL, setTimeout, clearTimeout,
+    CapTransferDiagnostics: require("../extension/transfer-diagnostics"), console: { info() {} },
     CapLargeTransfer: large, SUMMARY_BACKEND_URL: "https://context-generator-five.vercel.app/api/summarize", SUMMARY_CLIENT_HEADER: "cap-context-extension/1",
     isUuid: value => value === transferId, nowMs: Date.now, startSummaryServiceWorkerKeepAlive: () => () => {},
     getPreparedSummaryTelemetry: () => telemetry, getOrCreateTelemetryInstallId: async () => "install",
     waitForSummaryTelemetry: work => work, enqueueTelemetryWork: work => work(), restoreActiveTransferTelemetry: async () => {}, updatePreparedSummaryTelemetry() {},
     checkTransferOperation: op => op.controller.signal.throwIfAborted(), checkTransferDeadline() {}, checkTransferSource: async () => {},
-    readSummaryResponse: response => response.json(), fetch: fetchImpl,
-    createSummaryBackendError: async () => Object.assign(new Error("unavailable"), { code: "summary_failed" }),
-    createSummaryBackendPayloadError: () => Object.assign(new Error("failed"), { code: "summary_failed" }),
+    fetch: fetchImpl, recordKnownTransferTelemetryStage() {},
+    recordTransferTelemetry: async report => checkpoints.push(report),
     // Transport tests inspect only when confirmation is offered; signature
     // verification belongs to the real endpoint/Edge receipt tests.
     sanitizeSummaryConfirmation: value => value.summary_proof ? value : null,
     activeTransferTelemetry: new Map([[transferId, active]]), summaryProofs: proofs,
     mergeTransferTelemetryEvents: (_previous, next) => next,
     queueActiveTransferTelemetry: async payload => queued.push(payload), initializeTelemetryDelivery() {},
-    chrome: { tabs: { sendMessage: async (tabId, message) => progress.push({ tabId, message }) } }
+    chrome: { storage: { local: { set: async value => Object.assign(localDebug, value) } },
+      tabs: { sendMessage: async (tabId, message) => progress.push({ tabId, message }) } }
   };
   vm.createContext(sandbox); new vm.Script(code).runInContext(sandbox);
-  return { run: () => sandbox.summarizeLargeWithBackend("x".repeat(1000001), transferId, null, operation), queued, proofs, progress };
+  return { run: () => sandbox.summarizeLargeWithBackend("x".repeat(1000001), transferId, null, operation),
+    queued, checkpoints, localDebug, proofs, progress, sandbox };
 }
 
 test("background uses only the separate endpoint and persists only a complete final receipt", async () => {
@@ -141,4 +146,85 @@ test("background cannot count completed parts after final summary failure", asyn
   await assert.rejects(state.run(), error => error.code === "summary_failed");
   assert.equal(state.queued.length, 0);
   assert.equal(state.proofs.size, 0);
+});
+
+test("large fetch failures retain safe dispatch evidence before local recovery and sibling cancellation", async () => {
+  const state = backgroundFixture(async () => { throw new TypeError("PRIVATE_FETCH_ERROR https://PRIVATE/file.txt"); });
+  await assert.rejects(state.run(), error => {
+    assert.equal(error.diagnostics?.error_code, "summary_transport_failed");
+    const record = error.diagnostics.summary_response_failures[0];
+    assert.equal(record.phase, "request");
+    assert.equal(record.reason, "fetch_failed");
+    assert.equal(record.error_type, "TypeError");
+    assert.equal(record.http_status, undefined);
+    assert.equal(record.aborted, false);
+    return true;
+  });
+  assert.equal(state.checkpoints.length, 1, "Sibling cancellation cannot replace the initiating failure.");
+  assert.equal(state.checkpoints[0].diagnostics.summary_response_failures.length, 1);
+  assert.doesNotMatch(JSON.stringify(state.checkpoints), /PRIVATE|https:|stack|headers|receipt/);
+  const debug = state.localDebug["context-generator-summary-response-debug-v1"];
+  assert.equal(debug.large_phase, "part");
+  assert.equal(debug.part_index, 0);
+});
+
+test("large HTTP rejection and incomplete streams retain their actual failure boundary", async () => {
+  for (const [response, code, reason, phase] of [
+    [new Response(JSON.stringify({ code: "client_not_allowed", error: "PRIVATE_RESPONSE" }), { status: 403 }),
+      "client_not_allowed", "http_rejected", "response_headers"],
+    [new Response('{"type":"reset"}\n', { headers: { "content-type": "application/x-ndjson" } }),
+      "summary_invalid_response", "stream_completion_invalid", "stream_completion_validation"]
+  ]) {
+    const state = backgroundFixture(async () => response.clone());
+    await assert.rejects(state.run(), error => {
+      assert.equal(error.diagnostics?.error_code, code);
+      assert.equal(error.diagnostics.failure_site, "summary_response");
+      const record = error.diagnostics.summary_response_failures[0];
+      assert.equal(record.http_status, response.status);
+      assert.equal(record.reason, reason); assert.equal(record.phase, phase);
+      if (response.status === 200) { assert.ok(record.bytes_received > 0); assert.equal(record.eof, true); }
+      return true;
+    });
+    assert.equal(state.checkpoints.length, 1);
+    assert.doesNotMatch(JSON.stringify(state.checkpoints), /PRIVATE|https:|stack|receipt/);
+  }
+});
+
+clockTest("large requests record an elapsed timeout before response headers", { tickMs: 1000, maxElapsedMs: 90000 }, async () => {
+  const state = backgroundFixture((_url, { signal }) => new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  }));
+  await assert.rejects(state.run(), error => {
+    assert.equal(error.diagnostics?.error_code, "summary_timeout");
+    const record = error.diagnostics.summary_response_failures[0];
+    assert.equal(record.phase, "request"); assert.equal(record.reason, "aborted");
+    assert.equal(record.aborted, true); assert.equal(record.deadline_elapsed, true);
+    assert.ok(record.elapsed_ms >= 85000);
+    return true;
+  });
+});
+
+test("missing large part receipts retain response validation evidence", async () => {
+  const state = backgroundFixture(async () => new Response(JSON.stringify({ summary: "PRIVATE_PART", receipt: "" })));
+  await assert.rejects(state.run(), error => {
+    assert.equal(error.diagnostics?.error_code, "summary_invalid_response");
+    assert.equal(error.diagnostics.summary_response_failures[0].phase, "summary_validation");
+    return true;
+  });
+});
+
+test("a lost or missing worker summary reply has a distinct message diagnosis", async () => {
+  const source = fs.readFileSync(path.join(__dirname, "../extension/platform-content.js"), "utf8");
+  const code = source.slice(source.indexOf("  async function notifyBackground("), source.indexOf("  function getRuntimeAssetBaseUrl("));
+  for (const [sendMessage, expected] of [
+    [async () => { throw new Error("PRIVATE_PORT_ERROR"); }, "message_transport_failed"],
+    [async () => undefined, "message_reply_missing"],
+    [async () => ({ arbitrary: true }), "message_reply_invalid"]
+  ]) {
+    const sandbox = { extensionRuntime: { sendMessage }, isExtensionContextInvalidated: () => false };
+    vm.createContext(sandbox); new vm.Script(code).runInContext(sandbox);
+    await assert.rejects(sandbox.notifyBackground({ type: "SUMMARIZE_WITH_BACKEND" }), error => {
+      assert.equal(error.code, expected); assert.doesNotMatch(error.message, /PRIVATE/); return true;
+    });
+  }
 });

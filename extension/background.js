@@ -1655,6 +1655,7 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
     throw Object.assign(new Error("Large-chat summarization is unavailable."), { code: "summary_failed" });
   const started = nowMs(), stopKeepAlive = startSummaryServiceWorkerKeepAlive();
   const signal = operation?.controller.signal;
+  let failureRecorded = false;
   let fetchMs = 0, parseMs = 0, requestCount = 0;
   try {
     const telemetry = getPreparedSummaryTelemetry(transferId) || await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
@@ -1675,9 +1676,12 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
           ...progress }).catch(() => {}); } catch {}
       },
       async post(payload, { signal: requestSignal, deadlineAt: requestDeadline }) {
-        checkTransferOperation(operation);
-        await checkTransferSource(operation);
         const controller = new AbortController();
+        const requestStarted = nowMs();
+        const diagnostics = { version: 1, last_operation: "summary_request" };
+        const debug = { attempt_id: transferId, started_at: new Date().toISOString(), phase: "request",
+          large_phase: payload.large.phase, part_index: payload.large.index, part_count: payload.large.total };
+        let requestSent = false, responseReceived = false;
         const onAbort = () => controller.abort(requestSignal.reason);
         requestSignal.addEventListener("abort", onAbort, { once: true });
         if (requestSignal.aborted) onAbort();
@@ -1690,28 +1694,73 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
           controller.signal.throwIfAborted();
         };
         try {
+          checkTransferOperation(operation);
+          await checkTransferSource(operation);
           check();
           const body = JSON.stringify({ ...payload, ...(telemetry ? { telemetry } : {}) });
           if (new TextEncoder().encode(body).length > 3000000)
             throw Object.assign(new Error("Large-chat part exceeds the request bound."), { code: "request_too_large" });
           const fetchedAt = nowMs();
           requestCount++;
+          requestSent = true;
           const response = await fetch(SUMMARY_BACKEND_URL.replace(/\/summarize$/, "/large-summary"), {
             method: "POST", credentials: "omit", redirect: "error", signal: controller.signal,
             headers: { ...localPreviewAuthHeaders(SUMMARY_BACKEND_URL.replace(/\/summarize$/, "/large-summary")), "Content-Type": "application/json", "Accept": "application/x-ndjson",
               "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER }, body
           });
+          responseReceived = true;
+          Object.assign(debug, { phase: "response_headers", http_status: response.status,
+            headers_ms: Math.round(nowMs() - requestStarted) });
+          const vercelId = response.headers?.get("x-vercel-id");
+          if (typeof vercelId === "string" && /^[a-zA-Z0-9:;._=-]{1,160}$/.test(vercelId)) debug.vercel_request_id = vercelId;
+          globalThis.CapTransferDiagnostics?.update(diagnostics, { summary_http_status: response.status,
+            summary_fetch_ms: Math.round(nowMs() - fetchedAt), last_operation: "summary_response" });
           fetchMs += nowMs() - fetchedAt;
           check();
+          recordKnownTransferTelemetryStage(transferId, "summary_response_started");
           if (!response.ok) throw await createSummaryBackendError(response);
           const parsedAt = nowMs();
-          const data = await readSummaryResponse(response, check);
+          const data = await readSummaryResponse(response, check, () => {}, debug);
           parseMs += nowMs() - parsedAt;
           check();
+          debug.phase = "summary_validation";
           if (data?.ok === false || data?.code && !data?.summary?.trim())
             throw createSummaryBackendPayloadError(data, data.status || response.status);
+          // Validate here as well as in the orchestrator so a malformed part
+          // retains the HTTP/body evidence before sibling requests are stopped.
+          if (typeof data?.summary !== "string" || !data.summary.trim() || data.summary.length > 60000
+              || (payload.large.phase === "part" && (typeof data.receipt !== "string" || !data.receipt || data.receipt.length > 4000)))
+            throw Object.assign(new Error("Invalid large summary result."), { code: "summary_invalid_response" });
           await checkTransferSource(operation);
           return data;
+        } catch (error) {
+          // The initiating request owns the diagnosis. Aborted sibling requests
+          // must not overwrite it with a secondary cancellation or shared Error.
+          if (failureRecorded) throw error;
+          failureRecorded = true;
+          Object.assign(debug, { elapsed_ms: Math.round(nowMs() - requestStarted),
+            deadline_remaining_ms: Math.max(0, expiresAt - Date.now()), aborted: controller.signal.aborted });
+          const fallback = controller.signal.aborted ? "summary_timeout" : error.summaryServiceFailure ? "summary_failed"
+            : responseReceived ? "summary_invalid_response" : "summary_transport_failed";
+          globalThis.CapTransferDiagnostics?.update(diagnostics, {
+            ...globalThis.CapTransferDiagnostics?.errorDetails(error, responseReceived ? "summary_response" : "summary_request"),
+            error_code: globalThis.CapTransferDiagnostics?.errorCode(error, fallback),
+            error_origin: responseReceived && (debug.http_status >= 400 || error.summaryServiceFailure) ? "summary_service" : "background",
+            summary_ms: debug.elapsed_ms });
+          if (requestSent) {
+            // Reuse the deployed closed schema. Large transfers stop on the
+            // first failed HTTP request; there is no retry or partial success.
+            try { logSummaryResponseFailure(debug, error); } catch {}
+            try {
+              const record = makeSummaryResponseFailure(debug, error, 1, requestSignal, expiresAt, deadlineAt);
+              if (record) {
+                diagnostics.summary_response_failures = [record];
+                recordKnownSummaryResponseFailures(transferId, [record]);
+              }
+            } catch {}
+          }
+          error.diagnostics = globalThis.CapTransferDiagnostics?.validate(diagnostics) || null;
+          throw error;
         } finally {
           clearTimeout(timer);
           requestSignal.removeEventListener("abort", onAbort);
@@ -1743,6 +1792,10 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
       summaryMs: Math.round(nowMs() - started), fetchMs: Math.round(fetchMs), parseMs: Math.round(parseMs),
       chars: result.summary.length, requestChars: conversation.length, backendInputChars: conversation.length,
       backend: { ...result.timing, largeChat: { parts: result.partCount, requests: requestCount } } } };
+  } catch (error) {
+    // Preparation/splitting can fail before any HTTP request exists.
+    error.diagnostics ||= getBackgroundFailureDiagnostics(error, "summary_request");
+    throw error;
   } finally { stopKeepAlive(); }
 }
 
