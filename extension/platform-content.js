@@ -8679,6 +8679,7 @@
       statusText.setAttribute("aria-atomic", "true");
       statusText.style.cssText = [
         "position:relative",
+        "top:8px",
         "z-index:1",
         "display:flex",
         "min-height:42px",
