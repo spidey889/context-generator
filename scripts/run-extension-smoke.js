@@ -938,7 +938,7 @@ async function startFixtureServer() {
       }
       if (EARLY_HANDOFF_SMOKE && !EARLY_HANDOFF_STREAM_SMOKE) {
         state.summaryPending = true;
-        await new Promise(resolve => setTimeout(resolve, 21000));
+        await new Promise(resolve => setTimeout(resolve, 31000));
         state.summaryPending = false;
       }
       const summaryTelemetry = state.summaryRequests.at(-1)?.telemetry;

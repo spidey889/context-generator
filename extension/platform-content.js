@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-destination-backup-quick-exit-v234";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-summary-countdown-30-120-v235";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -9599,10 +9599,9 @@
   }
 
   function getHandoffSummaryLineDuration(inputChars) {
-    // Sep 30 real runs: ~19k-70k chars took 13-20s; ~109k took 63s.
     // This is a display estimate, never a request deadline or measured percentage.
-    const sizeRatio = Math.max(0, Math.min(1, (Number(inputChars || 0) - 60000) / 50000));
-    return Math.round(20000 + sizeRatio * 45000);
+    const sizeRatio = Math.max(0, Math.min(1, (Number(inputChars || 0) - 60000) / 440000));
+    return Math.round(30000 + sizeRatio * 90000);
   }
 
   function startHandoffActivityProgress(stageId, inputChars = 0) {
