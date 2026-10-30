@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-destination-backup-label-v232";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-destination-backup-timing-v233";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -10136,7 +10136,7 @@
               ], { duration: 200, easing: "cubic-bezier(0.16,1,0.3,1)" });
             }
             clearTimeout(errorDiv.contextGeneratorHideTimer);
-            const copiedDurationMs = copiedContext.signInRequired || copiedContext.pasteBackup ? 2500 : noticeDurationMs;
+            const copiedDurationMs = copiedContext.pasteBackup ? 1500 : copiedContext.signInRequired ? 2500 : noticeDurationMs;
             errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), copiedDurationMs);
           } catch {
             if (!ownsNotice()) return;
