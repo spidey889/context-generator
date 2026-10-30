@@ -141,6 +141,7 @@ function loadBackgroundForTransferTest({
   updateError = false,
   tabUpdateImpl,
   windowUpdateImpl,
+  tabGetImpl,
   sendMessageImpl,
   createTabImpl,
   badgeImpl,
@@ -219,6 +220,8 @@ function loadBackgroundForTransferTest({
         remove: async tabId => { operations.cancellationOrder.push("remove"); operations.removed.push(tabId); closedTabs.add(tabId); },
         get: async (tabId) => {
           operations.gotten.push(tabId);
+          const override = tabGetImpl?.(tabId);
+          if (override !== undefined) return override;
           if (closedTabs.has(tabId)) throw new Error(`No tab with id: ${tabId}`);
           if (sourceTab?.id === tabId) return sourceTab;
           if (preparedTab?.id === tabId) return preparedTab;
@@ -839,6 +842,26 @@ test("Escape cancels an active summary body and rejects late work for that attem
   assert.equal(signal.aborted, true);
   assert.equal((await sendSummary("cancel pending summary", null, 9)).code, "user_cancelled");
   assert.equal(fetches, 1, "A late request cannot restart generation.");
+});
+
+test("focused verified delivery does not depend on another source-tab API read", async () => {
+  let acknowledged = false, sourceReadsAtAck;
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab,
+    preparedTab: { id: 41, url: "https://grok.com/", status: "complete" },
+    tabGetImpl: tabId => {
+      if (tabId === 9 && acknowledged) throw new Error("A redundant source API read would block completion");
+    },
+    sendMessageImpl: (_tabId, message) => {
+      if (message.type === "PASTE_CONTEXT") {
+        sourceReadsAtAck = harness.operations.gotten.filter(id => id === 9).length;
+        acknowledged = true;
+      }
+      return { ok: true };
+    }
+  });
+  assert.equal((await harness.sendTransfer("grok", 41, false, null, sourceTab)).ok, true);
+  assert.equal(harness.operations.gotten.filter(id => id === 9).length, sourceReadsAtAck);
 });
 
 test("manual takeover waits for destination cancellation, keeps its tab and blocks late delivery", async () => {

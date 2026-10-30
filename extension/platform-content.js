@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-29-copy-box-focus-v221";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-paste-confirmation-v222";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -208,6 +208,9 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const CHATGPT_PASTE_VERIFY_TIMEOUT_MS = 1500;
   const PASTE_STABILITY_MS = 550;
+  // Leave room for a slow browser wake-up; never wait for an unbounded reply.
+  const PASTE_SOURCE_CHECK_TIMEOUT_MS = 6000;
+  const PASTE_VERIFICATION_WORK_LIMIT = 250000;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
   const HANDOFF_REASSURANCE_TEXT = "Taking a little longer—still working.";
@@ -531,6 +534,7 @@
   // to the inner user node, then rejoin it to whichever containing turn wins.
   const capturedPastedContent = [];
   let retainedPlatformInput = null;
+  let editorVerificationCache = null;
   let pendingPasteRecheck = null;
   let transientComposerPlacement = null;
   let transientComposerPlacementGraceTimer = null;
@@ -676,6 +680,7 @@
     if (!instanceActive) return;
     if (!preserveSharedUi) stopSourceDestinationProgress(activeTransferTrace);
     stopDomCaptureSizeCheck(activeTransferTrace);
+    editorVerificationCache = null;
     instanceActive = false;
     clearPickerJsonCapture();
     sourceReplySnapshot = null;
@@ -3237,7 +3242,6 @@
       const timing = await pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, startedAt, reportCheckpoint);
       globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt, last_operation: "paste_complete" });
       globalThis.CapTransferDiagnostics?.event(diagnostics, "paste_complete", Date.now() - startedAt, "paste_events");
-      if (diagnostics.paste_populated === true) reportCheckpoint("verified");
       return { ...timing, diagnostics: globalThis.CapTransferDiagnostics?.snapshot(diagnostics) || null };
     } catch (error) {
       globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt });
@@ -3293,10 +3297,10 @@
         throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
       }
       const timing = await pasteWithRetry(trimmedText, destination, transferId, deadlineAt, guard);
-      checkTransferDeadline({ deadlineAt });
       // A verified insert followed by the user's Send/edit is already delivered.
-      // Reporting failure here would make the worker paste again in a fresh tab.
-      if (!guard.userHandled) await guard.checkActive();
+      // No worker round trip may hold a verified paste open or reinterpret Send
+      // navigation as a different destination. Check ownership locally instead.
+      if (!guard.userHandled) guard.check();
       if (!guard.userHandled && destination.id !== "chatgpt") {
         schedulePostActivationPasteRecheck(trimmedText, destination, deadlineAt, guard);
         retainedGuard = true;
@@ -3315,6 +3319,7 @@
     let writing = false;
     let userHandled = false;
     let cancelled = false;
+    let rejectActiveCheck = null;
     const eventTypes = ["beforeinput", "input", "keydown", "click", "submit"];
     const onUserAction = (event) => {
       if (!event.isTrusted || writing || userHandled) return;
@@ -3355,12 +3360,29 @@
       async checkActive() {
         this.check();
         if (Number.isInteger(sourceTabId)) {
-          await notifyBackground({ type: "CHECK_TRANSFER_ACTIVE", transferId, sourceTabId });
-          this.check();
+          let timer;
+          try {
+            await Promise.race([
+              notifyBackground({ type: "CHECK_TRANSFER_ACTIVE", transferId, sourceTabId }),
+              new Promise((_, reject) => {
+                rejectActiveCheck = reject;
+                timer = setTimeout(() => {
+                  try { checkTransferDeadline({ deadlineAt }); }
+                  catch (error) { reject(error); return; }
+                  reject(createDiagnosticError("Could not confirm the source tab before pasting.", "message_timeout"));
+                }, Math.max(0, Math.min(PASTE_SOURCE_CHECK_TIMEOUT_MS, (deadlineAt || Infinity) - Date.now())));
+              })
+            ]);
+            if (!userHandled) this.check();
+          } finally {
+            clearTimeout(timer);
+            rejectActiveCheck = null;
+          }
         }
       },
       cancel() {
         cancelled = true;
+        rejectActiveCheck?.(createTransferCancelledError());
         if (pendingPasteRecheck?.guard === guard) cancelPendingPasteRecheck();
       },
       observe(input) {
@@ -3379,6 +3401,8 @@
       },
       dispose() {
         cancelled = true;
+        rejectActiveCheck?.(createTransferCancelledError());
+        if (editorVerificationCache?.text === text) editorVerificationCache = null;
         if (activePasteGuards.get(transferId) === guard) activePasteGuards.delete(transferId);
         eventTypes.forEach(type => removeOwnedEventListener(document, type, onUserAction, true));
         routeGuard.dispose();
@@ -3409,6 +3433,9 @@
       const navigationTiming = window.performance?.getEntriesByType?.("navigation")?.[0];
       const pageLoadMs = navigationTiming?.domContentLoadedEventEnd > 0 ? Math.round(navigationTiming.domContentLoadedEventEnd) : null;
       observe({ composer_wait_ms: composerWaitMs, page_load_ms: pageLoadMs, user_handled: Boolean(guard?.userHandled) });
+      // User actions are recognised only after this carry was seen in the editor.
+      if (guard?.userHandled) observe({ paste_populated: true });
+      guard?.reportCheckpoint?.("verified");
       return { composerWaitMs, pageLoadMs };
     };
 
@@ -3417,6 +3444,7 @@
       checkTransferDeadline({ deadlineAt });
       if (guard?.userHandled) return getTiming();
       await guard?.checkActive();
+      if (guard?.userHandled) return getTiming();
       guard?.check();
       const destinationMessageCount = getDetectedConversationMessageCount();
       if (destination.id === "claude" || destination.id === "gemini") observe({ destination_message_count: destinationMessageCount });
@@ -3449,20 +3477,17 @@
           observe({ last_operation: "paste_verify" }, "paste_verify");
           observe({ editor_connected: input.isConnected, editor_text_chars: getElementText(input).length });
           guard?.reportCheckpoint?.("inserted");
-          const populated = await waitForEditorText(input, text, verifyTimeoutMs);
+          const populated = await waitForEditorText(input, text, verifyTimeoutMs, guard);
           observe({ paste_populated: populated, editor_connected: input.isConnected, editor_text_chars: getElementText(input).length });
-          checkTransferDeadline({ deadlineAt });
           if (guard.userHandled) return getTiming();
-          await guard.checkActive();
+          guard.check();
           if (populated) {
             guard.observe(input);
             guard?.check();
             if (stabilityMs > 0) {
               observe({ last_operation: "paste_stability" }, "paste_stability");
               await delay(stabilityMs);
-              checkTransferDeadline({ deadlineAt });
               if (guard.userHandled) return getTiming();
-              await guard.checkActive();
               guard?.check();
               if (!input.isConnected || !editorContainsText(input, text)) {
                 observe({ paste_stable: false, editor_connected: input.isConnected,
@@ -3852,11 +3877,12 @@
     element.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function waitForEditorText(element, text, timeoutMs) {
+  function waitForEditorText(element, text, timeoutMs, guard = null) {
     const startedAt = Date.now();
 
     return new Promise((resolve) => {
       const tick = () => {
+        if (guard?.userHandled) { resolve(true); return; }
         if (!element.isConnected) {
           resolve(false);
           return;
@@ -3879,38 +3905,59 @@
   }
 
   function editorContainsText(element, text) {
-    const expected = normalizeVerificationText(text).split(" ").filter(Boolean);
-    const actual = normalizeVerificationText(getElementText(element)).split(" ").filter(Boolean);
+    // One carry and one observed value only; never an unbounded conversation cache.
+    // Disposal/teardown releases it. Unchanged polls need no repeated tokenisation.
+    if (!editorVerificationCache || editorVerificationCache.text !== text) {
+      const normalized = normalizeVerificationText(text);
+      editorVerificationCache = { text, normalized, words: normalized.split(" ").filter(Boolean), actualText: null, result: false };
+    }
+    const cache = editorVerificationCache;
+    const actualText = getElementText(element);
+    if (cache.actualText === actualText) return cache.result;
+    const remember = result => { cache.actualText = actualText; cache.result = result; return result; };
+    const expected = cache.words;
     if (!expected.length) return false;
+    if (actualText === text) return remember(true);
+    const normalized = normalizeVerificationText(actualText);
+    if (normalized === cache.normalized) return remember(true);
+    const actual = normalized.split(" ").filter(Boolean);
     const required = Math.ceil(expected.length * 95 / 100);
-    if (actual.length < required) return false;
+    if (actual.length < required) return remember(false);
 
     // Ordinary pastes, including added list markers, pass in one linear scan.
     let matched = 0;
     for (const word of actual) {
       if (word === expected[matched]) matched++;
-      if (matched >= required) return true;
+      if (matched >= required) return remember(true);
     }
 
     // Bounded Myers insertion/deletion distance finds the longest ordered word
     // match, even when a missing word occurs again later. A greedy skip would
     // reject good pastes with repeated words. Distance = N + M - 2 * matches.
     const limit = expected.length + actual.length - 2 * required;
+    // Damaged large text must not monopolise the UI thread. Unresolved matches
+    // stay unconfirmed, never successful. Count inner word comparisons as work too.
+    if (limit > PASTE_VERIFICATION_WORK_LIMIT) return remember(false);
+    let work = 0;
     const offset = limit + 1;
     const frontier = new Int32Array(2 * limit + 3).fill(-1);
     frontier[offset + 1] = 0;
     for (let distance = 0; distance <= limit; distance++) {
       for (let diagonal = -distance; diagonal <= distance; diagonal += 2) {
+        if (++work > PASTE_VERIFICATION_WORK_LIMIT) return remember(false);
         const index = offset + diagonal;
         let x = diagonal === -distance || (diagonal !== distance && frontier[index - 1] < frontier[index + 1])
           ? frontier[index + 1] : frontier[index - 1] + 1;
         let y = x - diagonal;
-        while (x < expected.length && y < actual.length && expected[x] === actual[y]) { x++; y++; }
+        while (x < expected.length && y < actual.length && expected[x] === actual[y]) {
+          if (++work > PASTE_VERIFICATION_WORK_LIMIT) return remember(false);
+          x++; y++;
+        }
         frontier[index] = x;
-        if (x >= expected.length && y >= actual.length) return true;
+        if (x >= expected.length && y >= actual.length) return remember(true);
       }
     }
-    return false;
+    return remember(false);
   }
 
   function normalizeVerificationText(text) {

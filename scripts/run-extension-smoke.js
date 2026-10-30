@@ -323,7 +323,7 @@ async function createSmokeExtension(tempRoot, origin) {
   window.__capSmokeHandoffStylesReady = () => handoffUserCssRequest;
   window.__capSmokeRebuildHandoff = () => { cleanupContextGeneratorNodes(); ensureFloatingOverlay(); };
   window.__capSmokeShowDraftRecovery = (destinationCopy = false) => showFallbackModal(createLocalContextCarry("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.").summary, "ChatGPT", false, false, true, { destinationCopy });
-  window.__capSmokePaste = (text, deadlineAt) => pasteIntoPlatform(text, currentPlatform.id, "smoke-paste-recovery", deadlineAt);
+  window.__capSmokePaste = (text, deadlineAt, sourceTabId = null) => pasteIntoPlatform(text, currentPlatform.id, "smoke-paste-recovery", deadlineAt, sourceTabId);
   window.__capSmokePasteState = () => ({ pending: Boolean(pendingPasteRecheck), userHandled: pendingPasteRecheck?.guard?.userHandled,
     active: instanceActive, visibility: document.visibilityState, turns: getDetectedConversationMessageCount(), ready: Boolean(findReadyPlatformInput()) });
   window.__capSmokeSourceRouteReady = () => {
@@ -2160,7 +2160,7 @@ async function verifyChatGptLongPaste(session) {
 
 async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
   const carry = "Synthetic carry: preserve every character.\nSecond line.";
-  for (const scenario of ["expired-focus", "disabled", "detached", "focus-remount", "draft"]) {
+  for (const scenario of ["send-during-confirmation", "expired-focus", "disabled", "detached", "focus-remount", "draft"]) {
     const { targetId } = await browserSession.call("Target.createTarget", {
       url: `${origin}/destination?${SMOKE_PLATFORM_QUERY}=claude`
     });
@@ -2174,7 +2174,49 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
       const contextId = session.getExtensionContextId();
       await browserSession.call("Target.activateTarget", { targetId });
       await waitFor(() => session.evaluate("document.visibilityState === 'visible'"), "visible paste-recovery destination");
-      if (scenario === "expired-focus") {
+      if (scenario === "send-during-confirmation") {
+        // Reproduce a stalled post-insert ownership reply without contacting a
+        // real source. Native Enter must send our verified carry without a retry.
+        await session.evaluate(`(() => {
+          const editor = document.querySelector('textarea'), form = editor.closest('form');
+          window.__sourceChecks = 0;
+          form.addEventListener('submit', event => {
+            event.preventDefault(); window.__sentCarry = editor.value;
+            editor.value = ''; history.pushState({}, '', '/chat/sent');
+          });
+          editor.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            window.__trustedSend = event.isTrusted; event.preventDefault(); form.requestSubmit();
+          });
+        })()`);
+        await session.evaluate(`(() => {
+          const nativeSend = chrome.runtime.sendMessage;
+          window.__sourceChecks = 0;
+          chrome.runtime.sendMessage = function(message, ...args) {
+            if (message?.type === 'CHECK_TRANSFER_ACTIVE') {
+              if (++window.__sourceChecks > 1) return new Promise(() => {});
+              return Promise.resolve({ok:true});
+            }
+            return Reflect.apply(nativeSend, this, [message, ...args]);
+          };
+          window.__confirmationResult = null;
+          window.__capSmokePaste(${JSON.stringify(carry)}, Date.now()+10000, 9).then(
+            result => window.__confirmationResult = {ok:true, populated:result.diagnostics.paste_populated},
+            error => window.__confirmationResult = {ok:false, code:error.code||error.diagnosticCode});
+          return true;
+        })()`, contextId);
+        await waitFor(() => session.evaluate(`document.querySelector('textarea').value === ${JSON.stringify(carry)}`), "verified carry before native Send");
+        await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        await session.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        await waitFor(() => session.evaluate("window.__confirmationResult", contextId), "confirmation after native Send");
+        assert.deepEqual(await session.evaluate("window.__confirmationResult", contextId), {ok:true, populated:true});
+        assert.equal(await session.evaluate("window.__sourceChecks", contextId), 1);
+        assert.equal(await session.evaluate("window.__trustedSend"), true);
+        assert.equal(await session.evaluate("window.__sentCarry"), carry);
+        await session.evaluate("new Promise(resolve => setTimeout(resolve, 700))");
+        assert.equal(await session.evaluate("document.querySelector('textarea').value"), "", "sent context must not be pasted again");
+        assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), false);
+      } else if (scenario === "expired-focus") {
         await session.evaluate(`document.querySelector('textarea').addEventListener('focus', () => {
           const until = Date.now() + 200; while (Date.now() < until) {}
         }, { once: true }); true`);
@@ -2218,7 +2260,8 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
         assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), scenario === "draft");
       }
       assert.equal(await session.evaluate("window.__capContextSmokeSendClicks"), 0);
-      process.stdout.write(`✓ Installed Brave paste recovery: ${scenario}, exact text/draft protection and no Send.\n`);
+      process.stdout.write(`✓ Installed Brave paste recovery: ${scenario}, ${scenario === "send-during-confirmation"
+        ? "trusted Send preserved verified delivery without reinsertion" : "exact text/draft protection and no automatic Send"}.\n`);
     } finally {
       session?.close();
       await browserSession.call("Target.closeTarget", { targetId });

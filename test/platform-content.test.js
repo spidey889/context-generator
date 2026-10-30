@@ -2364,6 +2364,83 @@ test("paste verification requires 95 percent of words in order, including repeat
   assert.equal(hooks.editorContainsText(new FakeElement({ text: "Unrelated input" }), expected), false);
 });
 
+test("large damaged paste verification finishes without blocking and never confirms unrelated text", async () => {
+  const { Worker } = require("node:worker_threads");
+  const start = PLATFORM_CONTENT_SOURCE.indexOf("  function editorContainsText(");
+  const end = PLATFORM_CONTENT_SOURCE.indexOf("  function getCleanVisibleText(", start);
+  const workLimit = PLATFORM_CONTENT_SOURCE.match(/const PASTE_VERIFICATION_WORK_LIMIT = (\d+);/)[1];
+  const worker = new Worker(`
+    const {parentPort, workerData} = require('node:worker_threads');
+    const check = new Function('getElementText', 'let editorVerificationCache = null; const PASTE_VERIFICATION_WORK_LIMIT = '+workerData.limit+';'+workerData.code+';return editorContainsText;')(e=>e.value);
+    const words = Array.from({length:370000},(_,i)=>'term'+i);
+    const expected = words.join(' '), damaged = words.map((w,i)=>i%16===0?'changed'+i:w).join(' ');
+    const first = check({value:damaged}, expected), unchanged = check({value:damaged}, expected);
+    parentPort.postMessage({first, unchanged, exact:check({value:expected},expected), unrelated:check({value:'A file was attached'},expected)});
+  `, { eval: true, workerData: { code: PLATFORM_CONTENT_SOURCE.slice(start, end), limit: workLimit } });
+  let timer;
+  try {
+    const result = await Promise.race([
+      new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Verification blocked for five seconds")), 5000); })
+    ]);
+    assert.deepEqual(result, { first: false, unchanged: false, exact: true, unrelated: false });
+  } finally { clearTimeout(timer); await worker.terminate(); }
+});
+
+clockTest("verified delivery does not await post-paste worker checks when Send changes the route", async () => {
+  for (const [host, platform] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
+    const editor = new FakeElement({ tag: "textarea" });
+    const carry = "Context carry: preserve this exact deployment plan.";
+    const checkpoints = [];
+    let checks = 0, sent = false;
+    const hooks = loadPlatformContent([editor], host, { runtimeSendMessage: message => {
+      if (message.type === "CHECK_TRANSFER_ACTIVE" && ++checks > 1) return new Promise(() => {});
+      if (message.type === "RECORD_PASTE_CHECKPOINT") {
+        checkpoints.push(message);
+        if (message.checkpoint === "inserted") setTimeout(() => {
+          assert.equal(editor.value, carry);
+          hooks.dispatchDocumentEvent("keydown", { target: editor, key: "Enter", isTrusted: true });
+          editor.value = "";
+          hooks.navigate("/c/sent");
+          sent = true;
+        }, 10);
+      }
+      return Promise.resolve({ ok: true });
+    } });
+    const result = await hooks.pasteIntoPlatform(carry, platform, `send-${platform}`, Date.now() + 10000, 9);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(sent, true, platform);
+    assert.equal(checks, 1, "only the pre-write source check gates delivery");
+    assert.equal(result.diagnostics.paste_populated, true, platform);
+    assert.equal(checkpoints.at(-1).checkpoint, "verified", platform);
+    assert.equal(editor.value, "", "Send must not cause reinsertion");
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
+clockTest("stalled pre-write source checks expire or cancel without late writes or false Send success", async () => {
+  for (const scenario of ["deadline", "timeout", "cancel"]) {
+    const editor = new FakeElement({ tag: "textarea" });
+    let release;
+    const hooks = loadPlatformContent([editor], "grok.com", { runtimeSendMessage: message => message.type === "CHECK_TRANSFER_ACTIVE"
+      ? new Promise(resolve => { release = resolve; }) : Promise.resolve({ ok: true }) });
+    const deadline = Date.now() + (scenario === "deadline" ? 80 : 20000);
+    const pending = hooks.pasteIntoPlatform("The context to deliver", "grok", "stalled-check", deadline, 9);
+    setTimeout(() => {
+      // A Send action before our context appeared is not delivery evidence.
+      hooks.dispatchDocumentEvent("keydown", { target: editor, key: "Enter", isTrusted: true });
+      if (scenario === "cancel") hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: "stalled-check" }, {}, () => {});
+    }, 10);
+    await assert.rejects(pending, error => (error.code || error.diagnosticCode) ===
+      (scenario === "deadline" ? "transfer_timeout" : scenario === "cancel" ? "user_cancelled" : "message_timeout"));
+    release({ ok: true });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(editor.value, "", scenario);
+    assert.equal(editor.clicks, 0, "a late reply cannot resume insertion");
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
 clockTest("all destinations accept editor Markdown reformatting without replacing it", async () => {
   const expected = "# Context carry\n\n1. **Keep** the deployment plan and its rollback steps.\n2. Read [the release notes](https://example.test/release/v2) before continuing.\n\n```text\nDeploy only after staging passes and preserve the saved configuration.\n```\n\nReply only: Context loaded. Then wait for the user.";
   const rendered = "Context carry\n\nKeep the deployment plan and its rollback steps.\nRead the release notes before continuing.\n\nDeploy only after staging passes and preserve the saved configuration.\n\nReply only: Context loaded. Then wait for the user.";

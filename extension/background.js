@@ -2377,7 +2377,9 @@ async function transferToDestinationObserved(
     throw error;
   }
 
-  await checkTransferSource(operation);
+  // The destination has acknowledged verified delivery. Focused destinations
+  // need no further source-tab API round trip before returning that success.
+  checkTransferOperation(operation);
   if (!deferFinalActivation && !destination.focusBeforePaste && !trace.localDirect && operation?.earlyRevealedTabId !== destinationTabId) {
     markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
     await activateDestinationTab(destinationTabId, deadlineAt, operation);
