@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-destination-backup-copied-v230";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-destination-backup-smooth-v231";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -918,7 +918,7 @@
           || typeof message.text !== "string" || !message.text.trim()) return;
         // Show on arrival, without waiting for paste verification or its reply.
         try {
-          showErrorOverlay("Copy your context and paste it manually.", { text: message.text, destinationName: currentPlatform.name,
+          showErrorOverlay("Copy your summary and paste it manually.", { text: message.text, destinationName: currentPlatform.name,
             recovery: { transferId: message.transferId, destination: message.destination }, pasteBackup: true, pendingCopy: true });
         } catch {} // Optional backup UI must not interrupt pasting.
       };
@@ -10080,6 +10080,7 @@
     }
 
     hideErrorOverlay(errorDiv, { immediate: true });
+    errorDiv.contextGeneratorPasteBackup = Boolean(copiedContext?.pasteBackup);
     errorDiv.setAttribute("role", copiedContext ? "status" : "alert");
     let copyAgain = document.getElementById("context-generator-error-copy-again");
     if (copiedContext && !copyAgain) {
@@ -10097,7 +10098,11 @@
     }
     if (copyAgain) {
       copyAgain.style.display = copiedContext ? "block" : "none";
-      copyAgain.textContent = copiedContext?.pendingCopy ? (copiedContext.pasteBackup ? "Copy context" : "Copy summary") : "Copy again";
+      copyAgain.textContent = copiedContext?.pendingCopy ? "Copy summary" : "Copy again";
+      // Keep the actions steady when the copy label changes to its confirmation.
+      copyAgain.style.minWidth = copiedContext?.pasteBackup ? "112px" : "";
+      copyAgain.style.transition = copiedContext?.pasteBackup && !reducedMotion
+        ? "background-color 180ms ease,color 180ms ease,border-color 180ms ease" : "none";
       copyAgain.disabled = false;
       if (copiedContext) {
         const owner = errorDiv.contextGeneratorCopyNoticeOwner = {};
@@ -10122,10 +10127,11 @@
               if (textSpan) textSpan.textContent = `Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`;
             }
             if (copiedContext.pasteBackup) {
-              if (title) title.textContent = "Copied";
-              if (mark) mark.textContent = "✓";
-              if (textSpan) textSpan.textContent = "Your context is on the clipboard.";
-              copyAgain.textContent = "Copied ✓";
+              copyAgain.textContent = "✓ Copied";
+              copyAgain.style.setProperty("background", "rgba(169,222,190,0.92)", "important");
+              copyAgain.style.setProperty("border-color", "rgba(202,243,216,0.52)", "important");
+              copyAgain.style.setProperty("color", "#193d2b", "important");
+              if (!reducedMotion) copyAgain.animate?.([{ opacity: 0.4 }, { opacity: 1 }], { duration: 180, easing: "ease-out" });
             }
             clearTimeout(errorDiv.contextGeneratorHideTimer);
             const copiedDurationMs = copiedContext.signInRequired || copiedContext.pasteBackup ? 2500 : noticeDurationMs;
@@ -10210,7 +10216,8 @@
     }
     errorDiv.style.transition = reducedMotion ? "none" : "opacity 260ms ease,transform 260ms ease";
     errorDiv.contextGeneratorSlideFromLeft = Boolean(copiedContext?.signInRequired);
-    errorDiv.style.transform = errorDiv.contextGeneratorSlideFromLeft ? "translate3d(-24px,0,0)" : "translate3d(24px,0,0)";
+    errorDiv.style.transform = errorDiv.contextGeneratorPasteBackup ? "translate3d(0,-6px,0) scale(0.98)"
+      : errorDiv.contextGeneratorSlideFromLeft ? "translate3d(-24px,0,0)" : "translate3d(24px,0,0)";
     const reveal = () => {
       errorDiv.contextGeneratorEnterTimer = null;
       errorDiv.style.display = "flex";
@@ -10267,7 +10274,8 @@
     cancelAnimationFrame(errorDiv.contextGeneratorAnimationFrame);
     errorDiv.setAttribute("aria-hidden", "true");
     errorDiv.style.opacity = "0";
-    errorDiv.style.transform = errorDiv.contextGeneratorSlideFromLeft ? "translate3d(-24px,0,0)" : "translate3d(24px,0,0)";
+    errorDiv.style.transform = errorDiv.contextGeneratorPasteBackup ? "translate3d(0,-6px,0) scale(0.98)"
+      : errorDiv.contextGeneratorSlideFromLeft ? "translate3d(-24px,0,0)" : "translate3d(24px,0,0)";
     if (immediate || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) errorDiv.style.display = "none";
     else errorDiv.contextGeneratorDisplayTimer = setTimeout(() => {
       errorDiv.style.display = "none";
