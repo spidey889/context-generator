@@ -1572,6 +1572,38 @@ clockTest("Gemini activates before recovering a receiver that waits for visibili
   assert.equal(harness.operations.updated.filter(update => update.tabId === 41).length, 1);
 });
 
+test("DeepSeek Send after verified paste cannot fail its deferred activation", async () => {
+  const sourceTab = { id: 9, url: "https://grok.com/c/source", windowId: 1 };
+  const preparedTab = { id: 41, url: "https://chat.deepseek.com/", windowId: 1 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, preparedTab });
+  assert.equal((await harness.sendTransfer("deepseek", 41, true, null, sourceTab)).ok, true);
+  // Native DeepSeek's Send changes / to this route and clears its textarea.
+  preparedTab.url = "https://chat.deepseek.com/a/chat/s/sent-context";
+  preparedTab.active = true;
+  const activation = await harness.activateDestination("deepseek", 41, null, sourceTab);
+  assert.equal(activation.ok, true, "a new-chat check cannot undo acknowledged delivery");
+  assert.equal(harness.operations.updated.length, 0, "do not refocus a destination the user already handled");
+  assert.equal(harness.operations.created.length, 0);
+  assert.equal(harness.operations.sent.filter(x => x.message.type === "PASTE_CONTEXT").length, 1);
+});
+
+test("deferred activation keeps ownership and expiry guards after verified delivery", async () => {
+  for (const scenario of ["unverified", "other-tab", "other-platform", "cancelled", "expired"]) {
+    const sourceTab = { id: 9, url: "https://grok.com/c/source", windowId: 1 };
+    const preparedTab = { id: 41, url: "https://chat.deepseek.com/", windowId: 1 };
+    const harness = loadBackgroundForTransferTest({ sourceTab, preparedTab,
+      tabGetImpl: id => id === 42 ? { id, url: "https://chat.deepseek.com/a/chat/s/unrelated" } : undefined });
+    if (scenario !== "unverified") assert.equal((await harness.sendTransfer("deepseek", 41, true, null, sourceTab)).ok, true);
+    preparedTab.url = "https://chat.deepseek.com/a/chat/s/sent-context";
+    if (scenario === "cancelled") harness.closeTab(9);
+    const response = await harness.activateDestination(scenario === "other-platform" ? "claude" : "deepseek",
+      scenario === "other-tab" ? 42 : 41, scenario === "expired" ? Date.now() - 1 : null, sourceTab);
+    assert.equal(response.ok, false, scenario);
+    assert.equal(harness.operations.updated.length, 0, scenario);
+    assert.equal(harness.operations.created.length, 0, scenario);
+  }
+});
+
 test("successful paste defers destination activation until the completion UI finishes", async () => {
   const harness = loadBackgroundForTransferTest({
     preparedTab: { id: 41, url: "https://chat.deepseek.com/", windowId: 1 },

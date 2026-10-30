@@ -2386,6 +2386,7 @@ async function transferToDestinationObserved(
   // The destination has acknowledged verified delivery. Focused destinations
   // need no further source-tab API round trip before returning that success.
   checkTransferOperation(operation);
+  if (operation) operation.verifiedPaste = { tabId: destinationTabId, destination: destinationId };
   if (!deferFinalActivation && !destination.focusBeforePaste && !trace.localDirect && operation?.earlyRevealedTabId !== destinationTabId) {
     markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
     await activateDestinationTab(destinationTabId, deadlineAt, operation);
@@ -2743,7 +2744,14 @@ async function activateVerifiedDestinationTab(tabId, destinationId, deadlineAt =
   if (!Number.isInteger(tabId) || !DESTINATIONS[destinationId]) {
     throw Object.assign(new Error("Destination tab was not available."), { diagnosticCode: "destination_tab_unavailable" });
   }
-  if (!await isPreparedDestinationTabUsable(tabId, destinationId, operation)) {
+  const usable = await isPreparedDestinationTabUsable(tabId, destinationId, operation);
+  checkTransferOperation(operation);
+  checkTransferDeadline(deadlineAt);
+  if (!usable) {
+    // DeepSeek can be sent before deferred focus runs. Delivery is already
+    // acknowledged for this exact attempt/tab; skip presentation after a route
+    // change, without refocusing, repasting or relaxing any pre-write guard.
+    if (operation?.verifiedPaste?.tabId === tabId && operation.verifiedPaste.destination === destinationId) return;
     throw Object.assign(new Error("Destination tab changed before activation."), { diagnosticCode: "destination_not_new_chat" });
   }
   if (operation?.earlyRevealedTabId !== tabId) await activateDestinationTab(tabId, deadlineAt, operation);
