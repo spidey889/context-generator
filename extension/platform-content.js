@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-destination-backup-16s-v229";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-destination-backup-copied-v230";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -10121,8 +10121,14 @@
               if (title) title.textContent = "Summary copied to your clipboard";
               if (textSpan) textSpan.textContent = `Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`;
             }
+            if (copiedContext.pasteBackup) {
+              if (title) title.textContent = "Copied";
+              if (mark) mark.textContent = "✓";
+              if (textSpan) textSpan.textContent = "Your context is on the clipboard.";
+              copyAgain.textContent = "Copied ✓";
+            }
             clearTimeout(errorDiv.contextGeneratorHideTimer);
-            const copiedDurationMs = copiedContext.signInRequired ? 2500 : noticeDurationMs;
+            const copiedDurationMs = copiedContext.signInRequired || copiedContext.pasteBackup ? 2500 : noticeDurationMs;
             errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), copiedDurationMs);
           } catch {
             if (!ownsNotice()) return;
@@ -10131,7 +10137,7 @@
             showFallbackModal(copiedContext.text, copiedContext.destinationName, false, false,
               copiedContext.draftPresent, { destinationCopy: true, signInRequired: copiedContext.signInRequired, recovery: copiedContext.recovery });
           } finally {
-            if (ownsNotice()) copyAgain.disabled = false;
+            if (ownsNotice()) copyAgain.disabled = Boolean(copiedContext.pasteBackup && !copiedContext.pendingCopy);
           }
         };
       }
