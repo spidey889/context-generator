@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-paste-copy-recovery-v223";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-local-retention-check-v224";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -3660,13 +3660,16 @@
     let draftPresent = false;
     const recoveryDeadlineAt = Math.min(pending.deadlineAt || Infinity,
       Date.now() + (destination.pasteRetryTimeoutMs || PASTE_RETRY_TIMEOUT_MS));
-    const checkRecovery = async () => {
+    const checkRecovery = async (beforeWrite = false) => {
       if (pendingPasteRecheck !== pending || pending.guard?.userHandled || getDetectedConversationMessageCount() > 0) {
         needsCopy = false;
         return false;
       }
       checkTransferDeadline(pending);
-      await pending.guard?.checkActive();
+      // Retained text is local evidence. A stalled source reply must not turn
+      // an already delivered carry into a false copy fallback.
+      if (beforeWrite) await pending.guard?.checkActive();
+      else pending.guard?.check();
       if (pendingPasteRecheck !== pending || pending.guard?.userHandled || getDetectedConversationMessageCount() > 0) {
         needsCopy = false;
         return false;
@@ -3689,6 +3692,7 @@
           }
           // Preserve drafts restored on focus or typed while discovery waits.
           if (getElementText(input).trim()) { draftPresent = true; return; }
+          if (!await checkRecovery(true)) return;
           if (pending.guard.insert(input) !== false) {
             const verifyMs = Math.min(destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS,
               Math.max(0, recoveryDeadlineAt - Date.now()));

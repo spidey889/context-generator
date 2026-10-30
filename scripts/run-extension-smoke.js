@@ -2160,9 +2160,9 @@ async function verifyChatGptLongPaste(session) {
 
 async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
   const carry = "Synthetic carry: preserve every character.\nSecond line.";
-  for (const scenario of ["send-during-confirmation", "expired-focus", "disabled", "detached", "focus-remount", "draft"]) {
+  for (const scenario of ["gemini-retained", "send-during-confirmation", "expired-focus", "disabled", "detached", "focus-remount", "draft"]) {
     const { targetId } = await browserSession.call("Target.createTarget", {
-      url: `${origin}/destination?${SMOKE_PLATFORM_QUERY}=claude`
+      url: `${origin}/destination?${SMOKE_PLATFORM_QUERY}=${scenario === "gemini-retained" ? "gemini" : "claude"}`
     });
     let session;
     try {
@@ -2174,7 +2174,34 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
       const contextId = session.getExtensionContextId();
       await browserSession.call("Target.activateTarget", { targetId });
       await waitFor(() => session.evaluate("document.visibilityState === 'visible'"), "visible paste-recovery destination");
-      if (scenario === "send-during-confirmation") {
+      if (scenario === "gemini-retained") {
+        // Native Gemini uses a Quill paragraph editor, not a textarea/form.
+        // Stall every source reply after the permitted initial write: retained
+        // text must finish its local recheck without another RPC or copy box.
+        await session.evaluate(`(() => {
+          const surface = document.createElement('div');
+          surface.style.cssText = 'position:fixed;left:80px;bottom:40px;width:700px';
+          surface.innerHTML = '<rich-textarea><div class="ql-editor" contenteditable="true" role="textbox" aria-label="Enter a prompt for Gemini"><p><br></p></div></rich-textarea><button aria-label="Send message"><span>↑</span></button>';
+          surface.querySelector('button').addEventListener('click', () => window.__capContextSmokeSendClicks++);
+          document.querySelector('form').replaceWith(surface);
+        })()`);
+        await session.evaluate(`(() => {
+          window.__sourceChecks = 0;
+          const nativeSend = chrome.runtime.sendMessage;
+          chrome.runtime.sendMessage = function(message, ...args) {
+            if (message?.type === 'CHECK_TRANSFER_ACTIVE') return ++window.__sourceChecks === 1
+              ? Promise.resolve({ok:true}) : new Promise(() => {});
+            return Reflect.apply(nativeSend, this, [message, ...args]);
+          };
+          return window.__capSmokePaste(${JSON.stringify(carry)}, Date.now()+15000, 9);
+        })()`, contextId);
+        await session.evaluate("new Promise(resolve => setTimeout(resolve, 7500))");
+        assert.equal(await session.evaluate("window.__sourceChecks", contextId), 1);
+        assert.equal(await session.evaluate('document.querySelector(".ql-editor").innerText.replace(/\\n+/g, "\\n").trim()'), carry);
+        assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), false,
+          "a successfully retained Gemini carry cannot become copy recovery after a stalled source reply");
+        assert.equal(await session.evaluate("window.__capSmokePasteState().pending", contextId), false);
+      } else if (scenario === "send-during-confirmation") {
         // Reproduce a stalled post-insert ownership reply without contacting a
         // real source. Native Enter must send our verified carry without a retry.
         await session.evaluate(`(() => {

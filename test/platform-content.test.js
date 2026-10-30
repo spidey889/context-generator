@@ -4214,6 +4214,45 @@ clockTest("paste deadline stops contenteditable fallbacks after native handlers 
   }
 });
 
+clockTest("retained pastes need no delayed source reply or false copy recovery", async () => {
+  for (const [hostname, destination] of [["claude.ai", "claude"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
+    let checks = 0;
+    const editor = new FakeElement({ tag: "textarea" });
+    const hooks = loadPlatformContent([editor], hostname, { runtimeSendMessage: message => {
+      if (message.type === "CHECK_TRANSFER_ACTIVE" && ++checks > 1) return new Promise(() => {});
+      return Promise.resolve({ ok: true });
+    } });
+    const modal = new FakeElement();
+    hooks.registerElementId("context-generator-fallback-modal", modal);
+    await hooks.pasteIntoPlatform("The complete retained carry", destination, "retained-source", Date.now() + 20000, 9);
+    await new Promise(resolve => setTimeout(resolve, 7500));
+    assert.equal(editor.value, "The complete retained carry", destination);
+    assert.equal(checks, 1, "reading a retained carry needs no source request");
+    assert.notEqual(modal.style.display, "flex", "a stalled source cannot turn retained text into copy recovery");
+    assert.equal(editor.clicks, 1, "no second insertion");
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
+clockTest("delayed recovery checks the source before its write but not after verification", async () => {
+  let checks = 0;
+  const editor = new FakeElement({ tag: "textarea" });
+  const hooks = loadPlatformContent([editor], "gemini.google.com", { visibilityState: "hidden", runtimeSendMessage: message => {
+    if (message.type === "CHECK_TRANSFER_ACTIVE" && ++checks > 2) return new Promise(() => {});
+    return Promise.resolve({ ok: true });
+  } });
+  const modal = new FakeElement();
+  hooks.registerElementId("context-generator-fallback-modal", modal);
+  await hooks.pasteIntoPlatform("The complete recovered carry", "gemini", "recovered-source", Date.now() + 20000, 9);
+  editor.value = "";
+  hooks.setVisibility("visible");
+  await new Promise(resolve => setTimeout(resolve, 8000));
+  assert.equal(editor.value, "The complete recovered carry");
+  assert.equal(checks, 2, "each actual write keeps its source check; verification stays local");
+  assert.notEqual(modal.style.display, "flex");
+  assert.equal(editor.clicks, 2, "one initial insert and one recovery insert");
+});
+
 clockTest("delayed paste recovery cannot write after a late source reply or expiring native focus", async (t) => {
   for (const boundary of ["source", "focus"]) {
     let recovery = false;
