@@ -13,7 +13,8 @@ const { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtensio
 const largeHandler = require("../api/large-summary");
 // Keep this mode free of worker debugging: attaching a debugger changes MV3
 // lifetime and masked the zero-request preparation failure in investigation.
-const slowProviderMs = process.env.CAP_CONTEXT_LARGE_SLOW_SMOKE === "1" ? 35000 : 0;
+const lateTimeoutSmoke = process.env.CAP_CONTEXT_LARGE_SLOW_SMOKE === "timeout";
+const slowProviderMs = process.env.CAP_CONTEXT_LARGE_SLOW_SMOKE === "1" ? 35000 : lateTimeoutSmoke ? 30000 : 0;
 const finalSummary = 'Verified final handoff: preserve the accepted implementation, all decisions and unresolved work. '
   + 'Continue the latest request by testing the complete transfer before any release.\n\nNext step:\n\n'
   + 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
@@ -22,10 +23,11 @@ async function scenario(failPart, failTransport = false) {
   const fixture = fixtures("deepseek", "smoke", 1);
   const prefix = "DeepSeek conversation:\n\nUser: ", tail = "\n\nAssistant: Keep the complete conversation and test recovery.  \r\n";
   const pattern = "  Decision: preserve source text and Unicode 世界 🕷️.\r\n";
-  const size = 4000000 - prefix.length - tail.length;
+  const transcriptChars = lateTimeoutSmoke ? 3006871 : 4000000;
+  const size = transcriptChars - prefix.length - tail.length;
   const text = (pattern.repeat(Math.ceil(size / pattern.length))).slice(0, size - 3) + " \r\n";
   const transcript = prefix + text + tail;
-  assert.equal(transcript.length, 4000000);
+  assert.equal(transcript.length, transcriptChars);
   fixture.data.data.biz_data.chat_messages[0].fragments = [{ type: "REQUEST", content: text }];
   fixture.data.data.biz_data.chat_messages[1].fragments = [{ type: "RESPONSE", content: tail.slice("\n\nAssistant: ".length) }];
   const requests = [], reports = [];
@@ -34,14 +36,26 @@ async function scenario(failPart, failTransport = false) {
   process.env.OPENROUTER_API_KEY = "synthetic-smoke-key";
   process.env.TELEMETRY_SIGNING_KEY = "synthetic-large-transfer-smoke-signing-key-only";
   process.env.OPENROUTER_ENABLED = "true";
+  if (lateTimeoutSmoke) {
+    process.env.TOKENHARBOR_API_KEY = "synthetic-smoke-backup";
+    process.env.TOKENHARBOR_ENABLED = "true";
+  }
   delete process.env.LARGE_SUMMARY_ENABLED;
   delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
   largeHandler.__test.resetRateLimit();
   global.fetch = async (input, options) => {
-    if (String(input) === "https://openrouter.ai/api/v1/chat/completions") {
+    if (String(input) === "https://openrouter.ai/api/v1/chat/completions"
+        || lateTimeoutSmoke && String(input) === "https://tokenharbor.ai/v1/chat/completions") {
       providerCalls++;
+      // Finish the first batch, then let the real primary/backup deadlines
+      // expire. No worker debugger or synthetic client-side timeout is used.
+      if (lateTimeoutSmoke && providerCalls > 3) return new Promise((_resolve, reject) => {
+        const abort = () => reject(options.signal.reason);
+        options.signal.addEventListener("abort", abort, { once: true });
+        if (options.signal.aborted) abort();
+      });
       if (slowProviderMs) await new Promise(resolve => setTimeout(resolve, slowProviderMs));
-      if (failPart) return new Response("synthetic provider rejection", { status: 503 });
+      if (failPart && !lateTimeoutSmoke) return new Response("synthetic provider rejection", { status: 503 });
       return new Response(JSON.stringify({ choices: [{ message: { content: finalSummary }, finish_reason: "stop" }] }), { status: 200 });
     }
     assert.ok(String(input).startsWith("http://127.0.0.1:"), "Smoke must not contact an external service.");
@@ -115,7 +129,10 @@ async function scenario(failPart, failTransport = false) {
       const failure = terminal.diagnostics.summary_response_failures?.[0];
       assert.ok(failure, "The actual source/outbox flow must retain the large-request failure.");
       assert.equal(failure.reason, failTransport ? "fetch_failed" : "service_rejected");
-      assert.equal(terminal.diagnostics.summary_error_code, failTransport ? "summary_transport_failed" : "summary_failed");
+      assert.equal(terminal.diagnostics.summary_error_code, lateTimeoutSmoke ? "summary_timeout"
+        : failTransport ? "summary_transport_failed" : "summary_failed");
+      if (lateTimeoutSmoke) assert.equal(requests.filter(r => r.large.phase === "part").length, 6,
+        "Complete the first three of seven parts before the next batch expires.");
       if (failTransport) {
         assert.equal(providerCalls, 0);
         assert.equal(failure.http_status, undefined);
@@ -141,7 +158,7 @@ async function scenario(failPart, failTransport = false) {
     }
     if (destination) assert.equal(await destination.evaluate("window.sendClicks"), 0);
     assert.doesNotMatch(JSON.stringify(reports), /SYNTHETIC_TOKEN|Decision: preserve source text|Verified final handoff|receipt/);
-    console.log(`PASS 4M ${failTransport ? "zero-provider connection failure diagnosis" : failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
+    console.log(`PASS ${transcriptChars} chars ${lateTimeoutSmoke ? "3/7 then provider-timeout recovery" : failTransport ? "zero-provider connection failure diagnosis" : failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
   } catch (error) {
     console.error(JSON.stringify({ requestPhases: requests.map(r => r.large.phase), providerCalls,
       reports: reports.map(r => ({ status: r.status, stage: r.last_stage, reason: r.failure_reason, diagnostics: r.diagnostics })),
@@ -161,6 +178,7 @@ async function scenario(failPart, failTransport = false) {
   }
 }
 async function run() {
+  if (lateTimeoutSmoke) { await scenario(true); return; }
   await scenario(false);
   if (!slowProviderMs) { await scenario(true); await scenario(true, true); }
 }

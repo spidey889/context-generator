@@ -6,6 +6,14 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-30
 
+- **Acknowledge large-summary requests before waiting for model output.** A 3,006,871-character ChatGPT-to-Claude attempt reached 3 of 7 completed parts and the owner observed several OpenRouter generations, then received full-text local recovery.
+  - The saved report records a lost worker message connection after about 114 seconds, with roughly four minutes left in the transfer; it does not establish a provider timeout or explain that historical worker shutdown.
+  - The separate large endpoint left its provider-start callback empty, unlike the ordinary endpoint. Headers waited for the first 15-second heartbeat or completed model response, unnecessarily consuming Chromium's independent pending-fetch allowance; API keepalive alone does not remove that limit.
+  - Reuse the normal control-only stream reset at each provider start to flush headers immediately. Keep partial summaries private, require every part and final receipt, and retain the existing provider order and deadlines.
+  - A regression fails before the change and verifies headers arrive before the upstream model resolves, with only reset/result frames and a completed part receipt. Focused endpoint, worker and ordinary-summary checks pass.
+  - Extend the isolated Brave smoke with a 3-of-7 timeout mode: the first batch completes, the next batch reaches real primary/backup deadlines, and the source must retain a specific service timeout and exact copy recovery. Synthetic tests use no external models or telemetry and attach no worker debugger.
+  - This removes a confirmed response-start gap; reproductions and historical telemetry do not prove the cause of that particular interruption. Live-provider completion still needs a fresh transfer after backend deployment; a branch push alone does not ship the fix.
+
 - **Yield while preparing large-chat requests.** A 3,903,349-character ChatGPT-to-Claude transfer captured successfully but lost its worker reply, with no request-failure record or observed OpenRouter request.
   - Isolated Brave reproduced the same local-recovery outcome with synthetic 4M and 1.1M transcripts and zero summary HTTP requests; the source retained a closed asynchronous-message channel error.
   - Temporary dispatch markers reached chunk preparation. Pausing the worker located its stack in `wireBytes` inside `split`; attaching the worker debugger let the same 4M flow complete, so ordinary debugger-attached success was insufficient evidence.

@@ -121,6 +121,31 @@ test("parts use only one NVIDIA OpenRouter request and return no completed-summa
   assert.equal(res.body.summaryModel, undefined);
 });
 
+test("large streams acknowledge the request before waiting for a model without exposing partial summaries", async t => {
+  const chunks = [], res = response();
+  let started, finish;
+  const pending = new Promise(resolve => { started = resolve; });
+  setup(t, async () => {
+    started();
+    return new Promise(resolve => { finish = () => resolve(new Response(JSON.stringify({
+      choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }]
+    }))); });
+  });
+  res.write = chunk => chunks.push(chunk);
+  res.flushHeaders = () => { res.headersSent = true; };
+  const work = handler(request({ conversation: "a".repeat(600000), large: metadata },
+    { accept: "application/x-ndjson" }), res);
+  try {
+    await pending;
+    assert.equal(res.headersSent, true, "The client must not wait for a heartbeat or model output to receive headers.");
+    assert.deepEqual(chunks.map(chunk => JSON.parse(chunk)), [{ type: "reset" }]);
+  } finally { finish(); await work; }
+  const events = chunks.map(chunk => JSON.parse(chunk));
+  assert.deepEqual(events.map(event => event.type), ["reset", "result"]);
+  assert.ok(events[1].data.summary.startsWith(usefulSummary));
+  assert.ok(events[1].data.receipt);
+});
+
 test("only a verified complete final consolidation receives one original-transfer summary proof", async t => {
   const calls = [];
   setup(t, async (url, options) => {

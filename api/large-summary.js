@@ -103,7 +103,11 @@ async function handler(req, res) {
           initialMessages: getInitialSummaryMessages(conversation, profile), requestBudgetMs: budgetMs,
           requestContext: { signal: controller.signal, maxAttempts: 1, firstAnswerTimeoutMs: budgetMs,
             inputChars: conversation.length, routeIndex: index + 1, ...(route.keySlot ? { keySlot: route.keySlot } : {}),
-            onDelta() {}, onStart() {}, onProviderFailure: observation => failures.record(observation) } });
+            // Acknowledge each model attempt immediately, as /summarize does.
+            // Waiting for the first timed heartbeat leaves an MV3 fetch pending
+            // on headers; runtime keepalive does not remove that fetch limit.
+            // Reset is control-only: intermediate summaries remain private.
+            onDelta() {}, onStart: channel.reset, onProviderFailure: observation => failures.record(observation) } });
         if (candidate.model !== route.model || candidate.provider !== route.provider.id
           || /^(?:length|max_tokens|max_output_tokens)$/i.test(String(candidate.finishReason || ""))
           || !candidate.summary?.trim() || candidate.summary.length > protocol.MAX_SUMMARY_CHARS)
