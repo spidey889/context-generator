@@ -2187,6 +2187,75 @@ async function verifyChatGptLongPaste(session) {
   process.stdout.write(`✓ Installed Brave ChatGPT: ${carry.length}/${largeCarry.length} characters intact, repeat delivery safe, unrelated focus preserved, no attachment/paste event or automatic Send.\n`);
 }
 
+async function verifyDeepSeekPaste({ browserSession, sourceSession, devToolsPort, origin }) {
+  const sourceContext = sourceSession.getExtensionContextId();
+  const send = message => sourceSession.evaluate(`chrome.runtime.sendMessage(${JSON.stringify(message)})`, sourceContext);
+  for (const scenario of ["send-before-activation", "long-retained"]) {
+    const carry = scenario === "long-retained"
+      ? "Synthetic DeepSeek carry\n" + ("Résumé 🧠 code: const answer = 42; " + "alpha beta gamma ".repeat(120) + "\n").repeat(60) + "END_DEEPSEEK_CARRY"
+      : "Synthetic DeepSeek context\nRésumé 🧠; const answer = 42; END_DEEPSEEK_CARRY";
+    const transferId = `deepseek-${scenario}`, deadlineAt = Date.now() + 20000;
+    const prepared = await send({ type: "PREPARE_DESTINATION", destination: "deepseek", transferId, deadlineAt });
+    assert.equal(prepared.ok, true);
+    const target = await waitFor(async () => (await getTargets(devToolsPort)).find(t => t.type === "page"
+      && t.url.startsWith(`${origin}/destination?${SMOKE_PLATFORM_QUERY}=deepseek`)), "prepared DeepSeek destination");
+    const session = await CdpSession.connect(target.webSocketDebuggerUrl);
+    try {
+      await session.call("Runtime.enable");
+      await waitFor(() => session.getExtensionContextId(), "DeepSeek content script");
+      // Native DeepSeek uses an unlabeled, no-form textarea and a role=button
+      // arrow. Keep native input, trusted Send and the actual worker protocol.
+      await session.evaluate(`(() => {
+        const surface = document.createElement('div');
+        surface.style.cssText = 'position:fixed;left:80px;bottom:40px;width:700px';
+        surface.innerHTML = '<textarea name="search" placeholder="Message DeepSeek" rows="2"></textarea><div role="button" tabindex="0" class="ds-button ds-button--primary ds-button--circle" style="width:34px;height:34px;background:#4c8dff"><svg width="16" height="16"><path d="M8 14V2M3 7l5-5 5 5" stroke="white"/></svg></div>';
+        document.querySelector('form').replaceWith(surface);
+        const editor = surface.querySelector('textarea');
+        window.__deepseekWrites = 0; window.__deepseekSends = 0;
+        editor.addEventListener('input', () => window.__deepseekWrites++);
+        surface.querySelector('[role="button"]').addEventListener('click', event => {
+          window.__deepseekTrustedSend = event.isTrusted;
+          window.__deepseekSentCarry = editor.value; window.__deepseekSends++;
+          editor.value = ''; history.pushState({}, '', '/a/chat/s/sent-context');
+        });
+      })()`);
+      const delivery = { type: "TRANSFER_TO_DESTINATION", destination: "deepseek", text: carry,
+        preparedTabId: prepared.tabId, transferId, deadlineAt, deferFinalActivation: true };
+      const result = await send(delivery);
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(await session.evaluate("document.querySelector('textarea').value"), carry);
+      assert.equal(await session.evaluate("window.__deepseekSends"), 0, "pasting never sends");
+      if (scenario === "send-before-activation") {
+        await session.call("Page.bringToFront");
+        await waitFor(() => session.evaluate("document.visibilityState === 'visible'"), "visible DeepSeek destination");
+        const point = await session.evaluate("(() => { const r = document.querySelector('[role=button]').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
+        await session.call("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
+        await session.call("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
+        assert.equal(await session.evaluate("window.__deepseekTrustedSend"), true);
+        assert.equal(await session.evaluate("window.__deepseekSentCarry"), carry);
+      } else {
+        const writes = await session.evaluate("window.__deepseekWrites");
+        assert.equal((await send(delivery)).ok, true);
+        assert.equal(await session.evaluate("window.__deepseekWrites"), writes, "repeat delivery does not insert again");
+      }
+      const activation = await send({ type: "ACTIVATE_DESTINATION_TAB", destination: "deepseek",
+        tabId: prepared.tabId, transferId, deadlineAt });
+      assert.equal(activation.ok, true, "verified Send must not become destination_not_new_chat");
+      await waitFor(() => session.evaluate("document.visibilityState === 'visible'"), "final native activation");
+      await session.evaluate("new Promise(resolve => setTimeout(resolve, 800))");
+      assert.equal(await session.evaluate("document.querySelector('textarea').value"), scenario === "long-retained" ? carry : "");
+      assert.equal(await session.evaluate("window.__deepseekSends"), scenario === "long-retained" ? 0 : 1);
+      assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), false);
+      assert.equal((await getTargets(devToolsPort)).filter(t => t.type === "page" && new URL(t.url).pathname.startsWith('/a/chat/s/')).length,
+        scenario === "send-before-activation" ? 1 : 0, "never create a duplicate sent conversation");
+      process.stdout.write(`✓ Installed Brave DeepSeek: ${scenario}, ${carry.length} characters, verified delivery and no duplicate paste/automatic Send.\n`);
+    } finally {
+      session.close();
+      await browserSession.call("Target.closeTarget", { targetId: target.id }).catch(() => {});
+    }
+  }
+}
+
 async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
   const carry = "Synthetic carry: preserve every character.\nSecond line.";
   for (const scenario of ["gemini-retained", "send-during-confirmation", "expired-focus", "disabled", "detached", "focus-remount", "draft"]) {
@@ -2653,6 +2722,10 @@ async function run() {
     }
     if (process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1") {
       await verifyDraftTransfer({ sourceSession, devToolsPort, origin, state, destinationSessions, telemetryFixture });
+      return;
+    }
+    if (process.env.CAP_CONTEXT_DEEPSEEK_PASTE_SMOKE === "1") {
+      await verifyDeepSeekPaste({ browserSession, sourceSession, devToolsPort, origin });
       return;
     }
     if (process.env.CAP_CONTEXT_PASTE_RECOVERY_SMOKE === "1") {
