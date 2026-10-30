@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-early-destination-copy-backup-v228";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-destination-backup-16s-v229";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -9941,7 +9941,7 @@
     const message = getUserFacingTransferErrorMessage(error);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     // Keep recovery until copying succeeds; allow a short read before its exit.
-    const noticeDurationMs = copiedContext?.pasteBackup ? 10000 : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
+    const noticeDurationMs = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
     const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
