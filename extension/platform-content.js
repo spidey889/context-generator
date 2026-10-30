@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-chatgpt-write-ownership-v225";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-composer-retry-drafts-v226";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -3794,36 +3794,50 @@
       return true;
     }
 
-    const target = element.querySelector("p") || element;
-    const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(target);
-    selection.removeAllRanges();
-    selection.addRange(range);
+    const canWrite = () => element.isConnected && isEditorReady(element) && element.contains(document.activeElement);
+    const prepareRetry = () => {
+      guard?.check();
+      if (!element.isConnected || !isEditorReady(element)) return false;
+      element.focus();
+      guard?.check();
+      if (!canWrite()) return false;
+      // Claude can restore its persisted draft on retry focus. Every native or
+      // DOM fallback must protect that text and keep selection in this editor.
+      if (getElementText(element).trim()) {
+        if (editorContainsText(element, text)) return false;
+        observe({ draft_present: true });
+        throw createDiagnosticError(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`, "editor_has_draft");
+      }
+      selectEditorContents(element);
+      guard?.check();
+      return canWrite();
+    };
+    selectEditorContents(element);
 
     guard?.check();
-    let inserted = document.execCommand("insertText", false, text);
+    if (!canWrite()) return false;
+    document.execCommand("insertText", false, text);
     observe({ insertion_method: "insert_text" });
     let hasText = editorContainsText(element, text);
 
-    if (!inserted || !hasText) {
-      guard?.check();
-      element.focus();
-      guard?.check();
-      document.execCommand("selectAll", false, null);
-      guard?.check();
-      inserted = document.execCommand("insertText", false, text);
+    if (!hasText) {
+      if (!prepareRetry()) return false;
+      document.execCommand("insertText", false, text);
       hasText = editorContainsText(element, text);
     }
 
+    let target = element;
     if (!hasText) {
+      if (!prepareRetry()) return false;
       observe({ insertion_method: "dom_text" });
       guard?.check();
+      target = element.querySelector("p") || element;
       target.textContent = text;
       hasText = editorContainsText(element, text);
     }
 
     if (!hasText) {
+      if (!prepareRetry()) return false;
       guard?.check();
       element.textContent = text;
     }

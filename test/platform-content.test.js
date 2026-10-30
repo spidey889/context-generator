@@ -4197,7 +4197,8 @@ for (const nativeInsert of [true, false]) clockTest(`ChatGPT long carries stay i
   assert.equal(commands.length, inserted, "An already delivered carry is never reinserted");
 });
 
-clockTest("ChatGPT fallback preserves native focus, restored drafts and unavailable editors", async () => {
+for (const [destination, hostname] of Object.entries({ chatgpt: "chatgpt.com", claude: "claude.ai", gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }))
+clockTest(`${destination} fallback preserves native focus, restored drafts and unavailable editors`, async () => {
   for (const scenario of ["moved", "redirected", "draft", "dom-draft", "detached", "readonly"]) {
     const carry = "Preserve this complete context carry.";
     const draft = "My restored native draft";
@@ -4205,7 +4206,7 @@ clockTest("ChatGPT fallback preserves native focus, restored drafts and unavaila
     editor.isContentEditable = true;
     const search = new FakeElement({ tag: "input", attrs: { type: "search" } });
     search.value = "Keep this search query";
-    const hooks = loadPlatformContent([editor, search], "chatgpt.com");
+    const hooks = loadPlatformContent([editor, search], hostname);
     hooks.registerElementId("context-generator-fallback-modal", new FakeElement());
     let calls = 0, focuses = 0;
     editor.focus = () => {
@@ -4228,7 +4229,7 @@ clockTest("ChatGPT fallback preserves native focus, restored drafts and unavaila
       return true;
     };
     const unavailable = ["redirected", "detached", "readonly"].includes(scenario);
-    const pending = hooks.pasteIntoPlatform(carry, "chatgpt", `fallback-${scenario}`, Date.now() + (unavailable ? 200 : 5000));
+    const pending = hooks.pasteIntoPlatform(carry, destination, `fallback-${scenario}`, Date.now() + (unavailable ? 200 : 5000));
     if (scenario === "moved") await pending;
     else await assert.rejects(pending, error => {
       assert.equal(error.diagnostics?.error_code, unavailable ? "transfer_timeout" : "editor_has_draft", `${scenario}: ${error.message}`);

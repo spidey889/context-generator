@@ -2188,8 +2188,10 @@ async function verifyChatGptLongPaste(session) {
 }
 
 async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
-  const carry = "Synthetic carry: preserve every character.\nSecond line.";
-  for (const scenario of ["gemini-retained", "send-during-confirmation", "expired-focus", "disabled", "detached", "focus-remount", "draft"]) {
+  for (const scenario of ["claude-focus-draft", "claude-retained", "gemini-retained", "send-during-confirmation", "expired-focus", "disabled", "detached", "focus-remount", "draft"]) {
+    const carry = scenario === "claude-retained"
+      ? "Synthetic Claude carry\n" + ("Résumé 🧠 code: const answer = 42; " + "alpha beta gamma ".repeat(120) + "\n").repeat(40) + "END_CLAUDE_CARRY"
+      : "Synthetic carry: preserve every character.\nSecond line.";
     const { targetId } = await browserSession.call("Target.createTarget", {
       url: `${origin}/destination?${SMOKE_PLATFORM_QUERY}=${scenario === "gemini-retained" ? "gemini" : "claude"}`
     });
@@ -2203,11 +2205,37 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
       const contextId = session.getExtensionContextId();
       await browserSession.call("Target.activateTarget", { targetId });
       await waitFor(() => session.evaluate("document.visibilityState === 'visible'"), "visible paste-recovery destination");
-      if (scenario === "gemini-retained") {
+      if (scenario.startsWith("claude-") || scenario === "send-during-confirmation") {
+        // Match the observed native Claude editor, including its lack of form.
+        await session.evaluate(`(() => {
+          const surface = document.createElement('div');
+          surface.style.cssText = 'position:fixed;left:80px;bottom:40px;width:700px';
+          surface.innerHTML = '<div class="tiptap ProseMirror" data-testid="chat-input" contenteditable="true" role="textbox" aria-label="Write your prompt to Claude" style="white-space:break-spaces"><p><br></p></div><button aria-label="Send message">Send</button>';
+          document.querySelector('form').replaceWith(surface);
+          const editor = surface.querySelector('.ProseMirror');
+          let cleared = false, restored = false;
+          editor.addEventListener('input', event => {
+            if (${JSON.stringify(scenario)} !== 'claude-focus-draft' || !event.isTrusted || cleared) return;
+            cleared = true; editor.replaceChildren(); editor.blur();
+          });
+          editor.addEventListener('focus', () => {
+            if (cleared && !restored) { restored = true; editor.innerHTML = '<p>My saved native draft</p>'; }
+          });
+          surface.querySelector('button').addEventListener('click', () => window.__capContextSmokeSendClicks++);
+        })()`);
+      }
+      if (scenario === "claude-focus-draft") {
+        const result = await session.evaluate(`window.__capSmokePaste(${JSON.stringify(carry)}, Date.now()+10000)
+          .then(() => ({ok:true}), error => ({ok:false,code:error.diagnostics?.error_code}))`, contextId);
+        assert.deepEqual(result, {ok:false,code:'editor_has_draft'});
+        assert.equal(await session.evaluate("document.querySelector('.ProseMirror').innerText"), 'My saved native draft');
+        assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-title').textContent"), 'Your draft is safe');
+        assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-text').value"), carry);
+      } else if (scenario === "gemini-retained" || scenario === "claude-retained") {
         // Native Gemini uses a Quill paragraph editor, not a textarea/form.
         // Stall every source reply after the permitted initial write: retained
         // text must finish its local recheck without another RPC or copy box.
-        await session.evaluate(`(() => {
+        if (scenario === "gemini-retained") await session.evaluate(`(() => {
           const surface = document.createElement('div');
           surface.style.cssText = 'position:fixed;left:80px;bottom:40px;width:700px';
           surface.innerHTML = '<rich-textarea><div class="ql-editor" contenteditable="true" role="textbox" aria-label="Enter a prompt for Gemini"><p><br></p></div></rich-textarea><button aria-label="Send message"><span>↑</span></button>';
@@ -2226,23 +2254,28 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
         })()`, contextId);
         await session.evaluate("new Promise(resolve => setTimeout(resolve, 7500))");
         assert.equal(await session.evaluate("window.__sourceChecks", contextId), 1);
-        assert.equal(await session.evaluate('document.querySelector(".ql-editor").innerText.replace(/\\n+/g, "\\n").trim()'), carry);
+        const selector = scenario === "claude-retained" ? ".ProseMirror" : ".ql-editor";
+        assert.equal(await session.evaluate(`document.querySelector(${JSON.stringify(selector)}).innerText.replace(/\\n+/g, "\\n").trim()`), carry);
         assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), false,
-          "a successfully retained Gemini carry cannot become copy recovery after a stalled source reply");
+          "a successfully retained carry cannot become copy recovery after a stalled source reply");
         assert.equal(await session.evaluate("window.__capSmokePasteState().pending", contextId), false);
+        if (scenario === "claude-retained") {
+          // Chromium renders sibling paragraphs with extra visual line breaks.
+          const retainedText = await session.evaluate("document.querySelector('.ProseMirror').innerText");
+          await session.evaluate(`window.__capSmokePaste(${JSON.stringify(carry)}, Date.now()+10000)`, contextId);
+          assert.equal(await session.evaluate("document.querySelector('.ProseMirror').innerText"), retainedText, "a repeated delivery must leave the original long context unchanged");
+        }
       } else if (scenario === "send-during-confirmation") {
         // Reproduce a stalled post-insert ownership reply without contacting a
         // real source. Native Enter must send our verified carry without a retry.
         await session.evaluate(`(() => {
-          const editor = document.querySelector('textarea'), form = editor.closest('form');
+          const editor = document.querySelector('.ProseMirror');
           window.__sourceChecks = 0;
-          form.addEventListener('submit', event => {
-            event.preventDefault(); window.__sentCarry = editor.value;
-            editor.value = ''; history.pushState({}, '', '/chat/sent');
-          });
           editor.addEventListener('keydown', event => {
             if (event.key !== 'Enter') return;
-            window.__trustedSend = event.isTrusted; event.preventDefault(); form.requestSubmit();
+            window.__trustedSend = event.isTrusted; event.preventDefault();
+            window.__sentCarry = editor.innerText;
+            editor.replaceChildren(); history.pushState({}, '', '/chat/sent');
           });
         })()`);
         await session.evaluate(`(() => {
@@ -2261,16 +2294,16 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
             error => window.__confirmationResult = {ok:false, code:error.code||error.diagnosticCode});
           return true;
         })()`, contextId);
-        await waitFor(() => session.evaluate(`document.querySelector('textarea').value === ${JSON.stringify(carry)}`), "verified carry before native Send");
+        await waitFor(() => session.evaluate(`document.querySelector('.ProseMirror').innerText.replace(/\\n+/g, "\\n") === ${JSON.stringify(carry)}`), "verified carry before native Send");
         await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
         await session.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
         await waitFor(() => session.evaluate("window.__confirmationResult", contextId), "confirmation after native Send");
         assert.deepEqual(await session.evaluate("window.__confirmationResult", contextId), {ok:true, populated:true});
         assert.equal(await session.evaluate("window.__sourceChecks", contextId), 1);
         assert.equal(await session.evaluate("window.__trustedSend"), true);
-        assert.equal(await session.evaluate("window.__sentCarry"), carry);
+        assert.equal((await session.evaluate("window.__sentCarry")).replace(/\n+/g, "\n"), carry);
         await session.evaluate("new Promise(resolve => setTimeout(resolve, 700))");
-        assert.equal(await session.evaluate("document.querySelector('textarea').value"), "", "sent context must not be pasted again");
+        assert.equal(await session.evaluate("document.querySelector('.ProseMirror').innerText"), "", "sent context must not be pasted again");
         assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), false);
       } else if (scenario === "expired-focus") {
         await session.evaluate(`document.querySelector('textarea').addEventListener('focus', () => {
