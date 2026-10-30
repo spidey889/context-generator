@@ -30,6 +30,7 @@
 
 ## Tests and checks
 
+- When fixing a confirmed bug or adding meaningful new behavior, add a regression test.
 - After a change, run focused tests or checks for the affected behavior. Do not run the full suite automatically after every change.
 - Run the full suite only when the change is large, affects several components, or focused checks are not enough to verify it. Run slow, database and browser checks when the affected behavior needs them.
 - For documentation-only changes, a diff/format check is usually enough. Required CI and branch-protection checks still apply.
