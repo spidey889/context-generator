@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-destination-copy-backup-v227";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-early-destination-copy-backup-v228";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -910,6 +910,20 @@
       endDestinationWaitingStatus(message.transferId);
       finishDestinationWaitingStatus(destinationWaitingStatus?.transferId);
       const finishStatus = showDestinationPasteStatus() || (() => {});
+      const showCopyBackup = () => {
+        if (document.visibilityState === "hidden") return;
+        removeOwnedEventListener(document, "visibilitychange", showCopyBackup);
+        if (!instanceActive || cancelledTransferIds.has(message.transferId) || message.destination !== currentPlatform.id
+          || !DESTINATION_LANDING_PATHS[currentPlatform.id]?.includes(window.location.pathname.replace(/\/+$/, "") || "/")
+          || typeof message.text !== "string" || !message.text.trim()) return;
+        // Show on arrival, without waiting for paste verification or its reply.
+        try {
+          showErrorOverlay("Copy your context and paste it manually.", { text: message.text, destinationName: currentPlatform.name,
+            recovery: { transferId: message.transferId, destination: message.destination }, pasteBackup: true, pendingCopy: true });
+        } catch {} // Optional backup UI must not interrupt pasting.
+      };
+      if (document.visibilityState === "hidden") addOwnedEventListener(document, "visibilitychange", showCopyBackup);
+      else showCopyBackup();
       pasteIntoPlatform(message.text, message.destination, message.transferId, message.deadlineAt, message.sourceTabId)
         .then((timing) => {
           finishStatus(true);
@@ -920,16 +934,6 @@
           const draftPresent = error?.diagnostics?.error_code === "editor_has_draft";
           finishStatus(error.code === "user_cancelled" || draftPresent || isSignInRecovery(error) ? null : false);
           sendResponse({ ok: false, error: error.message, code: error.code || null, diagnostics: error.diagnostics || null });
-        })
-        .finally(() => {
-          if (!instanceActive || cancelledTransferIds.has(message.transferId) || message.destination !== currentPlatform.id
-            || !DESTINATION_LANDING_PATHS[currentPlatform.id]?.includes(window.location.pathname.replace(/\/+$/, "") || "/")
-            || typeof message.text !== "string" || !message.text.trim()) return;
-          // Destination-only backup, after replying: optional UI cannot fail paste.
-          try {
-            showErrorOverlay("Copy your context and paste it manually.", { text: message.text, destinationName: currentPlatform.name,
-              recovery: { transferId: message.transferId, destination: message.destination }, pasteBackup: true, pendingCopy: true });
-          } catch {}
         });
 
       return true;
