@@ -3544,7 +3544,39 @@
     // A disabled or read-only composer can remain visible while a replacement
     // is mounting. Select among ready candidates instead of retrying the
     // highest-scoring unusable element until the paste deadline expires.
-    return findPlatformInput(platform, { readyOnly: true });
+    const input = findPlatformInput(platform, { readyOnly: true });
+    if (platform.id === "grok") {
+      // Temporary local diagnosis only: no editor text, HTML or telemetry.
+      try {
+        const matches = [...platform.inputSelectors, ...platform.fallbackSelectors]
+          .map(selector => ({ selector, elements: Array.from(document.querySelectorAll(selector)) }));
+        const editors = [...new Set(matches.flatMap(match => match.elements))];
+        if (retainedPlatformInput && !editors.includes(retainedPlatformInput)) editors.push(retainedPlatformInput);
+        console.debug("[CAP_GROK_DEBUG] editor scan", {
+          at: Date.now(), documentReadyState: document.readyState,
+          visibility: document.visibilityState, focused: document.hasFocus(),
+          selectors: matches.map(({ selector, elements }) => ({ selector, count: elements.length })),
+          editors: editors.map(element => {
+            const rect = element.getBoundingClientRect();
+            const reasons = [];
+            if (!isVisible(element)) reasons.push("not_visible");
+            if (element.closest("[aria-hidden='true']")) reasons.push("aria_hidden");
+            if (isContextGeneratorNode(element)) reasons.push("extension_ui");
+            if (isModalEditorCandidate(element)) reasons.push("inside_dialog");
+            if (isDisabled(element)) reasons.push("disabled");
+            if (element.readOnly) reasons.push("read_only");
+            if (!(element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) && !element.isContentEditable) reasons.push("not_editable");
+            return { tag: element.tagName, connected: element.isConnected,
+              width: rect.width, height: rect.height,
+              contenteditable: element.getAttribute("contenteditable"),
+              ready: isEditorReady(element), selected: element === input,
+              retained: element === retainedPlatformInput, rejectionReasons: reasons };
+          }),
+          editorFound: Boolean(input)
+        });
+      } catch { /* Debugging must never interrupt paste. */ }
+    }
+    return input;
   }
 
   function cancelPendingPasteRecheck() {
