@@ -1702,7 +1702,7 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
   let failureRecorded = false;
   let fetchMs = 0, parseMs = 0, requestCount = 0;
   try {
-    const telemetry = getPreparedSummaryTelemetry(transferId) || await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
+    const preparedTelemetry = getPreparedSummaryTelemetry(transferId) || await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
       await restoreActiveTransferTelemetry();
       const active = activeTransferTelemetry.get(transferId);
       if (!active || active.status !== "started") return null;
@@ -1710,6 +1710,10 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
       updatePreparedSummaryTelemetry(active, installId);
       return getPreparedSummaryTelemetry(transferId);
     }), signal || new AbortController().signal);
+    // Optional diagnostics may still describe pre-capture progress. Bind every
+    // part/final receipt to the verified input, not that earlier nullable count;
+    // the large endpoint rejects a telemetry/totalChars mismatch before routing.
+    const telemetry = preparedTelemetry ? { ...preparedTelemetry, character_count: conversation.length } : null;
     checkTransferOperation(operation);
     checkTransferDeadline(deadlineAt);
     const result = await globalThis.CapLargeTransfer.summarize({ conversation, transferId, signal,

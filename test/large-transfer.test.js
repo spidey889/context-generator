@@ -127,6 +127,22 @@ function backgroundFixture(fetchImpl, consent = () => true) {
     queued, checkpoints, localDebug, proofs, progress, sandbox };
 }
 
+test("large requests use the verified input count when the optional telemetry snapshot predates capture", async () => {
+  const requests = [], input = "x".repeat(1000001);
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body); requests.push(payload);
+    assert.equal(payload.telemetry.character_count, input.length);
+    if (payload.large.phase === "part") return { ok: true,
+      json: async () => ({ summary: "Accepted part", receipt: `part-${payload.large.index}` }) };
+    return { ok: true, json: async () => ({ summary: "Complete handoff" }) };
+  });
+  const pendingCapture = { attempt_id: transferId, character_count: null, status: "started", last_stage: "capture_started" };
+  state.sandbox.getPreparedSummaryTelemetry = () => pendingCapture;
+  await state.run(input);
+  assert.equal(requests.length, 4);
+  assert.equal(pendingCapture.character_count, null, "Do not mutate a shared diagnostic snapshot.");
+});
+
 test("background uses only the separate endpoint and persists only a complete final receipt", async () => {
   const requests = [];
   const state = backgroundFixture(async (url, options) => {
