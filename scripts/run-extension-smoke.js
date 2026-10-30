@@ -2150,12 +2150,41 @@ async function verifyChatGptLongPaste(session) {
     assert.equal(result.pasteEvents, 0, "Do not trigger ChatGPT's long-paste attachment handler");
     assert.equal(result.sends, 0);
   }
+  // A native editor can restore its state and move focus during insertion.
+  // A fallback must never select/replace an unrelated search field.
+  await session.evaluate(`(() => {
+    const editor = document.getElementById('prompt-textarea');
+    editor.textContent = '';
+    // Current native ChatGPT has no prompt-textarea ID.
+    editor.style.whiteSpace = getComputedStyle(editor).whiteSpace;
+    editor.classList.add('ProseMirror');
+    editor.removeAttribute('id');
+    const search = document.createElement('input');
+    search.id = 'native-search'; search.type = 'search'; search.value = 'Keep this search query';
+    document.body.prepend(search);
+    let moved = false;
+    editor.addEventListener('input', event => {
+      if (!event.isTrusted || moved) return;
+      moved = true; editor.textContent = ''; search.focus();
+    });
+  })()`);
+  await session.evaluate(`window.__capSmokePaste(${JSON.stringify(carry)}, Date.now() + 10000)`, contextId);
+  assert.equal(await session.evaluate("document.getElementById('native-search').value"), 'Keep this search query',
+    'ChatGPT fallback must not replace another native field after focus moves');
+  assert.equal(await session.evaluate("document.querySelector('.ProseMirror').innerText.replace(/\\n{3,}/g, '\\n\\n')"), carry);
+  // Stress payload size separately from thousands of native paragraph edits.
+  const largeCarry = carry + '\n' + Array.from({ length: 40 }, () =>
+    'Keep this additional synthetic context complete. '.repeat(100)).join('\n') + '\nEND_LARGE_CHATGPT_CARRY';
+  await session.evaluate("document.querySelector('.ProseMirror').textContent = ''; true");
+  await session.evaluate(`window.__capSmokePaste(${JSON.stringify(largeCarry)}, Date.now() + 15000)`, contextId);
+  assert.equal(await session.evaluate("document.querySelector('.ProseMirror').innerText.replace(/\\n{3,}/g, '\\n\\n')"), largeCarry);
+  assert.equal(await session.evaluate("window.__longPasteEvents + window.__longPasteSendClicks"), 0);
   if (FAILURE_ARTIFACT_DIR) {
     await fs.promises.mkdir(FAILURE_ARTIFACT_DIR, { recursive: true });
     const shot = await session.call('Page.captureScreenshot', { format: 'png' });
     await fs.promises.writeFile(path.join(FAILURE_ARTIFACT_DIR, 'chatgpt-long-paste.png'), Buffer.from(shot.data, 'base64'));
   }
-  process.stdout.write(`✓ Installed Brave ChatGPT: ${carry.length} characters exactly once, no attachment/paste event, repeat delivery safe, no Send.\n`);
+  process.stdout.write(`✓ Installed Brave ChatGPT: ${carry.length}/${largeCarry.length} characters intact, repeat delivery safe, unrelated focus preserved, no attachment/paste event or automatic Send.\n`);
 }
 
 async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {

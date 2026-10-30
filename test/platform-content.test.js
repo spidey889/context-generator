@@ -4175,6 +4175,7 @@ for (const nativeInsert of [true, false]) clockTest(`ChatGPT long carries stay i
   editor.isContentEditable = true;
   const hooks = loadPlatformContent([editor], "chatgpt.com");
   const attachments = [], commands = [];
+  editor.focus = () => { hooks.document.activeElement = editor; };
   hooks.window.getSelection = () => ({ removeAllRanges() {}, addRange() {} });
   hooks.document.createRange = () => ({ selectNodeContents() {} });
   editor.dispatchEvent = event => {
@@ -4196,12 +4197,57 @@ for (const nativeInsert of [true, false]) clockTest(`ChatGPT long carries stay i
   assert.equal(commands.length, inserted, "An already delivered carry is never reinserted");
 });
 
+clockTest("ChatGPT fallback preserves native focus, restored drafts and unavailable editors", async () => {
+  for (const scenario of ["moved", "redirected", "draft", "dom-draft", "detached", "readonly"]) {
+    const carry = "Preserve this complete context carry.";
+    const draft = "My restored native draft";
+    const editor = new FakeElement({ attrs: { contenteditable: "true", role: "textbox", class: "ProseMirror" } });
+    editor.isContentEditable = true;
+    const search = new FakeElement({ tag: "input", attrs: { type: "search" } });
+    search.value = "Keep this search query";
+    const hooks = loadPlatformContent([editor, search], "chatgpt.com");
+    hooks.registerElementId("context-generator-fallback-modal", new FakeElement());
+    let calls = 0, focuses = 0;
+    editor.focus = () => {
+      hooks.document.activeElement = ++focuses > 1 && scenario === "redirected" ? search : editor;
+      if (focuses === 2 && scenario === "draft") editor.innerText = editor.textContent = draft;
+    };
+    hooks.window.getSelection = () => ({ removeAllRanges() {}, addRange() {} });
+    hooks.document.createRange = () => ({ selectNodeContents() {} });
+    hooks.document.execCommand = (_command, _ui, text) => {
+      if (++calls === 1) {
+        hooks.document.activeElement = search;
+        if (scenario === "detached") editor.isConnected = false;
+        if (scenario === "readonly") editor.isContentEditable = false;
+        return false;
+      }
+      if (scenario === "dom-draft") { editor.innerText = editor.textContent = draft; return false; }
+      const active = hooks.document.activeElement;
+      if (active === search) search.value = text;
+      else editor.innerText = editor.textContent = text;
+      return true;
+    };
+    const unavailable = ["redirected", "detached", "readonly"].includes(scenario);
+    const pending = hooks.pasteIntoPlatform(carry, "chatgpt", `fallback-${scenario}`, Date.now() + (unavailable ? 200 : 5000));
+    if (scenario === "moved") await pending;
+    else await assert.rejects(pending, error => {
+      assert.equal(error.diagnostics?.error_code, unavailable ? "transfer_timeout" : "editor_has_draft", `${scenario}: ${error.message}`);
+      return true;
+    });
+    assert.equal(search.value, "Keep this search query", scenario);
+    assert.equal(editor.textContent, scenario.includes("draft") ? draft : scenario === "moved" ? carry : "", scenario);
+    assert.equal(calls, scenario === "moved" || scenario === "dom-draft" ? 2 : 1, "no later unsafe write");
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
 clockTest("paste deadline stops contenteditable fallbacks after native handlers expire it", async (t) => {
   for (const destination of ["chatgpt", "gemini"]) {
     const editor = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
     editor.isContentEditable = true;
     const hooks = loadPlatformContent([editor], destination === "chatgpt" ? "chatgpt.com" : "gemini.google.com");
     const commands = [];
+    editor.focus = () => { hooks.document.activeElement = editor; };
     hooks.window.getSelection = () => ({ removeAllRanges() {}, addRange() {} });
     hooks.document.createRange = () => ({ selectNodeContents() {} });
     const expire = () => t.mock.timers.setTime(Date.now() + 200);

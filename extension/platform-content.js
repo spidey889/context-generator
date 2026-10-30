@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-local-retention-check-v224";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-chatgpt-write-ownership-v225";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -3834,21 +3834,39 @@
   }
 
   function setChatGptEditorText(element, text, guard = null) {
+    const canWrite = () => element.isConnected && isEditorReady(element) && element.contains(document.activeElement);
+    const prepareRetry = () => {
+      guard?.check();
+      if (!element.isConnected || !isEditorReady(element)) return false;
+      element.focus();
+      guard?.check();
+      if (!canWrite()) return false;
+      // Native input/focus handlers can move focus, remount the editor or
+      // restore a draft. Never let a document-wide selectAll target another
+      // field, or let a later DOM fallback overwrite newly restored text.
+      if (getElementText(element).trim()) {
+        if (editorContainsText(element, text)) return false;
+        globalThis.CapTransferDiagnostics?.update(guard?.diagnostics, { draft_present: true });
+        throw createDiagnosticError("ChatGPT editor already contains text. Use an empty chat or copy the context manually.", "editor_has_draft");
+      }
+      selectEditorContents(element);
+      guard?.check();
+      return canWrite();
+    };
     selectEditorContents(element);
     guard?.check();
+    if (!canWrite()) return;
     // ChatGPT turns long clipboard pastes into attachments outside the editor.
     // Insert as text so a hidden card cannot trigger a second fallback copy.
     document.execCommand("insertText", false, text);
 
     if (!editorContainsText(element, text)) {
-      guard?.check();
-      document.execCommand("selectAll", false, null);
-      guard?.check();
+      if (!prepareRetry()) return;
       document.execCommand("insertText", false, text);
     }
 
     if (!editorContainsText(element, text)) {
-      guard?.check();
+      if (!prepareRetry()) return;
       element.textContent = text;
     }
 
