@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-composer-retry-drafts-v226";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-destination-copy-backup-v227";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -920,6 +920,16 @@
           const draftPresent = error?.diagnostics?.error_code === "editor_has_draft";
           finishStatus(error.code === "user_cancelled" || draftPresent || isSignInRecovery(error) ? null : false);
           sendResponse({ ok: false, error: error.message, code: error.code || null, diagnostics: error.diagnostics || null });
+        })
+        .finally(() => {
+          if (!instanceActive || cancelledTransferIds.has(message.transferId) || message.destination !== currentPlatform.id
+            || !DESTINATION_LANDING_PATHS[currentPlatform.id]?.includes(window.location.pathname.replace(/\/+$/, "") || "/")
+            || typeof message.text !== "string" || !message.text.trim()) return;
+          // Destination-only backup, after replying: optional UI cannot fail paste.
+          try {
+            showErrorOverlay("Copy your context and paste it manually.", { text: message.text, destinationName: currentPlatform.name,
+              recovery: { transferId: message.transferId, destination: message.destination }, pasteBackup: true, pendingCopy: true });
+          } catch {}
         });
 
       return true;
@@ -9927,7 +9937,7 @@
     const message = getUserFacingTransferErrorMessage(error);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     // Keep recovery until copying succeeds; allow a short read before its exit.
-    const noticeDurationMs = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
+    const noticeDurationMs = copiedContext?.pasteBackup ? 10000 : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
     const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
@@ -10046,7 +10056,7 @@
 
     const title = document.getElementById("context-generator-error-title");
     if (title) {
-      title.textContent = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? `Sign in to ${copiedContext.destinationName}` : "Summary copied to your clipboard") : copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
+      title.textContent = copiedContext?.pasteBackup ? "In case paste did not work" : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? `Sign in to ${copiedContext.destinationName}` : "Summary copied to your clipboard") : copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
         ? CHATGPT_LOGGED_OUT_ERROR_TITLE
         : isNoConversationError
           ? NO_CONVERSATION_ERROR_TITLE
@@ -10083,7 +10093,7 @@
     }
     if (copyAgain) {
       copyAgain.style.display = copiedContext ? "block" : "none";
-      copyAgain.textContent = copiedContext?.pendingCopy ? "Copy summary" : "Copy again";
+      copyAgain.textContent = copiedContext?.pendingCopy ? (copiedContext.pasteBackup ? "Copy context" : "Copy summary") : "Copy again";
       copyAgain.disabled = false;
       if (copiedContext) {
         const owner = errorDiv.contextGeneratorCopyNoticeOwner = {};
