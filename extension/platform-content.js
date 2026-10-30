@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-paste-confirmation-v222";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-paste-copy-recovery-v223";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -884,6 +884,21 @@
           { transferId: message.transferId, destination: message.destination });
       }
       sendResponse({ ok: allowed });
+      return false;
+    }
+    if (message?.type === "SHOW_PASTE_RECOVERY") {
+      const allowed = message.destination === currentPlatform.id && instanceActive
+        && !cancelledTransferIds.has(message.transferId)
+        && (!Number.isFinite(message.deadlineAt) || message.deadlineAt > Date.now())
+        && DESTINATION_LANDING_PATHS[currentPlatform.id]?.includes(window.location.pathname.replace(/\/+$/, "") || "/")
+        && typeof message.text === "string" && Boolean(message.text.trim());
+      if (allowed) {
+        endDestinationWaitingStatus(message.transferId);
+        document.getElementById(DESTINATION_STATUS_ID)?.remove();
+        showFallbackModal(message.text, currentPlatform.name, false, false, false,
+          { destinationCopy: true, pasteFailed: true, recovery: { transferId: message.transferId, destination: message.destination } });
+      }
+      sendResponse({ ok: Boolean(allowed) });
       return false;
     }
     if (message?.type === "PASTE_CONTEXT") {
@@ -10204,7 +10219,7 @@
   }
 
   function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false,
-    { destinationCopy = false, recovery = null, largeTranscript = false, signInRequired = false } = {}) {
+    { destinationCopy = false, recovery = null, largeTranscript = false, signInRequired = false, pasteFailed = false } = {}) {
     // A new destination recovery owns the carry. A pending Copy again from an
     // older notice must not reopen its text over this dialog after rejection.
     const copyNotice = document.getElementById("context-generator-error-overlay");
@@ -10578,7 +10593,7 @@
     modal.contextGeneratorPreviousFocus = document.activeElement;
 
     const title = document.getElementById("context-generator-fallback-title");
-    if (title) title.textContent = signInRequired ? `Sign in to ${destinationName}` : draftPresent ? "Your draft is safe" : pasteUnconfirmed ? "Check your destination tab" : isBackup ? "In case the paste didn't work" : "Context is ready to copy";
+    if (title) title.textContent = signInRequired ? `Sign in to ${destinationName}` : draftPresent ? "Your draft is safe" : pasteUnconfirmed ? "Check your destination tab" : pasteFailed ? "Pasting failed" : isBackup ? "In case the paste didn't work" : "Context is ready to copy";
 
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
@@ -10590,6 +10605,8 @@
         ? "We noticed your text box has text in it. Here’s your conversation, ready to be copied."
         : pasteUnconfirmed
         ? `The paste into ${destinationName} wasn't confirmed. Check that tab first. If the context is missing, copy it from here.`
+        : pasteFailed
+        ? `Your context is ready. Copy it and paste it into ${destinationName}'s message box.`
         : isBackup
         ? `If anything got lost on the way to ${destinationName}, no worries—your context is right here. Copy it from here.`
         : `Auto-paste did not land in ${destinationName}. The context is safe here - copy it, paste it into the message box, then send when ready.`;

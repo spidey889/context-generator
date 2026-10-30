@@ -3574,6 +3574,30 @@ test("Claude new-chat rejection records the route and platform checks without pr
   }
 });
 
+clockTest("final paste failure offers the existing destination copy box on all five platforms", () => {
+  for (const [host, platform] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
+    const hooks = loadPlatformContent([], host);
+    const modal = new FakeElement(), title = new FakeElement(), desc = new FakeElement(), text = new FakeElement({ tag: "textarea" });
+    for (const [id, element] of [["modal", modal], ["title", title], ["desc", desc], ["text", text]]) hooks.registerElementId(`context-generator-fallback-${id}`, element);
+    const message = { type: "SHOW_PASTE_RECOVERY", destination: platform, transferId: "copy-test", text: "Complete prepared summary", deadlineAt: Date.now() + 10000 };
+    let reply;
+    const send = overrides => hooks.runtimeMessageListeners[0]({ ...message, ...overrides }, {}, value => { reply = value; });
+    send({});
+    assert.equal(reply.ok, true, host);
+    assert.equal(modal.style.display, "flex");
+    assert.equal(title.textContent, "Pasting failed");
+    assert.equal(text.value, message.text);
+    assert.match(desc.textContent, /Copy it and paste it/);
+    for (const overrides of [{ destination: "other" }, { text: "" }, { deadlineAt: Date.now() - 1 }]) {
+      modal.style.display = "none"; send(overrides);
+      assert.equal(reply.ok, false); assert.equal(modal.style.display, "none");
+    }
+    hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: "copy-test" }, {}, () => {});
+    send({}); assert.equal(reply.ok, false, "cancelled transfers cannot reopen recovery");
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
 clockTest("unconfirmed paste recovery asks to check the destination and retains the full carry", () => {
   const hooks = loadPlatformContent([], "claude.ai");
   const modal = new FakeElement();

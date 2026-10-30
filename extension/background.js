@@ -2374,6 +2374,12 @@ async function transferToDestinationObserved(
     const error = new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
     error.code = "paste_failed";
     error.diagnosticCode = pasteResult?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult) || "unknown_error";
+    // Offer manual copy only after automatic recovery is exhausted. Never put
+    // a failure box in the first tab while a fresh-tab retry may still succeed.
+    if (!["editor_has_draft", "conversation_changed", "transfer_timeout", "user_cancelled"].includes(error.diagnosticCode)) {
+      chrome.tabs.sendMessage(destinationTabId, { type: "SHOW_PASTE_RECOVERY", destination: destinationId,
+        text: trimmedText, transferId, deadlineAt }).catch(() => {});
+    }
     throw error;
   }
 

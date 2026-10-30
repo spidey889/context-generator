@@ -6,6 +6,8 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-30
 
+- **Offer manual copy on the failed destination too.** After automatic paste retries are exhausted, reuse the existing copy dialog with “Pasting failed” and the exact prepared summary/context. Keep the source backup, draft/sign-in flows and expired/cancelled/navigation guards; do not delay completion or interrupt a retry. Five-platform checks and a real Brave rendering fixture verify the dialog text, complete carry and unchanged editor.
+
 - **Complete verified pastes without stalled source checks or false Send failures.** The owner sent a pasted carry and received Grok's reply while the extension still showed “Pasting”; a recorded attempt later timed out waiting for acknowledgement. The screenshot established delivery, but historical diagnostics did not establish which browser operation stalled.
   - Audit reproduction found the exact carry present and locally verified, then a second worker ownership check pending. Native trusted Enter submitted it and changed the new-chat route; the resumed guard threw `conversation_changed` despite `paste_populated=true`. The unchanged logic failed for all five adapters, and an isolated Brave fixture reproduced the visible false failure.
   - Keep source/cancellation/deadline/draft checks before writes. Bound unanswered ownership replies to six seconds or the earlier attempt deadline, reject pending checks on cancellation, and prevent late replies from writing. Remove redundant post-verification worker checks and the focused destination's final source-tab read; preserve existing native activation and stability/recovery policies.

@@ -1335,6 +1335,12 @@ clockTest("fresh recovery retains the first editor failure alongside the final d
         : { ok: finalOk, error: "PRIVATE final error", diagnostics: last } });
     const response = await harness.sendTransfer("claude", 41);
     assert.equal(response.ok, finalOk);
+    const recovery = harness.operations.sent.filter(({ message }) => message.type === "SHOW_PASTE_RECOVERY");
+    assert.equal(recovery.length, finalOk ? 0 : 1, "only exhausted recovery offers the destination copy box");
+    if (!finalOk) {
+      assert.notEqual(recovery[0].tabId, 41, "do not interrupt the first tab while retrying");
+      assert.equal(recovery[0].message.text, harness.operations.sent.find(({ message }) => message.type === "PASTE_CONTEXT").message.text);
+    }
     assert.deepEqual(JSON.parse(JSON.stringify(response.diagnostics.prepared_diagnostics)), first);
     assert.equal(response.diagnostics.recovery_error_code, "paste_not_retained");
     assert.equal(response.diagnostics.fresh_recovery, true);
@@ -1523,7 +1529,8 @@ test("prepared-tab recovery opens at most one fresh destination", async () => {
 
   assert.equal(response.ok, false);
   assert.equal(harness.operations.created.length, 1);
-  assert.deepEqual(harness.operations.sent.map(({ tabId }) => tabId), [41, 100]);
+  assert.deepEqual(harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT").map(({ tabId }) => tabId), [41, 100]);
+  assert.deepEqual(harness.operations.sent.filter(({ message }) => message.type === "SHOW_PASTE_RECOVERY").map(({ tabId }) => tabId), [100]);
 });
 
 test("Claude, ChatGPT and Gemini focus and settle prepared and fresh composers before paste", async () => {
