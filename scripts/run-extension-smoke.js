@@ -1152,6 +1152,73 @@ async function waitFor(check, description, timeoutMs = SMOKE_TIMEOUT_MS, interva
   throw new Error(`Timed out waiting for ${description}.${detail}`);
 }
 
+async function dispatchTrustedFixtureInput(session, { selector, key = null, previousSession = null, isClosed = async () => false }) {
+  // CDP activation/focus acknowledgements can precede the renderer's input
+  // readiness. Observe delivery at window capture, before extension handlers.
+  // Retry only missing browser input, never an action the product received.
+  const eventType = key ? "keydown" : "click";
+  const target = JSON.stringify(selector);
+  await previousSession?.call("Emulation.setFocusEmulationEnabled", { enabled: false });
+  await session.evaluate(`(() => {
+    window.__capSmokeInput = { received: false };
+    window.__capSmokeInputListener = event => {
+      if (!event.isTrusted || (${JSON.stringify(key)} && event.key !== ${JSON.stringify(key)})) return;
+      const element = document.querySelector(${target});
+      window.__capSmokeInput = { received: true, onTarget: !!element && (event.target === element || element.contains(event.target)) };
+    };
+    window.addEventListener(${JSON.stringify(eventType)}, window.__capSmokeInputListener, true);
+  })()`);
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await session.call("Page.bringToFront");
+      await session.call("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await session.evaluate(`document.querySelector(${target}).focus()`);
+      await waitFor(() => session.evaluate(`document.visibilityState === 'visible' && document.hasFocus()
+        && document.activeElement === document.querySelector(${target})`), "native fixture input focus");
+      // Flush layout/compositor work after revealing or replacing the fixture.
+      await session.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+      try {
+        if (key) {
+          await session.call("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: 27 });
+        } else {
+          const point = await session.evaluate(`(() => {
+            const element = document.querySelector(${target}), r = element.getBoundingClientRect();
+            const x = r.x + r.width / 2, y = r.y + r.height / 2;
+            if (!element.contains(document.elementFromPoint(x, y))) throw new Error('Native fixture button is obscured');
+            return { x, y };
+          })()`);
+          await session.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+          await session.call("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
+          await session.call("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
+        }
+      } catch (error) {
+        // Successful destination cancellation can close CDP before its reply.
+        if (await isClosed()) return;
+        throw error;
+      }
+      let observed;
+      const until = Date.now() + 500;
+      do {
+        if (await isClosed()) return;
+        observed = await session.evaluate("window.__capSmokeInput");
+        if (observed.received) {
+          assert.equal(observed.onTarget, true, "Trusted fixture input must reach its intended element");
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 20));
+      } while (Date.now() < until);
+      process.stdout.write(`Brave missed native ${eventType} delivery (attempt ${attempt + 1}/3).\n`);
+    }
+    throw new Error(`Brave did not deliver a trusted ${eventType} to the fixture after three attempts.`);
+  } catch (error) {
+    if (await isClosed()) return;
+    throw error;
+  } finally {
+    await session.evaluate(`window.removeEventListener(${JSON.stringify(eventType)}, window.__capSmokeInputListener, true);
+      delete window.__capSmokeInputListener; delete window.__capSmokeInput;`).catch(() => {});
+  }
+}
+
 async function waitForProcessExit(child, timeoutMs) {
   if (!child || child.exitCode !== null || child.signalCode != null) return;
   await new Promise(resolve => {
@@ -1436,26 +1503,16 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   if (ESCAPE_SMOKE === "destination") {
     await waitFor(() => destination.evaluate('document.getElementById("context-generator-destination-status")?.textContent.startsWith("Polishing")'), "the revealed summary waiting cue");
   }
-  // CDP delivers a trusted native key event; dispatchEvent would only verify
-  // synthetic panel dismissal, which deliberately cannot cancel a transfer.
-  await session.call("Page.bringToFront");
-  await session.call("Emulation.setFocusEmulationEnabled", { enabled: true });
   assert.equal(await destination.evaluate('document.querySelector("textarea").value'), "");
   assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
-  // A tab activation acknowledgement can precede native editor focus. Target
-  // the composer and await that state before sending the one trusted Escape.
-  await session.evaluate('document.querySelector(\'textarea, [contenteditable="true"]\').focus()');
-  await waitFor(() => session.evaluate('document.visibilityState === "visible" && document.hasFocus() && document.activeElement === document.querySelector(\'textarea, [contenteditable="true"]\')'), "the focused Escape composer");
   await session.evaluate(`window.__capSmokeEscapeKeys = []; window.addEventListener('keydown', event => {
     window.__capSmokeEscapeKeys.push({ key: event.key, trusted: event.isTrusted, visible: document.visibilityState, focused: document.hasFocus() });
   }, true);`);
   const escapeStartedAt = Date.now();
-  try {
-    await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  } catch (error) {
-    // Closing the destination can beat the key-event acknowledgement itself.
-    if (ESCAPE_SMOKE !== "destination" || (await getTargets(devToolsPort)).some(item => item.id === target.id)) throw error;
-  }
+  await dispatchTrustedFixtureInput(session, {
+    selector: 'textarea, [contenteditable="true"]', key: "Escape",
+    isClosed: () => getTargets(devToolsPort).then(targets => !targets.some(item => item.id === target.id))
+  });
   if (ESCAPE_SMOKE === "source") {
     const local = await sourceSession.evaluate(`(() => {
       const overlay = document.getElementById("context-generator-overlay");
@@ -2226,11 +2283,7 @@ async function verifyDeepSeekPaste({ browserSession, sourceSession, devToolsPort
       assert.equal(await session.evaluate("document.querySelector('textarea').value"), carry);
       assert.equal(await session.evaluate("window.__deepseekSends"), 0, "pasting never sends");
       if (scenario === "send-before-activation") {
-        await session.call("Page.bringToFront");
-        await waitFor(() => session.evaluate("document.visibilityState === 'visible'"), "visible DeepSeek destination");
-        const point = await session.evaluate("(() => { const r = document.querySelector('[role=button]').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
-        await session.call("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
-        await session.call("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
+        await dispatchTrustedFixtureInput(session, { selector: '[role="button"]', previousSession: sourceSession });
         assert.equal(await session.evaluate("window.__deepseekTrustedSend"), true);
         assert.equal(await session.evaluate("window.__deepseekSentCarry"), carry);
       } else {
@@ -4121,5 +4174,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort, getTargets, waitFor,
+module.exports = { CdpSession, dispatchTrustedFixtureInput, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort, getTargets, waitFor,
   startFixtureServer, expectedChatGptConversation, SUMMARY_TEXT };
