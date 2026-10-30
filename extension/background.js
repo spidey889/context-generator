@@ -1733,7 +1733,9 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
         const onAbort = () => controller.abort(requestSignal.reason);
         requestSignal.addEventListener("abort", onAbort, { once: true });
         if (requestSignal.aborted) onAbort();
-        const expiresAt = Math.min(requestDeadline, Date.now() + 85000);
+        // Include upload/response transit around the server's 75s model budget;
+        // a live slow-part timeout arrived after 94s with intact NDJSON framing.
+        const expiresAt = Math.min(requestDeadline, Date.now() + 110000);
         const timer = setTimeout(() => controller.abort(), Math.max(0, expiresAt - Date.now()));
         const check = () => {
           checkTransferOperation(operation);

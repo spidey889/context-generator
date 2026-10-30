@@ -12,7 +12,6 @@ const BACKUP_MODEL = "deepseek-v4.1-flash:free";
 const BACKUP_PROVIDER = Object.freeze({ id: "tokenharbor", label: "TokenHarbor",
   url: "https://tokenharbor.ai/v1/chat/completions" });
 const REQUEST_TIMEOUT_MS = 75000;
-const PRIMARY_WITH_BACKUP_MS = 45000;
 const LIMIT_KEY = Symbol.for("cap-context.large-summary-rate-limit.v1");
 
 // Chunk requests must not consume the ordinary summary endpoint's 8/minute
@@ -88,36 +87,52 @@ async function handler(req, res) {
   const failures = createProviderFailureLog({ attemptId: validation.telemetry?.attempt_id, telemetry: validation.telemetry });
   try {
     const modelsTried = [], providerTimes = { openrouterMs: 0, tokenharborMs: 0 };
-    let result;
-    for (const [index, route] of routes.entries()) {
-      controller.signal.throwIfAborted();
-      const remainingMs = REQUEST_TIMEOUT_MS - (Date.now() - startedAt);
-      if (remainingMs <= 0) { controller.abort(); controller.signal.throwIfAborted(); }
-      // Reserve backup time inside the existing 75s request, not another full
-      // timeout. Only this failed piece/final merge is retried on DeepSeek.
-      const budgetMs = Math.min(remainingMs, index === 0 && routes.length > 1 ? PRIMARY_WITH_BACKUP_MS : REQUEST_TIMEOUT_MS);
+    // Both approved free routes share one wall-clock deadline. Waiting 45s for
+    // a stalled primary left only 30s for DeepSeek's thinking/completion. Race
+    // complete validated results instead; no partial output can win or be signed.
+    const routeControllers = routes.map(() => new AbortController());
+    const work = routes.map(async (route, index) => {
+      const signal = AbortSignal.any([controller.signal, routeControllers[index].signal]);
       const routeStarted = Date.now();
-      modelsTried.push(route.model);
+      let onAbort;
       try {
-        const candidate = await createSummaryWithProvider({ ...route, profile,
+        signal.throwIfAborted();
+        const budgetMs = REQUEST_TIMEOUT_MS - (Date.now() - startedAt);
+        if (budgetMs <= 0) { controller.abort(); controller.signal.throwIfAborted(); }
+        modelsTried.push(route.model);
+        // Native abort should stop fetch/body reads, but an unresponsive adapter
+        // must not hold the response open past expiry or a winning peer.
+        const cancelled = new Promise((_resolve, reject) => {
+          onAbort = () => reject(signal.reason);
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        });
+        const candidate = await Promise.race([createSummaryWithProvider({ ...route, profile,
           initialMessages: getInitialSummaryMessages(conversation, profile), requestBudgetMs: budgetMs,
-          requestContext: { signal: controller.signal, maxAttempts: 1, firstAnswerTimeoutMs: budgetMs,
+          requestContext: { signal, maxAttempts: 1, firstAnswerTimeoutMs: budgetMs,
             inputChars: conversation.length, routeIndex: index + 1, ...(route.keySlot ? { keySlot: route.keySlot } : {}),
             // Acknowledge each model attempt immediately, as /summarize does.
             // Waiting for the first timed heartbeat leaves an MV3 fetch pending
             // on headers; runtime keepalive does not remove that fetch limit.
             // Reset is control-only: intermediate summaries remain private.
-            onDelta() {}, onStart: channel.reset, onProviderFailure: observation => failures.record(observation) } });
+            onDelta() {}, onStart: channel.reset, onProviderFailure: observation => failures.record(observation) } }), cancelled]);
+        signal.throwIfAborted();
         if (candidate.model !== route.model || candidate.provider !== route.provider.id
           || /^(?:length|max_tokens|max_output_tokens)$/i.test(String(candidate.finishReason || ""))
           || !candidate.summary?.trim() || candidate.summary.length > protocol.MAX_SUMMARY_CHARS)
           throw new Error("Incomplete large summary result");
-        result = candidate;
-      } catch {
-        // Caller cancellation/expiry must never start the backup provider.
-        controller.signal.throwIfAborted();
-      } finally { providerTimes[`${route.provider.id}Ms`] += Date.now() - routeStarted; }
-      if (result) break;
+        return candidate;
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+        providerTimes[`${route.provider.id}Ms`] = Date.now() - routeStarted;
+      }
+    });
+    let result;
+    try { result = await Promise.any(work); }
+    catch { controller.signal.throwIfAborted(); }
+    finally {
+      for (const peer of routeControllers) peer.abort();
+      await Promise.allSettled(work); // Each task has its own abort race above.
     }
     controller.signal.throwIfAborted();
     if (Date.now() - startedAt >= REQUEST_TIMEOUT_MS || !result) {
@@ -126,7 +141,7 @@ async function handler(req, res) {
     const timing = { ...result, summary: undefined, modelsTried,
       openrouterModelsTried: modelsTried.filter(model => model === MODEL),
       tokenharborModelsTried: modelsTried.filter(model => model === BACKUP_MODEL), ...providerTimes,
-      fallback: { attempted: modelsTried.length > 1, used: modelsTried.length > 1, servedBy: result.provider, model: result.model },
+      fallback: { attempted: modelsTried.includes(BACKUP_MODEL), used: result.provider === "tokenharbor", servedBy: result.provider, model: result.model },
       totalMs: Date.now() - startedAt,
       inputChars: part ? conversation.length : validation.large.totalChars, outputChars: result.summary.length,
       parts: validation.large.total, phase: validation.large.phase };

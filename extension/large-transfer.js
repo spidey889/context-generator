@@ -2,9 +2,10 @@
 // Text/part receipts live only for this attempt; none enter persistent telemetry.
 (function (root) {
   const encoder = new TextEncoder();
-  // Super VL completed the 500k synthetic case; larger pieces leave less time
-  // for completion on the free endpoint. The server retains its hard 750k cap.
-  const MAX_CHARS = 4000000, MAX_BYTES = 16000000, PART_CHARS = 500000, MAX_PARTS = 16;
+  // Dense 500k inputs exhausted the real free endpoint's primary/backup budgets;
+  // 250k trials completed. 260k also keeps exact 4M Unicode
+  // input within sixteen parts after avoiding split surrogates/CRLF.
+  const MAX_CHARS = 4000000, MAX_BYTES = 16000000, PART_CHARS = 260000, MAX_PARTS = 16;
   const failure = code => Object.assign(new Error("Large-chat summarization could not finish. The full conversation is available to copy."),
     { code, diagnosticCode: code });
   const wireBytes = value => encoder.encode(JSON.stringify(value)).length;
@@ -44,9 +45,11 @@
     signal?.addEventListener("abort", cancelled, { once: true });
     if (signal?.aborted) cancelled();
     // Leave the existing transfer enough room for final delivery/manual recovery.
-    const expiresAt = Math.min(Date.now() + 240000, deadlineAt - 65000);
+    // More, smaller pieces need more batches. Stay below MV3's five-minute
+    // message-event limit and retain the existing delivery/final reservations.
+    const expiresAt = Math.min(Date.now() + 290000, deadlineAt - 65000);
     const timer = setTimeout(() => controller.abort(failure("summary_timeout")), Math.max(0, expiresAt - Date.now()));
-    const partDeadline = Math.min(expiresAt - 80000, Date.now() + 160000);
+    const partDeadline = Math.min(expiresAt - 80000, Date.now() + 210000);
     const check = () => {
       controller.signal.throwIfAborted();
       if (Date.now() >= expiresAt) throw failure("summary_timeout");

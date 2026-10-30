@@ -16,7 +16,7 @@ test("large partitions cover exact Unicode/CRLF input once and stay below both J
     for (const part of parts) {
       assert.equal(part.offset, offset);
       offset += part.conversation.length;
-      assert.ok(part.conversation.length <= 500000);
+      assert.ok(part.conversation.length <= 260000);
       assert.ok(Buffer.byteLength(JSON.stringify({ conversation: part.conversation })) <= 2700000);
       assert.ok(Buffer.byteLength(JSON.stringify(JSON.stringify({ conversation: part.conversation }))) <= 3500000);
       assert.doesNotMatch(part.conversation, /[\uD800-\uDBFF]$/);
@@ -41,15 +41,15 @@ test("large summaries wait for every bounded part and finalize in source order",
         return { summary: `Part ${payload.large.index}`, receipt: `proof-${payload.large.index}` };
       }
       assert.equal(active, 0);
-      assert.deepEqual(payload.parts, Array.from({ length: 8 }, (_, index) => ({ summary: `Part ${index}`, receipt: `proof-${index}` })));
+      assert.deepEqual(payload.parts, Array.from({ length: 16 }, (_, index) => ({ summary: `Part ${index}`, receipt: `proof-${index}` })));
       return { summary: "Complete handoff", summaryProofV3: "a".repeat(64) };
     } });
-  assert.equal(result.partCount, 8);
+  assert.equal(result.partCount, 16);
   assert.equal(result.summary, "Complete handoff");
   assert.ok(peak <= 3 && peak > 1);
   assert.equal(calls.filter(call => call.large.phase === "final").length, 1);
   assert.equal(calls.filter(call => call.large.phase === "part").map(call => call.conversation).join(""), input);
-  assert.deepEqual(progress.at(-1), { completed: 8, total: 8, phase: "final" });
+  assert.deepEqual(progress.at(-1), { completed: 16, total: 16, phase: "final" });
 });
 
 test("a failed part cancels siblings and cannot finalize a partial handoff", async () => {
@@ -139,7 +139,7 @@ test("large requests use the verified input count when the optional telemetry sn
   const pendingCapture = { attempt_id: transferId, character_count: null, status: "started", last_stage: "capture_started" };
   state.sandbox.getPreparedSummaryTelemetry = () => pendingCapture;
   await state.run(input);
-  assert.equal(requests.length, 4);
+  assert.equal(requests.length, 5);
   assert.equal(pendingCapture.character_count, null, "Do not mutate a shared diagnostic snapshot.");
 });
 
@@ -159,7 +159,7 @@ test("background uses only the separate endpoint and persists only a complete fi
       summaryConfirmedAt: "2026-10-29T12:00:00Z", summaryModel: "nvidia/nemotron-3.5-super-vl:free", timing: { model: "nvidia/nemotron-3.5-super-vl:free" } }) };
   });
   const result = await state.run();
-  assert.equal(requests.length, 4);
+  assert.equal(requests.length, 5);
   assert.equal(result.summary, "final handoff");
   assert.equal(state.queued.length, 1);
   assert.equal(state.queued[0].last_stage, "summary_completed");
@@ -196,7 +196,7 @@ test("large Firefox transfers recheck consent for each part and the final reques
   assert.ok(requests.some(request => request.telemetry));
   assert.ok(requests.some(request => request.large.phase === "part" && !Object.hasOwn(request, "telemetry")));
   assert.equal(Object.hasOwn(requests.at(-1), "telemetry"), false);
-  assert.equal(requests.length, 5);
+  assert.equal(requests.length, 9);
 });
 
 test("large fetch failures retain safe dispatch evidence before local recovery and sibling cancellation", async () => {
@@ -241,7 +241,7 @@ test("large HTTP rejection and incomplete streams retain their actual failure bo
   }
 });
 
-clockTest("large requests record an elapsed timeout before response headers", { tickMs: 1000, maxElapsedMs: 90000 }, async () => {
+clockTest("large requests record an elapsed timeout before response headers", { tickMs: 1000, maxElapsedMs: 115000 }, async () => {
   const state = backgroundFixture((_url, { signal }) => new Promise((_, reject) => {
     signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   }));
@@ -250,9 +250,24 @@ clockTest("large requests record an elapsed timeout before response headers", { 
     const record = error.diagnostics.summary_response_failures[0];
     assert.equal(record.phase, "request"); assert.equal(record.reason, "aborted");
     assert.equal(record.aborted, true); assert.equal(record.deadline_elapsed, true);
-    assert.ok(record.elapsed_ms >= 85000);
+    assert.ok(record.elapsed_ms >= 110000);
     return true;
   });
+});
+
+clockTest("large request transit can finish after 85 seconds without aborting accepted work", { tickMs: 1000, maxElapsedMs: 105000 }, async () => {
+  let calls = 0;
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    if (++calls === 1) await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, 95000);
+      options.signal.addEventListener("abort", () => { clearTimeout(timer); reject(options.signal.reason); }, { once: true });
+    });
+    return { ok: true, json: async () => payload.large.phase === "part"
+      ? { summary: "Accepted part", receipt: `part-${payload.large.index}` } : { summary: "Complete handoff" } };
+  });
+  assert.equal((await state.run()).summary, "Complete handoff");
+  assert.equal(state.checkpoints.length, 0);
 });
 
 test("missing large part receipts retain response validation evidence", async () => {

@@ -14,7 +14,7 @@ const largeHandler = require("../api/large-summary");
 // Keep this mode free of worker debugging: attaching a debugger changes MV3
 // lifetime and masked the zero-request preparation failure in investigation.
 const lateTimeoutSmoke = process.env.CAP_CONTEXT_LARGE_SLOW_SMOKE === "timeout";
-const slowProviderMs = process.env.CAP_CONTEXT_LARGE_SLOW_SMOKE === "1" ? 35000 : lateTimeoutSmoke ? 30000 : 0;
+const slowProviderMs = process.env.CAP_CONTEXT_LARGE_SLOW_SMOKE === "1" || lateTimeoutSmoke ? 30000 : 0;
 const finalSummary = 'Verified final handoff: preserve the accepted implementation, all decisions and unresolved work. '
   + 'Continue the latest request by testing the complete transfer before any release.\n\nNext step:\n\n'
   + 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
@@ -30,12 +30,14 @@ async function scenario(failPart, failTransport = false) {
   assert.equal(transcript.length, transcriptChars);
   fixture.data.data.biz_data.chat_messages[0].fragments = [{ type: "REQUEST", content: text }];
   fixture.data.data.biz_data.chat_messages[1].fragments = [{ type: "RESPONSE", content: tail.slice("\n\nAssistant: ".length) }];
-  const requests = [], reports = [];
+  const requests = [], reports = [], upstreamPartIndices = new Map();
   let providerCalls = 0;
   const env = { ...process.env }, nativeFetch = global.fetch;
   process.env.OPENROUTER_API_KEY = "synthetic-smoke-key";
   process.env.TELEMETRY_SIGNING_KEY = "synthetic-large-transfer-smoke-signing-key-only";
   process.env.OPENROUTER_ENABLED = "true";
+  delete process.env.TOKENHARBOR_API_KEY;
+  delete process.env.TOKENHARBOR_BACKUP_API_KEY;
   if (lateTimeoutSmoke) {
     process.env.TOKENHARBOR_API_KEY = "synthetic-smoke-backup";
     process.env.TOKENHARBOR_ENABLED = "true";
@@ -49,7 +51,8 @@ async function scenario(failPart, failTransport = false) {
       providerCalls++;
       // Finish the first batch, then let the real primary/backup deadlines
       // expire. No worker debugger or synthetic client-side timeout is used.
-      if (lateTimeoutSmoke && providerCalls > 3) return new Promise((_resolve, reject) => {
+      const inputPart = lateTimeoutSmoke ? JSON.parse(JSON.parse(options.body).messages[1].content).conversation : null;
+      if (lateTimeoutSmoke && upstreamPartIndices.get(inputPart) >= 3) return new Promise((_resolve, reject) => {
         const abort = () => reject(options.signal.reason);
         options.signal.addEventListener("abort", abort, { once: true });
         if (options.signal.aborted) abort();
@@ -66,7 +69,10 @@ async function scenario(failPart, failTransport = false) {
       const url = new URL(req.url, "http://localhost");
       if (url.pathname === "/api/large-summary") {
         const chunks = []; for await (const chunk of req) chunks.push(chunk);
-        if (req.method === "POST") { req.body = JSON.parse(Buffer.concat(chunks)); requests.push(req.body); }
+        if (req.method === "POST") {
+          req.body = JSON.parse(Buffer.concat(chunks)); requests.push(req.body);
+          if (req.body.large.phase === "part") upstreamPartIndices.set(req.body.conversation, req.body.large.index);
+        }
         // Reproduce a connection ending before the backend calls any model.
         if (failTransport) { res.destroy(); return; }
         res.status = code => { res.statusCode = code; return res; };
@@ -114,7 +120,7 @@ async function scenario(failPart, failTransport = false) {
     const context = await waitFor(() => source.getExtensionContextId(), "4M source extension");
     await waitFor(() => source.evaluate('typeof window.__capSmokeStartDomTransfer === "function"', context), "transfer helper");
     await source.evaluate("window.__capSmokeStartDomTransfer()", context);
-    const terminal = await waitFor(() => reports.find(r => ["failed", "succeeded"].includes(r.status)), "4M terminal report", slowProviderMs ? 220000 : 60000);
+    const terminal = await waitFor(() => reports.find(r => ["failed", "succeeded"].includes(r.status)), "4M terminal report", slowProviderMs ? 320000 : 60000);
     assert.equal(terminal.status, failPart ? "failed" : "succeeded", `Unexpected transfer outcome: ${terminal.failure_reason}`);
     assert.equal(terminal.character_count, transcript.length);
     assert.ok(requests.length >= 1);
@@ -132,7 +138,7 @@ async function scenario(failPart, failTransport = false) {
       assert.equal(terminal.diagnostics.summary_error_code, lateTimeoutSmoke ? "summary_timeout"
         : failTransport ? "summary_transport_failed" : "summary_failed");
       if (lateTimeoutSmoke) assert.equal(requests.filter(r => r.large.phase === "part").length, 6,
-        "Complete the first three of seven parts before the next batch expires.");
+        "Complete the first three of twelve parts before the next batch expires.");
       if (failTransport) {
         assert.equal(providerCalls, 0);
         assert.equal(failure.http_status, undefined);
@@ -158,7 +164,7 @@ async function scenario(failPart, failTransport = false) {
     }
     if (destination) assert.equal(await destination.evaluate("window.sendClicks"), 0);
     assert.doesNotMatch(JSON.stringify(reports), /SYNTHETIC_TOKEN|Decision: preserve source text|Verified final handoff|receipt/);
-    console.log(`PASS ${transcriptChars} chars ${lateTimeoutSmoke ? "3/7 then provider-timeout recovery" : failTransport ? "zero-provider connection failure diagnosis" : failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
+    console.log(`PASS ${transcriptChars} chars ${lateTimeoutSmoke ? "3/12 then provider-timeout recovery" : failTransport ? "zero-provider connection failure diagnosis" : failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
   } catch (error) {
     console.error(JSON.stringify({ requestPhases: requests.map(r => r.large.phase), providerCalls,
       reports: reports.map(r => ({ status: r.status, stage: r.last_stage, reason: r.failure_reason, diagnostics: r.diagnostics })),
