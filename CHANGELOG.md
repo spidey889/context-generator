@@ -6,6 +6,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-30
 
+- **Recognize Grok's native editable attribute variants.** User 44's DeepSeek-to-Grok attempt returned `editor_missing` after 229 checks across two tabs; the report records no usable editor, rather than proving no editor existed.
+  - The current signed-in Grok page uses `contenteditable="true"` and is detected normally. Its observed editor has no hidden or dialog ancestor, so this inspection does not reproduce the historical failure.
+  - Isolated Brave running the actual content script reproduced a concrete selector mismatch: visible native editors with `contenteditable="plaintext-only"` or an empty attribute are writable, but discovery omitted them before the readiness check could run. The old code reached the exact `editor_missing` failure on the plaintext-only editor; the unchanged `true` editor pasted successfully.
+  - Extend only Grok's selectors to those two additional native modes. Preserve existing hidden/dialog exclusions, readiness, draft protection, retry windows, insertion and verification behavior. Keep temporary `[CAP_GROK_DEBUG]` console observations local.
+  - Thirteen focused checks pass, including the new discovery regression and existing draft, disabled-editor, modal and Grok checks. The isolated Brave fixture now discovers and pastes into all three editable modes using the real content script, with no summary service or hosted telemetry.
+  - User 44's page structure was not recorded; the compatibility bug is confirmed, but its role in that historical failure remains unproven. The owner performs unpacked-extension reloads; source changes do not update already installed clients or publish a Store release.
+
 - **Retain per-part large-summary checkpoints in Supabase.** Real transfers can still fall back after several completed parts; the previous HTTP failure report did not identify every finished or pending part.
   - Add a bounded cumulative record for each of up to sixteen parts and the final combine, including request/headers/result stage, observed status, relative timing, request budget and available provider timing/winner.
   - Queue checkpoints independently of the source reply using the existing consent-aware durable outbox. Preserve them across sparse terminal reports and stale progress without storing chat, summaries, receipts, URLs or raw exceptions.

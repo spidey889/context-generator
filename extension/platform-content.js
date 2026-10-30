@@ -408,7 +408,10 @@
         "div[contenteditable='true'][aria-label*='ask' i]",
         "div[contenteditable='true'][role='textbox']",
         "[contenteditable='true'][data-placeholder]",
-        "[contenteditable='true']"
+        "[contenteditable='true']",
+        // These native editable modes pass readiness too; exact 'true' misses them.
+        "[contenteditable='plaintext-only']",
+        "[contenteditable='']"
       ],
       fallbackSelectors: [
         "[data-testid='grokInput'] textarea",

@@ -163,9 +163,10 @@ class FakeElement {
     const existsMatch = selector.match(/^\[([a-z0-9_-]+)\]$/i);
     if (existsMatch) return this.hasAttribute(existsMatch[1]);
 
-    const attrMatch = selector.match(/^\[([^\]*^=]+)([*^]?=)'([^']+)'(?: i)?\]$/);
+    const attrMatch = selector.match(/^\[([^\]*^=]+)([*^]?=)'([^']*)'(?: i)?\]$/);
     if (attrMatch) {
       const [, attrName, operator, expected] = attrMatch;
+      if (!this.hasAttribute(attrName)) return false;
       const actual = String(this.getAttribute(attrName) || "");
       if (!operator) return this.hasAttribute(attrName);
       if (operator === "*=") return actual.toLowerCase().includes(expected.toLowerCase());
@@ -1514,6 +1515,20 @@ clockTest("slow/release: physical scroll movement prevents a premature stale exi
     Array.from({ length: 16 }, (_, index) => `${index % 2 ? "ChatGPT" : "User"}: Delayed tall-message turn ${index + 1}`),
     "every turn must survive in order, without omissions or duplicates"
   );
+});
+
+test("Grok finds native true, plaintext-only and empty editable modes", () => {
+  for (const mode of ["true", "plaintext-only", ""]) {
+    const editor = new FakeElement({ attrs: { contenteditable: mode, role: "combobox" } });
+    editor.isContentEditable = true;
+    const hooks = loadPlatformContent([editor], "grok.com");
+    assert.equal(hooks.findReadyPlatformInput(), editor, `Grok should discover editable mode ${JSON.stringify(mode)}`);
+  }
+  for (const attrs of [{}, { contenteditable: "false" }]) {
+    const editor = new FakeElement({ attrs: { role: "combobox", ...attrs } });
+    const hooks = loadPlatformContent([editor], "grok.com");
+    assert.equal(hooks.findReadyPlatformInput(), null, "noneditable elements stay excluded");
+  }
 });
 
 test("paste selects a ready composer when a higher-scoring one is disabled", () => {
