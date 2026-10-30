@@ -792,7 +792,9 @@ function recordPasteCheckpoint(message, sender) {
   const keys = ["document_ready_state", "visibility", "editor_seen", "editor_connected", "editor_kind", "editor_text_chars",
     "composer_wait_ms", "paste_retry_limit_ms", "paste_verify_limit_ms", "paste_stability_ms", "paste_attempts", "editor_remounts",
     "insertion_method", "paste_populated", "paste_stable", "draft_present", "user_handled", "page_load_ms", "destination_message_count",
-    "destination_auth_prompt", "paste_ms"];
+    "destination_auth_prompt", "paste_ms", "insertion_method", "editor_insert_attempted", "editor_retained", "editor_document_focused",
+    "editor_match_count", "editor_match_peak", "editor_unmatched_count", "editor_hidden_count", "editor_aria_hidden_count",
+    "editor_modal_count", "editor_owned_count", "editor_disabled_count", "editor_readonly_count", "editor_not_editable_count", "editor_ready_count"];
   for (const key of keys) if (safe[key] !== undefined) snapshot[key] = safe[key];
   snapshot.last_operation = ["paste_start", "editor_wait", "paste_verify", "paste_complete"][index];
   target.events.push({ event: snapshot.last_operation,

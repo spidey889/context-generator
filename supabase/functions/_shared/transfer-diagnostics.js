@@ -153,7 +153,8 @@
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
     "editor_seen", "editor_connected", "draft_present", "paste_populated", "paste_stable", "user_handled",
-    "summary_cache_hit", "summary_fallback", "events_truncated", "destination_route_allowed", "destination_platform_match", "destination_auth_prompt"];
+    "summary_cache_hit", "summary_fallback", "events_truncated", "destination_route_allowed", "destination_platform_match", "destination_auth_prompt",
+    "editor_retained", "editor_insert_attempted", "editor_document_focused"];
   const numbers = ["duration_ms", "deadline_remaining_ms", "capture_ms", "capture_chars", "capture_bytes",
     "candidate_turns", "captured_turns", "useful_turns", "raw_candidate_chars", "initial_rendered_turns",
     "sweep_scrolls", "sweep_stale_scrolls", "sweep_quiet_checks", "capture_retries", "expanded_blocks",
@@ -161,7 +162,9 @@
     "summary_provider_attempts", "summary_http_status", "destination_open_ms", "activation_ms", "activation_settle_ms",
     "delivery_ms", "message_ms", "message_attempts", "script_injections", "paste_ms", "paste_attempts",
     "composer_wait_ms", "paste_retry_limit_ms", "paste_verify_limit_ms", "paste_stability_ms", "editor_remounts",
-    "editor_text_chars", "page_load_ms", "destination_message_count", "diagnostics_revision", "error_line", "error_column"];
+    "editor_text_chars", "page_load_ms", "destination_message_count", "diagnostics_revision", "error_line", "error_column",
+    "editor_match_count", "editor_match_peak", "editor_unmatched_count", "editor_hidden_count", "editor_aria_hidden_count",
+    "editor_modal_count", "editor_owned_count", "editor_disabled_count", "editor_readonly_count", "editor_not_editable_count", "editor_ready_count"];
   const schema = { version: { type: "number", values: [1] },
     ...Object.fromEntries(Object.entries(enums).map(([key, values]) => [key, { type: "string", values }])),
     ...Object.fromEntries(booleans.map(key => [key, { type: "boolean" }])),

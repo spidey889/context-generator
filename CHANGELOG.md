@@ -6,10 +6,17 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-30
 
+- **Diagnose editor discovery failures across all five destinations.** User 44's 229 Grok checks identified `editor_missing`, but could not distinguish no selector matches from hidden, disabled, read-only or otherwise rejected candidates; the later compatibility reproduction did not establish that historical cause.
+  - Replace temporary `[CAP_GROK_DEBUG]` console output with bounded numeric/boolean observations inside the existing private Supabase diagnostics record, shared by Claude, ChatGPT, Gemini, Grok and DeepSeek.
+  - Record current/peak unique matches, unmatched native-input candidates, overlapping rejection counts, eligible editors, retained-editor reuse and document focus. Unmatched native inputs may be unrelated controls; neither a count nor a loaded page proves a composer exists.
+  - Mark actual insertion attempts after draft protection and retain search/insertion facts in worker checkpoints when the final paste reply is lost. Preserve the original prepared-tab record separately from the fresh retry; reobserve document readiness at return.
+  - Extend the canonical client/Vercel/Edge contract and additive SQL validator only. No chat text, selectors, attributes, DOM nodes, HTML, URLs, identifiers, tables/columns, outcome/counting rules or paste decisions are added or changed.
+  - Verify five-platform rejection counts, observational failures that cannot interrupt paste, lost-reply/sparse-report preservation, fresh-tab separation, strict relay/privacy validation and database replay/preservation. Server validators must be rolled out before extension reload/distribution; a branch push alone does not make these observations collectable in production.
+
 - **Recognize Grok's native editable attribute variants.** User 44's DeepSeek-to-Grok attempt returned `editor_missing` after 229 checks across two tabs; the report records no usable editor, rather than proving no editor existed.
   - The current signed-in Grok page uses `contenteditable="true"` and is detected normally. Its observed editor has no hidden or dialog ancestor, so this inspection does not reproduce the historical failure.
   - Isolated Brave running the actual content script reproduced a concrete selector mismatch: visible native editors with `contenteditable="plaintext-only"` or an empty attribute are writable, but discovery omitted them before the readiness check could run. The old code reached the exact `editor_missing` failure on the plaintext-only editor; the unchanged `true` editor pasted successfully.
-  - Extend only Grok's selectors to those two additional native modes. Preserve existing hidden/dialog exclusions, readiness, draft protection, retry windows, insertion and verification behavior. Keep temporary `[CAP_GROK_DEBUG]` console observations local.
+  - Extend only Grok's selectors to those two additional native modes. Preserve existing hidden/dialog exclusions, readiness, draft protection, retry windows, insertion and verification behavior. Initial local console observations were later replaced by the bounded five-platform diagnostics described above.
   - Thirteen focused checks pass, including the new discovery regression and existing draft, disabled-editor, modal and Grok checks. The isolated Brave fixture now discovers and pastes into all three editable modes using the real content script, with no summary service or hosted telemetry.
   - User 44's page structure was not recorded; the compatibility bug is confirmed, but its role in that historical failure remains unproven. The owner performs unpacked-extension reloads; source changes do not update already installed clients or publish a Store release.
 

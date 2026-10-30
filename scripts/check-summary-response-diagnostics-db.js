@@ -16,7 +16,7 @@ async function checkSummaryResponseDiagnostics(db, sql) {
   const base = { attempt: 1, phase: "stream_read", reason: "body_read_failed", error_type: "TypeError" };
   const report = records => ({ version: 1, summary_response_failures: records });
   const before = await snapshot();
-  const historicalSchema = structuredClone(contract.schema);
+  const historicalSchema = require("./diagnostics-history").withoutPasteEditorFields(contract.schema);
   delete historicalSchema.large_summary_requests;
   delete historicalSchema.recovery_events;
   const historicalResponseSchema = structuredClone(contract.summaryResponseFailureSchema);

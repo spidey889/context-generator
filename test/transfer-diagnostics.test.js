@@ -244,6 +244,24 @@ test("legacy broad capture categories and explicit inner codes remain useful", (
   assert.equal(record.error_type, "Error");
 });
 
+test("editor observations are closed metadata through both relays and prepared-tab recovery", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  const sample = { version: 1, editor_match_count: 3, editor_match_peak: 4, editor_unmatched_count: 1,
+    editor_hidden_count: 1, editor_aria_hidden_count: 0, editor_modal_count: 1, editor_owned_count: 0,
+    editor_disabled_count: 1, editor_readonly_count: 0, editor_not_editable_count: 0, editor_ready_count: 0,
+    editor_retained: false, editor_insert_attempted: false, editor_document_focused: true };
+  const report = { ...sample, prepared_diagnostics: sample };
+  assert.deepEqual(validateTelemetryPayload(payload({ diagnostics: report })), edge.validateTelemetryPayload(payload({ diagnostics: report })));
+  assert.ok(diagnostics.validate(report));
+  for (const [key, value] of Object.entries(sample)) {
+    if (key === "version") continue;
+    for (const bad of typeof value === "number" ? [-1, 0.5, 2147483648, "PRIVATE"] : [1, "PRIVATE", null]) {
+      assert.equal(diagnostics.validate({ ...sample, [key]: bad }), null, key);
+      assert.equal(edge.validateTelemetryPayload(payload({ diagnostics: { version: 1, prepared_diagnostics: { ...sample, [key]: bad } } })), null, key);
+    }
+  }
+});
+
 test("retry storms retain bounded first and last observations and the counts", () => {
   const record = { version: 1, paste_attempts: 200 };
   for (let i = 0; i < 200; i++) diagnostics.event(record, "paste_verify", i, "paste_events");

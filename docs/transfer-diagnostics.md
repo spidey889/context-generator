@@ -16,6 +16,29 @@ The existing `failure_reason` and `last_stage` remain compatible.
 
 Unused picker captures and numeric-only size probes never upload these records. Telemetry remains best effort: a process killed before reporting, an unavailable relay or an older client cannot supply observations it did not send. No chat text, title, filename, address, identifier, raw exception or stack is admitted. Capture behavior is unchanged. Deploy DB, Edge and Vercel validators before updating clients.
 
+## Editor discovery and paste progress
+
+All five destinations report the final editor scan as counts, alongside the peak
+number of selector matches seen during that tab's paste attempt:
+
+- `editor_match_count` / `editor_match_peak`: unique provider-selector matches now / at most during this attempt.
+- `editor_unmatched_count`: generic native input/editable nodes absent from those selectors. These may be unrelated inputs; this does not prove a missed chat composer.
+- `editor_hidden_count`, `editor_aria_hidden_count`, `editor_modal_count`, `editor_owned_count`, `editor_disabled_count`, `editor_readonly_count`, `editor_not_editable_count`: overlapping rejection clues among matched nodes, not a partition to add together.
+- `editor_ready_count`: matches surviving the existing selection/readiness filters; `editor_retained` separately identifies reuse of an earlier verified editor.
+- `editor_document_focused`: the document's focus observation at the scan. The final `document_ready_state` is sampled again when paste returns.
+- `editor_insert_attempted`: insertion was actually entered, after draft protection. Existing `insertion_method`, `paste_populated`, `paste_stable`, `editor_connected`, remount observations and paste events distinguish insertion, verification and later loss.
+
+The first tab's observations remain in `prepared_diagnostics`; the fresh tab's
+fields describe only that replacement. Worker checkpoints retain search counts
+and insertion facts even if the final paste reply is lost. Missing fields remain
+unknown, including reports from older clients. Counts contain no selectors,
+attributes, node references, chat text, HTML, URLs or identifiers. Discovery,
+rejection rules, retry windows and paste behavior are unchanged.
+
+Deploy `20261030111450_paste_editor_diagnostics.sql`, the matching Edge validator
+and the Vercel relay before updating/reloading clients. Existing reports and the
+private table/column, outcome, receipt and counter contracts remain compatible.
+
 ## Minimal login/signup clue
 
 `destination_auth_prompt` is an optional boolean in the existing diagnosis:

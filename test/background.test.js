@@ -1300,9 +1300,10 @@ clockTest("fresh recovery retains the first editor failure alongside the final d
     const finalOk = outcome === "success";
     const first = { version: 1, error_code: "paste_not_retained", error_origin: "destination", draft_present: false,
       editor_kind: "textarea", editor_text_chars: 42, composer_wait_ms: 10, paste_attempts: 1,
+      editor_match_count: 4, editor_hidden_count: 2, editor_ready_count: 1, editor_insert_attempted: true,
       paste_events: [{ event: "failure", at_ms: 10, code: "paste_not_retained" }] };
     const last = outcome === "missing_editor"
-      ? { version: 1, error_code: "editor_missing", error_origin: "destination", editor_seen: false, paste_attempts: 3 }
+      ? { version: 1, error_code: "editor_missing", error_origin: "destination", editor_seen: false, paste_attempts: 3, editor_match_count: 0, editor_ready_count: 0 }
       : { version: 1, paste_populated: finalOk, editor_seen: true, paste_attempts: 3, draft_present: false,
         ...(finalOk ? {} : { error_code: "paste_not_retained", error_origin: "destination" }) };
     const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url: "https://claude.ai/new" },
@@ -1314,7 +1315,8 @@ clockTest("fresh recovery retains the first editor failure alongside the final d
     assert.deepEqual(JSON.parse(JSON.stringify(response.diagnostics.prepared_diagnostics)), first);
     assert.equal(response.diagnostics.recovery_error_code, "paste_not_retained");
     assert.equal(response.diagnostics.fresh_recovery, true);
-    for (const key of ["paste_populated", "draft_present", "editor_seen", "editor_kind", "editor_text_chars", "composer_wait_ms", "paste_events"]) {
+    for (const key of ["paste_populated", "draft_present", "editor_seen", "editor_kind", "editor_text_chars", "composer_wait_ms", "paste_events",
+      "editor_match_count", "editor_hidden_count", "editor_ready_count", "editor_insert_attempted"]) {
       assert.deepEqual(response.diagnostics[key], last[key], `${outcome}: ${key} must describe only the fresh destination`);
     }
     assert.equal(response.diagnostics.error_code, last.error_code);

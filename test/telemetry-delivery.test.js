@@ -969,8 +969,9 @@ clockTest("destination paste progress survives a lost paste reply and a sparse t
   await new Promise(setImmediate);
   for (const [checkpoint, diagnostics] of [
     ["received", { paste_ms: 0 }],
-    ["editor_found", { paste_ms: 10, editor_seen: true, editor_kind: "contenteditable" }],
-    ["inserted", { paste_ms: 20, editor_seen: true, editor_text_chars: 457957 }]
+    ["editor_found", { paste_ms: 10, editor_seen: true, editor_kind: "contenteditable", editor_match_count: 3,
+      editor_disabled_count: 2, editor_ready_count: 1, editor_document_focused: true }],
+    ["inserted", { paste_ms: 20, editor_seen: true, editor_text_chars: 457957, editor_insert_attempted: true, insertion_method: "insert_text" }]
   ]) assert.equal((await pasteCheckpoint(background, checkpoint, diagnostics)).ok, true);
   await background.settled();
   assert.deepEqual(delivered.at(-1).diagnostics.paste_events.map(entry => entry.event), ["paste_start", "editor_wait", "paste_verify"]);
@@ -983,6 +984,11 @@ clockTest("destination paste progress survives a lost paste reply and a sparse t
   assert.equal(terminal.status, "failed");
   assert.equal(terminal.failure_reason, "paste_failed");
   assert.equal(terminal.diagnostics.editor_text_chars, 457957);
+  assert.equal(terminal.diagnostics.editor_match_count, 3);
+  assert.equal(terminal.diagnostics.editor_disabled_count, 2);
+  assert.equal(terminal.diagnostics.editor_ready_count, 1);
+  assert.equal(terminal.diagnostics.editor_insert_attempted, true);
+  assert.equal(terminal.diagnostics.insertion_method, "insert_text");
   assert.equal(terminal.diagnostics.paste_events.length, 3);
   assert.equal(terminal.diagnostics.paste_populated, undefined, "insertion is not verified delivery");
   assert.equal((await pasteCheckpoint(background, "verified", { paste_populated: true })).ok, false);

@@ -1531,6 +1531,34 @@ test("Grok finds native true, plaintext-only and empty editable modes", () => {
   }
 });
 
+test("all five platforms record editor rejection counts without changing selection", () => {
+  for (const host of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const ready = new FakeElement({ tag: "textarea" });
+    const hidden = new FakeElement({ tag: "textarea", attrs: { "data-display": "none" } });
+    const ariaHidden = new FakeElement({ tag: "textarea", attrs: { "aria-hidden": "true" } });
+    const modal = new FakeElement({ tag: "textarea" });
+    new FakeElement({ attrs: { role: "dialog" } }).appendChild(modal);
+    const disabled = new FakeElement({ tag: "textarea" }); disabled.disabled = true;
+    const readonly = new FakeElement({ tag: "textarea" }); readonly.readOnly = true;
+    const owned = new FakeElement({ tag: "textarea" }); owned.dataset.contextGeneratorOwned = "true";
+    const hooks = loadPlatformContent([ready, hidden, ariaHidden, modal, disabled, readonly, owned], host);
+    const record = { version: 1 };
+    assert.equal(hooks.findReadyPlatformInput(undefined, record), ready, host);
+    assert.equal(record.editor_match_count, 7, host);
+    for (const key of ["hidden", "aria_hidden", "modal", "disabled", "readonly", "owned", "ready"]) {
+      assert.equal(record[`editor_${key}_count`], 1, `${host}: ${key}`);
+    }
+    assert.equal(record.editor_match_peak, 7);
+    assert.equal(record.editor_retained, false);
+    const query = hooks.document.querySelectorAll;
+    hooks.document.querySelectorAll = selector => {
+      if (selector.startsWith("textarea, input:not")) throw new Error("Optional observation unavailable");
+      return query(selector);
+    };
+    assert.equal(hooks.findReadyPlatformInput(undefined, {}), ready, "diagnostic errors cannot break paste");
+  }
+});
+
 test("paste selects a ready composer when a higher-scoring one is disabled", () => {
   for (const [hostname, unavailableProperty] of [
     ["chatgpt.com", "disabled"],

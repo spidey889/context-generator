@@ -3215,7 +3215,7 @@
 
   async function pasteIntoPlatform(text, destinationId, transferId = null, deadlineAt = null, sourceTabId = null) {
     const startedAt = Date.now();
-    const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "paste_start", summary_chars: text?.length || 0,
+    const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "paste_start", editor_insert_attempted: false, summary_chars: text?.length || 0,
       document_ready_state: document.readyState,
       visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown" };
     const sentCheckpoints = new Set();
@@ -3286,11 +3286,9 @@
           claude_page: globalThis.CapTransferDiagnostics.claudePage(`https://${window.location.hostname}${window.location.pathname}`)
         });
       }
-      if (destination.id === "claude" || destination.id === "gemini") {
-        globalThis.CapTransferDiagnostics?.update(diagnostics, {
-          destination_platform_match: platformMatches, destination_route_allowed: routeAllowed
-        });
-      }
+      globalThis.CapTransferDiagnostics?.update(diagnostics, {
+        destination_platform_match: platformMatches, destination_route_allowed: routeAllowed
+      });
       if (!platformMatches || !routeAllowed) {
         throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
       }
@@ -3305,7 +3303,8 @@
       }
       return timing;
     } finally {
-      globalThis.CapTransferDiagnostics?.update(diagnostics, { destination_auth_prompt: observeDestinationAuthPrompt() });
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { destination_auth_prompt: observeDestinationAuthPrompt(),
+        document_ready_state: document.readyState });
       if (!retainedGuard) guard.dispose();
     }
   }
@@ -3422,7 +3421,7 @@
       const destinationMessageCount = getDetectedConversationMessageCount();
       if (destination.id === "claude" || destination.id === "gemini") observe({ destination_message_count: destinationMessageCount });
       if (destinationMessageCount > 0) throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
-      const input = findReadyPlatformInput(destination);
+      const input = findReadyPlatformInput(destination, diagnostics);
       observe({ editor_seen: sawInput || Boolean(input) });
       if (input) {
         composerWaitMs ??= Date.now() - startedAt;
@@ -3442,7 +3441,10 @@
         }
         try {
           observe({ draft_present: false, last_operation: "editor_insert", ...(alreadyPasted ? { insertion_method: "already_present" } : {}) }, "editor_insert");
-          if (!alreadyPasted) guard.insert(input);
+          if (!alreadyPasted) {
+            observe({ editor_insert_attempted: true });
+            guard.insert(input);
+          }
 
           observe({ last_operation: "paste_verify" }, "paste_verify");
           observe({ editor_connected: input.isConnected, editor_text_chars: getElementText(input).length });
@@ -3500,10 +3502,10 @@
     throw lastError || createDiagnosticError(`Paste operation failed to populate the ${destination.name} editor.`, "paste_not_populated");
   }
 
-  function findPlatformInput(platform = currentPlatform, { readyOnly = false } = {}) {
+  function findPlatformInput(platform = currentPlatform, { readyOnly = false, diagnostics = null } = {}) {
     const selectors = [...platform.inputSelectors, ...platform.fallbackSelectors];
-    const candidates = selectors
-      .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
+    const matches = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const candidates = matches
       .filter((element, index, all) => {
         return (
           all.indexOf(element) === index &&
@@ -3516,10 +3518,35 @@
     // Settings and native modal editors share the same textarea/contenteditable
     // primitives as chat composers. Never let a newly mounted overlay replace
     // the page composer; an already verified input remains eligible below.
-    const selectedInput = candidates
-      .filter((element) => !isModalEditorCandidate(element) && (!readyOnly || isEditorReady(element)))
+    const eligible = candidates.filter((element) => !isModalEditorCandidate(element) && (!readyOnly || isEditorReady(element)));
+    const selectedInput = eligible
       .map((element) => ({ element, score: scoreInputCandidate(element) }))
       .sort((a, b) => b.score - a.score)[0]?.element || null;
+
+    if (diagnostics) {
+      // Count overlapping rejection reasons, never selectors, DOM nodes or text.
+      // Observation failures must not affect which editor the existing rules pick.
+      try {
+        const unique = [...new Set(matches)];
+        const count = predicate => unique.filter(predicate).length;
+        globalThis.CapTransferDiagnostics?.update(diagnostics, {
+          editor_match_count: unique.length,
+          editor_match_peak: Math.max(diagnostics.editor_match_peak || 0, unique.length),
+          editor_unmatched_count: Array.from(document.querySelectorAll("textarea, input:not([type]), input[type='text'], input[type='search'], [contenteditable]"))
+            .filter(element => !matches.includes(element) && !isContextGeneratorNode(element)).length,
+          editor_hidden_count: count(element => !isVisible(element)),
+          editor_aria_hidden_count: count(element => Boolean(element.closest("[aria-hidden='true']"))),
+          editor_modal_count: count(isModalEditorCandidate),
+          editor_owned_count: count(isContextGeneratorNode),
+          editor_disabled_count: count(isDisabled),
+          editor_readonly_count: count(element => Boolean(element.readOnly)),
+          editor_not_editable_count: count(element => !(element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) && !element.isContentEditable),
+          editor_ready_count: eligible.length,
+          editor_retained: false,
+          editor_document_focused: document.hasFocus?.()
+        });
+      } catch { /* Optional diagnostics cannot interrupt discovery or paste. */ }
+    }
 
     if (selectedInput) {
       if (platform.id === currentPlatform.id) retainedPlatformInput = selectedInput;
@@ -3532,7 +3559,9 @@
     if (platform.id === currentPlatform.id && retainedPlatformInput?.isConnected && isVisible(retainedPlatformInput)) {
       // Keep the verified reference through a temporary disabled state. A
       // native overlay may hide it from normal queries before it becomes ready.
-      return !readyOnly || isEditorReady(retainedPlatformInput) ? retainedPlatformInput : null;
+      const retained = !readyOnly || isEditorReady(retainedPlatformInput) ? retainedPlatformInput : null;
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { editor_retained: Boolean(retained) });
+      return retained;
     }
 
     if (platform.id === currentPlatform.id) retainedPlatformInput = null;
@@ -3543,43 +3572,11 @@
     return Boolean(element?.closest?.("dialog, [role='dialog'], [aria-modal='true']"));
   }
 
-  function findReadyPlatformInput(platform = currentPlatform) {
+  function findReadyPlatformInput(platform = currentPlatform, diagnostics = null) {
     // A disabled or read-only composer can remain visible while a replacement
     // is mounting. Select among ready candidates instead of retrying the
     // highest-scoring unusable element until the paste deadline expires.
-    const input = findPlatformInput(platform, { readyOnly: true });
-    if (platform.id === "grok") {
-      // Temporary local diagnosis only: no editor text, HTML or telemetry.
-      try {
-        const matches = [...platform.inputSelectors, ...platform.fallbackSelectors]
-          .map(selector => ({ selector, elements: Array.from(document.querySelectorAll(selector)) }));
-        const editors = [...new Set(matches.flatMap(match => match.elements))];
-        if (retainedPlatformInput && !editors.includes(retainedPlatformInput)) editors.push(retainedPlatformInput);
-        console.debug("[CAP_GROK_DEBUG] editor scan", {
-          at: Date.now(), documentReadyState: document.readyState,
-          visibility: document.visibilityState, focused: document.hasFocus(),
-          selectors: matches.map(({ selector, elements }) => ({ selector, count: elements.length })),
-          editors: editors.map(element => {
-            const rect = element.getBoundingClientRect();
-            const reasons = [];
-            if (!isVisible(element)) reasons.push("not_visible");
-            if (element.closest("[aria-hidden='true']")) reasons.push("aria_hidden");
-            if (isContextGeneratorNode(element)) reasons.push("extension_ui");
-            if (isModalEditorCandidate(element)) reasons.push("inside_dialog");
-            if (isDisabled(element)) reasons.push("disabled");
-            if (element.readOnly) reasons.push("read_only");
-            if (!(element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) && !element.isContentEditable) reasons.push("not_editable");
-            return { tag: element.tagName, connected: element.isConnected,
-              width: rect.width, height: rect.height,
-              contenteditable: element.getAttribute("contenteditable"),
-              ready: isEditorReady(element), selected: element === input,
-              retained: element === retainedPlatformInput, rejectionReasons: reasons };
-          }),
-          editorFound: Boolean(input)
-        });
-      } catch { /* Debugging must never interrupt paste. */ }
-    }
-    return input;
+    return findPlatformInput(platform, { readyOnly: true, diagnostics });
   }
 
   function cancelPendingPasteRecheck() {
