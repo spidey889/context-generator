@@ -10,6 +10,11 @@
 - Unless the owner explicitly specifies another base, always create new branches from up-to-date `master`, never from the current feature branch.
 - Ask the owner before making a major design decision, such as adding/removing database tables or columns, changing the architecture, or replacing an existing approach. Explain the proposed change simply and wait for approval. Routine work within an already approved decision can proceed.
 
+## Skills
+
+- Use relevant available skills without asking for permission, including GStack skills, when they help investigate, implement or review the work. Choose skills for the task rather than running unrelated workflows.
+- For bug fixes, normally use GStack's `investigate` skill to trace the root cause before editing. When the owner explicitly asks for a fast, short or minimal change, keep the workflow lean. Skill instructions never override the owner's limits on scope, checks, Computer Use, commits or pushes.
+
 ## Communication
 
 - When the owner explicitly asks for a simple answer, keep it short, use everyday words and make it clear on the first read. Include only the details needed to answer the question. For a bug, plainly explain what went wrong and how it was fixed. Use technical terms only when helpful, with a brief plain-language explanation. Match this level: "We counted the welcome text as a message, so pasting stopped. We fixed it by ignoring the welcome screen." Apply this extra-simple style only when requested; otherwise use the detail the task needs.
