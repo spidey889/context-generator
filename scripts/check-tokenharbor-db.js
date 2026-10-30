@@ -17,6 +17,7 @@ async function checkTokenHarbor(db, sql, model = "claude-haiku-5.5:free") {
   const definition = (await rows("select pg_get_functiondef('public.is_valid_transfer_diagnostics(jsonb,integer)'::regprocedure) as sql"))[0].sql;
   // The minimal auth clue is added by a later migration, checked separately.
   const historicalSchema = structuredClone(contract.schema);
+  delete historicalSchema.large_summary_requests;
   historicalSchema.capture_detail.values = historicalSchema.capture_detail.values.filter(value => value !== "invalid_utf8");
   delete historicalSchema.destination_auth_prompt;
   delete historicalSchema.summary_response_failures;

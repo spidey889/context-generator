@@ -114,6 +114,36 @@
     ...Object.fromEntries(["aborted", "caller_aborted", "deadline_elapsed", "transfer_deadline_elapsed", "eof", "final_result", "online"]
       .map(key => [key, { type: "boolean" }]))
   };
+  // One cumulative record per part, plus final combine; no bodies or receipts.
+  const largeSummaryRequestSchema = {
+    index: { type: "number", max: 16 }, total: { type: "number", min: 1, max: 16 },
+    phase: { type: "string", values: ["part", "final"] },
+    stage: { type: "string", values: ["request", "headers", "completed", "failed", "cancelled"] },
+    provider: { type: "string", values: ["openrouter", "tokenharbor"] },
+    error_code: { type: "string", values: codes },
+    ...Object.fromEntries(["started_ms", "elapsed_ms", "headers_ms", "provider_ms", "openrouter_ms", "tokenharbor_ms", "deadline_remaining_ms"]
+      .map(key => [key, { type: "number", max: 2147483647 }])),
+    http_status: { type: "number", min: 100, max: 599 }
+  };
+  function validateLargeSummaryRequest(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)
+        || !["index", "total", "phase", "stage", "started_ms"].every(key => Object.hasOwn(input, key))
+        || Object.entries(input).some(([key, value]) => !validField(key, value, largeSummaryRequestSchema))
+        || (input.phase === "part" ? input.index >= input.total : input.index !== input.total)) return null;
+    return { ...input };
+  }
+  function mergeLargeSummaryRequests(first = [], second = []) {
+    const records = new Map(), stages = largeSummaryRequestSchema.stage.values;
+    for (const input of [...first, ...second]) {
+      const safe = validateLargeSummaryRequest(input);
+      if (!safe) continue;
+      const key = `${safe.phase}:${safe.index}`, previous = records.get(key);
+      // Stale progress cannot replace a completed/failed observation.
+      if (!previous || stages.indexOf(previous.stage) < 2 && stages.indexOf(safe.stage) >= stages.indexOf(previous.stage))
+        records.set(key, { ...previous, ...safe });
+    }
+    return [...records.values()].sort((a, b) => a.index - b.index).slice(0, 17);
+  }
   const recoveryEventSchema = {
     event: { type: "string", values: ["box_shown", "copy_started", "copy_succeeded", "copy_failed", "copy_unconfirmed"] },
     surface: { type: "string", values: ["dialog", "handoff_copy", "copy_notice"] },
@@ -140,7 +170,7 @@
     capture_http_status: { type: "number", min: 100, max: 599 },
     summary_provider_status: { type: "number", min: 100, max: 599 },
     events: { type: "array" }, delivery_events: { type: "array" }, paste_events: { type: "array" }, json_attempts: { type: "array" },
-    summary_response_failures: { type: "array" }, recovery_events: { type: "array" }, prepared_diagnostics: { type: "object" }
+    summary_response_failures: { type: "array" }, large_summary_requests: { type: "array" }, recovery_events: { type: "array" }, prepared_diagnostics: { type: "object" }
   };
   function validField(key, value, rules = schema) {
     const rule = rules[key];
@@ -222,6 +252,10 @@
         if (!Array.isArray(value) || value.length > 2) return null;
         result[key] = value.map(validateSummaryResponseFailure);
         if (result[key].some(entry => !entry) || new Set(result[key].map(entry => entry.attempt)).size !== value.length) return null;
+      } else if (key === "large_summary_requests") {
+        if (!Array.isArray(value) || value.length > 17) return null;
+        result[key] = value.map(validateLargeSummaryRequest);
+        if (result[key].some(entry => !entry) || mergeLargeSummaryRequests(value).length !== value.length) return null;
       } else if (key === "recovery_events") {
         if (!Array.isArray(value) || value.length > 12) return null;
         result[key] = value.map(validateRecoveryEvent);
@@ -361,7 +395,8 @@
     update(target, { ...details, error_code: code, error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
-  const api = { schema, jsonAttemptSchema, summaryResponseFailureSchema, recoveryEventSchema, validateRecoveryEvent, mergeRecoveryEvents,
+  const api = { schema, jsonAttemptSchema, summaryResponseFailureSchema, largeSummaryRequestSchema, validateLargeSummaryRequest, mergeLargeSummaryRequests,
+    recoveryEventSchema, validateRecoveryEvent, mergeRecoveryEvents,
     validateJsonAttempt, validateSummaryResponseFailure, mergeSummaryResponseFailures, mergeJsonAttempts, jsonAttempt,
     codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage, authPromptFromUrl };
   root.CapTransferDiagnostics = api;

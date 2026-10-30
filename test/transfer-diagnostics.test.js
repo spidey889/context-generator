@@ -79,6 +79,23 @@ test("summary response failures use one closed schema at every ingress and retai
   assert.deepEqual(diagnostics.mergeSummaryResponseFailures([base, { ...base, attempt: 2 }], [base]), [base, { ...base, attempt: 2 }]);
 });
 
+test("large-summary checkpoints are bounded metadata and stale progress cannot erase a result", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  const base = { phase: "part", index: 0, total: 16, stage: "request", started_ms: 0 };
+  const done = { ...base, stage: "completed", elapsed_ms: 34000, provider: "openrouter", provider_ms: 32000 };
+  const report = entries => ({ version: 1, large_summary_requests: entries });
+  const entries = Array.from({ length: 17 }, (_, index) => ({ ...done, index, phase: index === 16 ? "final" : "part" }));
+  assert.ok(validateTelemetryPayload(payload({ diagnostics: report(entries) })));
+  assert.ok(edge.validateTelemetryPayload(payload({ diagnostics: report(entries) })));
+  assert.deepEqual(diagnostics.mergeLargeSummaryRequests([done], [base]), [done]);
+  for (const records of [[base, base], [...entries, base], [{ ...base, index: 16 }], [{ ...base, phase: "final" }],
+    [{ ...base, started_ms: -1 }], [{ ...base, provider: "PRIVATE" }], [{ ...base, error_code: "PRIVATE" }],
+    ...["text", "summary", "receipt", "url", "stack", "message"].map(key => [{ ...base, [key]: "PRIVATE" }])]) {
+    assert.equal(validateTelemetryPayload(payload({ diagnostics: report(records) })), null);
+    assert.equal(edge.validateTelemetryPayload(payload({ diagnostics: report(records) })), null);
+  }
+});
+
 test("unexpected exceptions retain their observed operation and type without inventing a cause", () => {
   const record = { version: 1, last_operation: "paste_verify", editor_seen: true, paste_populated: false };
   diagnostics.failure(record, new Error("PRIVATE account URL and chat text"), "destination", 500);
@@ -242,6 +259,7 @@ test("retry storms retain bounded first and last observations and the counts", (
     if (rule.type === "boolean") maximal[key] = true;
     if (rule.type === "array") maximal[key] = key === "summary_response_failures"
       ? [1, 2].map(attempt => ({ attempt, phase: "stream_completion_validation", reason: "stream_completion_invalid", error_type: "Error" }))
+      : key === "large_summary_requests" ? [{ index: 0, total: 16, phase: "part", stage: "failed", started_ms: 0 }]
       : key === "json_attempts" ? [{ outcome: "failed", mode: "fresh", failure_check: "raw_header_limit" }]
       : key === "recovery_events" ? [{ event: "copy_unconfirmed", surface: "handoff_copy", side: "source", method: "clipboard", at_ms: 2147483647 }]
       : Array(32).fill({ event: "destination_activate", at_ms: 2147483647, code: "destination_activation_failed" });

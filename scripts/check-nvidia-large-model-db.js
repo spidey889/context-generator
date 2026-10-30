@@ -19,6 +19,7 @@ async function checkNvidiaLargeModel(db, sql) {
   const definition = (await rows("select pg_get_functiondef('public.is_valid_provider_failure(jsonb)'::regprocedure) sql"))[0].sql;
   const sqlRules = JSON.parse(definition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]);
   const expectedRules = structuredClone(contract.schema);
+  delete expectedRules.large_summary_requests;
   // JSON enumeration order does not affect the closed set of accepted models.
   sqlRules.model.values.sort(); expectedRules.model.values.sort();
   equal(sqlRules, expectedRules);

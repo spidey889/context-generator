@@ -167,6 +167,23 @@ test("background uses only the separate endpoint and persists only a complete fi
   assert.ok(state.progress.every(item => item.tabId === 42 && !JSON.stringify(item.message).includes("partial")));
 });
 
+test("large checkpoints persist each concurrent part and final result without response text", async () => {
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    return { ok: true, status: 200, json: async () => ({ summary: "PRIVATE_SUMMARY", receipt: "PRIVATE_RECEIPT",
+      timing: { provider: "openrouter", totalMs: 32100, openrouterMs: 32000, tokenharborMs: 32001,
+        private: "PRIVATE_PROVIDER_BODY" } }) };
+  });
+  await state.run();
+  const records = state.checkpoints.at(-1).diagnostics.large_summary_requests;
+  assert.equal(records.length, 5);
+  assert.ok(records.every(record => record.stage === "completed" && record.provider === "openrouter" && record.http_status === 200));
+  assert.equal(records.at(-1).phase, "final");
+  assert.ok(state.checkpoints.some(report => report.diagnostics.large_summary_requests.some(entry => entry.stage === "request")));
+  assert.ok(state.checkpoints.some(report => report.diagnostics.large_summary_requests.some(entry => entry.stage === "headers")));
+  assert.doesNotMatch(JSON.stringify(state.checkpoints), /PRIVATE|receipt|summaryProof|https:/);
+});
+
 test("background cannot count completed parts after final summary failure", async () => {
   const state = backgroundFixture(async (_url, options) => {
     const payload = JSON.parse(options.body);
@@ -211,8 +228,8 @@ test("large fetch failures retain safe dispatch evidence before local recovery a
     assert.equal(record.aborted, false);
     return true;
   });
-  assert.equal(state.checkpoints.length, 1, "Sibling cancellation cannot replace the initiating failure.");
-  assert.equal(state.checkpoints[0].diagnostics.summary_response_failures.length, 1);
+  assert.equal(state.checkpoints.filter(report => report.diagnostics.summary_response_failures).length, 1,
+    "Sibling cancellation cannot replace the initiating failure.");
   assert.doesNotMatch(JSON.stringify(state.checkpoints), /PRIVATE|https:|stack|headers|receipt/);
   const debug = state.localDebug["context-generator-summary-response-debug-v1"];
   assert.equal(debug.large_phase, "part");
@@ -236,7 +253,7 @@ test("large HTTP rejection and incomplete streams retain their actual failure bo
       if (response.status === 200) { assert.ok(record.bytes_received > 0); assert.equal(record.eof, true); }
       return true;
     });
-    assert.equal(state.checkpoints.length, 1);
+    assert.equal(state.checkpoints.filter(report => report.diagnostics.summary_response_failures).length, 1);
     assert.doesNotMatch(JSON.stringify(state.checkpoints), /PRIVATE|https:|stack|receipt/);
   }
 });
@@ -267,7 +284,7 @@ clockTest("large request transit can finish after 85 seconds without aborting ac
       ? { summary: "Accepted part", receipt: `part-${payload.large.index}` } : { summary: "Complete handoff" } };
   });
   assert.equal((await state.run()).summary, "Complete handoff");
-  assert.equal(state.checkpoints.length, 0);
+  assert.ok(state.checkpoints.some(report => report.diagnostics.large_summary_requests.some(entry => entry.stage === "completed")));
 });
 
 test("missing large part receipts retain response validation evidence", async () => {

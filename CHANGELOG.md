@@ -6,6 +6,12 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-30
 
+- **Retain per-part large-summary checkpoints in Supabase.** Real transfers can still fall back after several completed parts; the previous HTTP failure report did not identify every finished or pending part.
+  - Add a bounded cumulative record for each of up to sixteen parts and the final combine, including request/headers/result stage, observed status, relative timing, request budget and available provider timing/winner.
+  - Queue checkpoints independently of the source reply using the existing consent-aware durable outbox. Preserve them across sparse terminal reports and stale progress without storing chat, summaries, receipts, URLs or raw exceptions.
+  - Extend the matching extension, Vercel, Edge and SQL diagnostics validators inside the existing JSON field; change no tables, columns, permissions, provider routing, deadlines or summary-proof rules.
+  - Verify concurrent progress, private-data rejection, bounded records and database preservation/merging. The logging change helps diagnose the next real failure; it does not fix or prove the unresolved transfer succeeds.
+
 - **Give large transfers a usable provider window under live load.** A new 3,006,871-character ChatGPT-to-Claude attempt captured every file but failed after roughly two minutes. Unlike the earlier lost-channel report, its durable diagnostics show three real NVIDIA timeouts at 45 seconds, two with only 12–14 answer characters, followed by an interrupted response body near the client deadline.
   - Production was still at `5002c25`; the previous stream/count corrections existed only on a branch. Landed verified `c6bf66e` and confirmed that exact commit READY on the live backend before further trials.
   - Live synthetic comparisons reproduced a dense 500k part timing out, a 250k dense part completing in about 33 seconds, and a 500k prose part completing in about 17 seconds. A complete timeout response took about 95 seconds in transit. Smaller parts alone still failed in a real-provider browser flow; provider scheduling also needed correction.

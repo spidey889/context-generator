@@ -9,6 +9,7 @@ async function checkProviderFailures(db, sql, migrations) {
   await db.exec(sql);
   // This replay boundary predates the million-character admission migration.
   const historicalSchema = structuredClone(contract.schema);
+  delete historicalSchema.large_summary_requests;
   historicalSchema.input_chars.max = 350000;
   historicalSchema.model.values = historicalSchema.model.values.filter(model => model !== "nvidia/nemotron-3.5-super-vl:free");
   equal(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);

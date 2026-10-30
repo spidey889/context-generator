@@ -401,6 +401,7 @@ async function main() {
         equal(updated.replace(pattern, "RULES"), original.replace(pattern, "RULES"));
         equal(JSON.parse(updated.match(pattern)[1]), { ...JSON.parse(original.match(pattern)[1]), destination_auth_prompt: { type: "boolean" } });
         const historicalSchema = structuredClone(require("../extension/transfer-diagnostics.js").schema);
+  delete historicalSchema.large_summary_requests;
         delete historicalSchema.summary_response_failures;
         delete historicalSchema.recovery_events;
         historicalSchema.capture_detail.values = historicalSchema.capture_detail.values.filter(value => value !== "invalid_utf8");
@@ -420,6 +421,8 @@ async function main() {
         checks += await require("./check-transfer-flow-diagnostics-db.js").checkTransferFlowDiagnostics(db, sql);
       } else if (name.endsWith("_nvidia_large_summary_model.sql")) {
         checks += await require("./check-nvidia-large-model-db.js").checkNvidiaLargeModel(db, sql);
+      } else if (name.endsWith("_large_summary_request_checkpoints.sql")) {
+        checks += await require("./check-large-summary-checkpoints-db.js").checkLargeSummaryCheckpoints(db, sql);
       } else if (name.endsWith("_rejected_capture_character_count.sql")) {
         checks += await require("./check-rejected-capture-count-db.js").checkRejectedCaptureCount(db, sql);
       } else await db.exec(sql);

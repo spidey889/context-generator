@@ -17,6 +17,7 @@ async function checkSummaryResponseDiagnostics(db, sql) {
   const report = records => ({ version: 1, summary_response_failures: records });
   const before = await snapshot();
   const historicalSchema = structuredClone(contract.schema);
+  delete historicalSchema.large_summary_requests;
   delete historicalSchema.recovery_events;
   const historicalResponseSchema = structuredClone(contract.summaryResponseFailureSchema);
   historicalResponseSchema.phase.values = historicalResponseSchema.phase.values.filter(value => value !== "request");

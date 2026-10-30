@@ -539,8 +539,12 @@ function mergePasteCheckpointEvents(first = [], second = [], key = "paste_events
 }
 
 function mergeRecoveryDiagnostics(first, second) {
-  if (!first?.recovery_events && !second?.recovery_events) return {};
-  return { version: 1, recovery_events: globalThis.CapTransferDiagnostics.mergeRecoveryEvents(first?.recovery_events, second?.recovery_events) };
+  return {
+    ...((first?.recovery_events || second?.recovery_events) ? { version: 1,
+      recovery_events: globalThis.CapTransferDiagnostics.mergeRecoveryEvents(first?.recovery_events, second?.recovery_events) } : {}),
+    ...((first?.large_summary_requests || second?.large_summary_requests) ? { version: 1,
+      large_summary_requests: globalThis.CapTransferDiagnostics.mergeLargeSummaryRequests(first?.large_summary_requests, second?.large_summary_requests) } : {})
+  };
 }
 
 function mergeTransferTelemetryEvents(previous, next) {
@@ -1701,6 +1705,24 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
   const signal = operation?.controller.signal;
   let failureRecorded = false;
   let fetchMs = 0, parseMs = 0, requestCount = 0;
+  let requestLog = [];
+  const checkpoint = (entry, changes = {}) => {
+    const contract = globalThis.CapTransferDiagnostics;
+    if (!contract) return;
+    for (const [key, value] of Object.entries(changes)) {
+      const rule = contract.largeSummaryRequestSchema[key];
+      if (rule?.type === "number" && Number.isFinite(value)) entry[key] = Math.max(rule.min || 0, Math.min(rule.max, Math.round(value)));
+      else if (rule?.values?.includes(value)) entry[key] = value;
+    }
+    requestLog = contract.mergeLargeSummaryRequests(requestLog, [entry]);
+    const active = activeTransferTelemetry.get(transferId);
+    if (!active || active.status !== "started") return;
+    // Queue independently of the long source reply. Do not delay model work on
+    // optional storage/network, and never promote part logs to summary proof.
+    const diagnostics = contract.snapshot({ ...(active.diagnostics || {}), version: 1,
+      large_summary_requests: requestLog.map(record => ({ ...record })) });
+    if (diagnostics) recordTransferTelemetry({ ...active, diagnostics }).catch(() => {});
+  };
   try {
     const preparedTelemetry = getPreparedSummaryTelemetry(transferId) || await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
       await restoreActiveTransferTelemetry();
@@ -1736,6 +1758,9 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
         // Include upload/response transit around the server's 75s model budget;
         // a live slow-part timeout arrived after 94s with intact NDJSON framing.
         const expiresAt = Math.min(requestDeadline, Date.now() + 110000);
+        const logEntry = { phase: payload.large.phase, index: payload.large.index ?? payload.large.total,
+          total: payload.large.total, stage: "request", started_ms: Math.max(0, Math.round(requestStarted - started)) };
+        checkpoint(logEntry, { deadline_remaining_ms: expiresAt - Date.now() });
         const timer = setTimeout(() => controller.abort(), Math.max(0, expiresAt - Date.now()));
         const check = () => {
           checkTransferOperation(operation);
@@ -1762,6 +1787,7 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
               "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER }, body
           });
           responseReceived = true;
+          checkpoint(logEntry, { stage: "headers", http_status: response.status, headers_ms: nowMs() - requestStarted });
           Object.assign(debug, { phase: "response_headers", http_status: response.status,
             headers_ms: Math.round(nowMs() - requestStarted) });
           const vercelId = response.headers?.get("x-vercel-id");
@@ -1785,10 +1811,17 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
               || (payload.large.phase === "part" && (typeof data.receipt !== "string" || !data.receipt || data.receipt.length > 4000)))
             throw Object.assign(new Error("Invalid large summary result."), { code: "summary_invalid_response" });
           await checkTransferSource(operation);
+          checkpoint(logEntry, { stage: "completed", elapsed_ms: nowMs() - requestStarted,
+            provider: data.timing?.provider, provider_ms: data.timing?.totalMs,
+            openrouter_ms: data.timing?.openrouterMs, tokenharbor_ms: data.timing?.tokenharborMs });
           return data;
         } catch (error) {
           // The initiating request owns the diagnosis. Aborted sibling requests
           // must not overwrite it with a secondary cancellation or shared Error.
+          checkpoint(logEntry, { stage: failureRecorded || requestSignal.aborted ? "cancelled" : "failed",
+            elapsed_ms: nowMs() - requestStarted, deadline_remaining_ms: expiresAt - Date.now(),
+            error_code: globalThis.CapTransferDiagnostics?.errorCode(error, controller.signal.aborted ? "summary_timeout"
+              : responseReceived ? "summary_invalid_response" : "summary_transport_failed") });
           if (failureRecorded) throw error;
           failureRecorded = true;
           Object.assign(debug, { elapsed_ms: Math.round(nowMs() - requestStarted),

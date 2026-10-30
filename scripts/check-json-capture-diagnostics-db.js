@@ -39,6 +39,7 @@ async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
   // These historical migrations precede the additive TokenHarbor provider label.
   // Its later migration verifies the complete current schema separately.
   const historicalSchema = structuredClone(contract.schema);
+  delete historicalSchema.large_summary_requests;
   delete historicalSchema.destination_auth_prompt;
   delete historicalSchema.recovery_events;
   delete historicalSchema.summary_response_failures;
@@ -128,6 +129,7 @@ async function checkAttachmentDecodeDiagnostics(db, sql) {
   assert.deepEqual(await snapshot(), before); checks++;
   const updated = await definition();
   const historicalSchema = structuredClone(contract.schema);
+  delete historicalSchema.large_summary_requests;
   delete historicalSchema.summary_response_failures;
   delete historicalSchema.recovery_events;
   assert.deepEqual(JSON.parse(updated.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema); checks++;
