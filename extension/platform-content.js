@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-30-destination-backup-smooth-v231";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-destination-backup-label-v232";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -10098,11 +10098,9 @@
     }
     if (copyAgain) {
       copyAgain.style.display = copiedContext ? "block" : "none";
-      copyAgain.textContent = copiedContext?.pendingCopy ? "Copy summary" : "Copy again";
+      copyAgain.textContent = copiedContext?.pendingCopy ? (copiedContext.pasteBackup ? "Copy Summary" : "Copy summary") : "Copy again";
       // Keep the actions steady when the copy label changes to its confirmation.
       copyAgain.style.minWidth = copiedContext?.pasteBackup ? "112px" : "";
-      copyAgain.style.transition = copiedContext?.pasteBackup && !reducedMotion
-        ? "background-color 180ms ease,color 180ms ease,border-color 180ms ease" : "none";
       copyAgain.disabled = false;
       if (copiedContext) {
         const owner = errorDiv.contextGeneratorCopyNoticeOwner = {};
@@ -10127,11 +10125,15 @@
               if (textSpan) textSpan.textContent = `Sign in to ${copiedContext.destinationName}, then paste it into a new chat.`;
             }
             if (copiedContext.pasteBackup) {
-              copyAgain.textContent = "✓ Copied";
-              copyAgain.style.setProperty("background", "rgba(169,222,190,0.92)", "important");
-              copyAgain.style.setProperty("border-color", "rgba(202,243,216,0.52)", "important");
-              copyAgain.style.setProperty("color", "#193d2b", "important");
-              if (!reducedMotion) copyAgain.animate?.([{ opacity: 0.4 }, { opacity: 1 }], { duration: 180, easing: "ease-out" });
+              const copiedLabel = document.createElement("span");
+              copiedLabel.textContent = "✓ Copied";
+              copiedLabel.style.display = "inline-block";
+              copyAgain.replaceChildren(copiedLabel);
+              // Animate just the label, leaving the button's color and size steady.
+              if (!reducedMotion) copiedLabel.animate?.([
+                { opacity: 0, transform: "translateY(3px)" },
+                { opacity: 1, transform: "translateY(0)" }
+              ], { duration: 200, easing: "cubic-bezier(0.16,1,0.3,1)" });
             }
             clearTimeout(errorDiv.contextGeneratorHideTimer);
             const copiedDurationMs = copiedContext.signInRequired || copiedContext.pasteBackup ? 2500 : noticeDurationMs;
