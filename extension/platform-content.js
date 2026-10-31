@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-local-handoff-sequence-v236";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-summary-labels-v237";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -214,6 +214,9 @@
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
   const HANDOFF_REASSURANCE_TEXT = "Taking a little longer—still working.";
+  const HANDOFF_SUMMARY_LABELS = ["Polishing", "Refining", "Crafting"];
+  const HANDOFF_SUMMARY_PRIMARY_LABEL_MS = 12000;
+  const HANDOFF_SUMMARY_ALTERNATE_LABEL_MS = 4000;
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
   // native capture and summary creep below completion; DOM capture uses scroll diagnostics.
   const HANDOFF_STAGES = [
@@ -550,6 +553,7 @@
   let handoffCaptureProgressFrame = null;
   let handoffCapturePresentation = null;
   let handoffStageAdvanceTimer = null;
+  let handoffSummaryLabelTimer = null;
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
   let claudeLimitNudgeDismissedUntilLimitClears = false;
@@ -795,6 +799,7 @@
           checkTransferDeadline(trace);
           const label = message.phase === "final" ? "Combining summaries"
             : `Summarized ${message.completed} of ${message.total} parts`;
+          stopHandoffSummaryLabels();
           const statusLabel = document.getElementById("context-generator-text-label");
           const stage = document.getElementById("context-generator-handoff-progress")
             ?.querySelector("[data-context-generator-stage='summary']");
@@ -9643,6 +9648,7 @@
 
   function stopHandoffLiveProgress() {
     stopHandoffActivityProgress();
+    stopHandoffSummaryLabels();
     clearTimeout(handoffStageAdvanceTimer);
     handoffStageAdvanceTimer = null;
     handoffCapturePresentation = null;
@@ -9652,7 +9658,33 @@
     }
   }
 
+  function stopHandoffSummaryLabels() {
+    clearTimeout(handoffSummaryLabelTimer);
+    handoffSummaryLabelTimer = null;
+  }
+
+  function startHandoffSummaryLabels(inputChars) {
+    // Cosmetic activity words, never provider phases or a completion estimate.
+    // Local carries pass no AI input size, even when destination prep is slow.
+    if (inputChars < MIN_BACKEND_CONVERSATION_CHARS || inputChars > MAX_BACKEND_CONVERSATION_CHARS) return;
+    const label = document.getElementById("context-generator-text-label");
+    const stage = document.getElementById("context-generator-handoff-progress")
+      ?.querySelector("[data-context-generator-stage='summary']");
+    let alternate = 0;
+    const advance = () => {
+      handoffSummaryLabelTimer = null;
+      if (!isHandoffOverlayVisible() || stage?.dataset.state !== "active"
+          || !["Summarizing", ...HANDOFF_SUMMARY_LABELS].includes(label?.textContent)) return;
+      const primary = label.textContent !== "Summarizing";
+      label.textContent = primary ? "Summarizing" : HANDOFF_SUMMARY_LABELS[alternate++ % HANDOFF_SUMMARY_LABELS.length];
+      handoffSummaryLabelTimer = setTimeout(advance,
+        primary ? HANDOFF_SUMMARY_PRIMARY_LABEL_MS : HANDOFF_SUMMARY_ALTERNATE_LABEL_MS);
+    };
+    handoffSummaryLabelTimer = setTimeout(advance, HANDOFF_SUMMARY_PRIMARY_LABEL_MS);
+  }
+
   function setHandoffProgress(stageId, phase = "active", destinationName = null, inputChars = 0) {
+    stopHandoffSummaryLabels();
     const overlay = document.getElementById(OVERLAY_ID);
     const progress = document.getElementById("context-generator-handoff-progress");
     const statusText = document.getElementById("context-generator-text");
@@ -9750,7 +9782,10 @@
     progress.setAttribute("aria-label", `Transfer progress: ${currentStatus}`);
     // Native capture starts its own activity after source admission; DOM capture
     // continues to use measured scrolling rather than an estimated animation.
-    if (phase === "active" && stageId === "summary") startHandoffActivityProgress(stageId, inputChars);
+    if (phase === "active" && stageId === "summary") {
+      startHandoffActivityProgress(stageId, inputChars);
+      startHandoffSummaryLabels(inputChars);
+    }
   }
 
   function getRenderedHandoffLineProgress(stageElement) {

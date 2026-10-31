@@ -1117,6 +1117,59 @@ test("local capture and carry preparation leave presentation stages for the sequ
   assert.ok(!trace.marks.some(mark => mark.label === "local handoff done"));
 });
 
+clockTest("AI summary labels rotate slowly with Summarizing occupying most of the wait", (t) => {
+  const { hooks, stage } = createHandoffCompletionFixture();
+  const label = hooks.document.getElementById("context-generator-text-label");
+  hooks.setHandoffProgress("summary", "active", "Claude", 20000);
+  for (const alternate of ["Polishing", "Refining", "Crafting", "Polishing"]) {
+    t.mock.timers.tick(11999);
+    assert.equal(label.textContent, "Summarizing");
+    t.mock.timers.tick(1);
+    assert.equal(label.textContent, alternate);
+    assert.equal(stage.dataset.state, "active", "Cosmetic words cannot complete a stage.");
+    t.mock.timers.tick(3999);
+    assert.equal(label.textContent, alternate);
+    t.mock.timers.tick(1);
+    assert.equal(label.textContent, "Summarizing");
+  }
+});
+
+clockTest("summary label rotation cannot affect local carries or replace real part progress", (t) => {
+  const { hooks } = createHandoffCompletionFixture();
+  const label = hooks.document.getElementById("context-generator-text-label");
+  hooks.setHandoffProgress("summary", "active", "Claude", 20000);
+  t.mock.timers.tick(12000);
+  assert.equal(label.textContent, "Polishing");
+  hooks.setHandoffProgress("summary", "active");
+  t.mock.timers.tick(60000);
+  assert.equal(label.textContent, "Summarizing", "A slow local destination must never start the AI label rotation.");
+  hooks.setHandoffProgress("summary", "active", "Claude", 1000001);
+  t.mock.timers.tick(60000);
+  assert.equal(label.textContent, "Summarizing", "Large chats keep their dedicated part/combine presentation.");
+  hooks.setHandoffProgress("summary", "active", "Claude", 20000);
+  label.textContent = "Combining summaries";
+  t.mock.timers.tick(60000);
+  assert.equal(label.textContent, "Combining summaries", "Real large-chat progress takes priority over activity words.");
+});
+
+clockTest("summary label rotation stops on completion, paste, cancellation and teardown", (t) => {
+  for (const end of ["complete", "paste", "cancel", "teardown", "capture"]) {
+    const { hooks } = createHandoffCompletionFixture();
+    const label = hooks.document.getElementById("context-generator-text-label");
+    hooks.setHandoffProgress("summary", "active", "Claude", 20000);
+    t.mock.timers.tick(12000);
+    assert.equal(label.textContent, "Polishing");
+    if (end === "complete") hooks.setHandoffProgress("summary", "done");
+    else if (end === "paste") hooks.setHandoffProgress("paste", "active");
+    else if (end === "capture") hooks.setHandoffProgress("capture", "active");
+    else if (end === "cancel") hooks.resetRunningFlag({ immediate: true });
+    else hooks.teardownContextGeneratorInstance();
+    const finalLabel = label.textContent;
+    t.mock.timers.tick(60000);
+    assert.equal(label.textContent, finalLabel, end);
+  }
+});
+
 test("handoff completion glides from the rendered position and the next stage preserves that glide", () => {
   for (const activeStage of ["capture", "summary"]) {
     const { hooks, stage } = createHandoffCompletionFixture(activeStage);

@@ -2550,6 +2550,19 @@ async function verifyHandoffPalette(session) {
     `Abrupt completion glides through an intermediate width across the paste update: ${JSON.stringify(lineMotion)}`);
   assert.ok(lineMotion.end >= 0.999, "The completion glide reaches the end.");
   process.stdout.write("✓ Handoff line keeps moving while pending and glides to completion across stage changes.\n");
+  await session.evaluate('window.__capSmokeHandoffStage("summary")', contextId);
+  await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Polishing"'),
+    "the slow AI summary headline rotation", 20000);
+  assert.equal(await session.evaluate('document.querySelector("[data-context-generator-stage=summary] .context-generator-handoff-stage-label").textContent'),
+    "Summarizing", "Activity words must not rename the actual summary step.");
+  if (HANDOFF_SCREENSHOT_PATH) {
+    const shot = await session.call("Page.captureScreenshot", { format: "png" });
+    await fs.promises.mkdir(path.dirname(HANDOFF_SCREENSHOT_PATH), { recursive: true });
+    await fs.promises.writeFile(HANDOFF_SCREENSHOT_PATH.replace(/\.png$/, "-polishing.png"), Buffer.from(shot.data, "base64"));
+  }
+  await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Summarizing"'),
+    "the primary summary headline returning", 8000);
+  process.stdout.write("✓ AI headline briefly shows Polishing after 12 seconds, then returns to Summarizing with a stable stage label.\n");
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await session.evaluate(`window.__capHandoffPaletteSnapshot = () => {
     const root = document.getElementById("context-generator-overlay");
