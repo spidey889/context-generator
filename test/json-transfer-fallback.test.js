@@ -149,14 +149,17 @@ test("finishing DOM capture aborts its background count and releases the shared 
   }
 });
 
-test("picker prefetch waits out the remaining entrance without delaying reduced motion", async t => {
+test("all five picker captures start during the entrance and also support reduced motion", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const start = source.indexOf("  function scheduleDestinationPickerWarmup()");
   const end = source.indexOf("  function hideDestinationSheet(", start);
   const warmup = new vm.Script(source.slice(start, end));
-  for (const animated of [true, false]) {
-    const { context, calls } = harness("chatgpt", { mode: "success" });
-    let frame, animationTime = 40;
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) for (const animated of [true, false]) {
+    const { context, calls } = harness(platform, { mode: "success" });
+    let frame;
+    // Freeze the entrance before completion: advancing it must not be needed
+    // for a native read, regardless of the source platform.
+    const animationTime = 40;
     Object.assign(context, {
       DESTINATION_SHEET_ID: "picker", destinationSheetAnimationFrame: null, destinationSheetWarmupTimer: null,
       destinationSheetPathname: context.window.location.pathname,
@@ -169,23 +172,15 @@ test("picker prefetch waits out the remaining entrance without delaying reduced 
       setTimeout, warmDestinationConnections() {}
     });
     warmup.runInContext(context);
-    context.scheduleDestinationPickerWarmup(); frame();
+    context.scheduleDestinationPickerWarmup();
+    assert.equal(context.pickerJsonCapture, null, "opening styles get their first paint before capture");
+    frame();
+    assert.equal(context.pickerJsonCapture, null, "the warmup yields out of the paint callback");
     t.mock.timers.tick(0);
-    if (animated) {
-      t.mock.timers.tick(119);
-      assert.equal(context.pickerJsonCapture, null, "snapshotting must not interrupt the entrance");
-      assert.equal(calls.json, 0);
-      animationTime = 60;
-      t.mock.timers.tick(1);
-      assert.equal(context.pickerJsonCapture, null, "a delayed animation must be rechecked before capture");
-      animationTime = 160;
-      t.mock.timers.tick(100);
-    } else {
-      t.mock.timers.tick(0);
-    }
+    assert.ok(context.pickerJsonCapture, `${platform}: capture starts without finishing the entrance`);
     await context.pickerJsonCapture.promise;
     assert.equal(calls.json, 1);
-    assert.equal(calls.destination + calls.dom + calls.flows.length, 0);
+    assert.equal(calls.destination + calls.prepare + calls.dom + calls.flows.length, 0);
   }
 });
 

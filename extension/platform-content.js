@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-diagnostics-merge-v240";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-picker-capture-v241";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -7980,29 +7980,20 @@
 
   function scheduleDestinationPickerWarmup() {
     const sourceUrl = window.location.href;
-    // The history snapshot reads rendered text and can force layout on long chats.
-    // Keep it out of the entire entrance, not just its first paint. The timer is
-    // cancelled on dismissal; selection can start capture immediately as usual.
+    // Rendered history can force layout. Let the opening styles paint, then
+    // overlap the native read with the entrance instead of waiting for it to end.
+    // Dismissal/navigation/selection still revoke this queued warmup.
     destinationSheetAnimationFrame = requestAnimationFrame(() => {
       destinationSheetAnimationFrame = null;
-      const warmup = () => {
+      destinationSheetWarmupTimer = setTimeout(() => {
         destinationSheetWarmupTimer = null;
         const sheet = document.getElementById(DESTINATION_SHEET_ID);
         if (isRunning || !isDestinationSheetOpen() || sheet?.getAttribute("aria-hidden") === "true"
             || destinationSheetPathname !== window.location.pathname
             || sourceUrl !== window.location.href || pickerJsonCapture) return;
-        // A busy first paint can delay the animation's start beyond wall time.
-        // Recheck its clock before scanning history rather than assuming it ended.
-        const remainingMs = Math.max(0, ...(sheet?.getAnimations?.() || []).map(animation =>
-          (animation.effect?.getComputedTiming?.().endTime || 0) - (animation.currentTime || 0)));
-        if (remainingMs > 0) {
-          destinationSheetWarmupTimer = setTimeout(warmup, Math.ceil(remainingMs));
-          return;
-        }
         warmDestinationConnections();
         startPickerJsonCapture();
-      };
-      destinationSheetWarmupTimer = setTimeout(warmup, 0);
+      }, 0);
     });
   }
 
