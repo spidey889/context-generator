@@ -1776,7 +1776,7 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
           const diagnostics = { version: 1, last_operation: "summary_request" };
           const debug = { attempt_id: transferId, started_at: new Date().toISOString(), phase: "request",
             large_phase: payload.large.phase, part_index: payload.large.index, part_count: payload.large.total, attempt };
-          let requestSent = false, responseReceived = false;
+          let requestSent = false, responseReceived = false, retryAfterMs = 60000;
           const onAbort = () => controller.abort(requestSignal.reason);
           requestSignal.addEventListener("abort", onAbort, { once: true });
           if (requestSignal.aborted) onAbort();
@@ -1808,6 +1808,14 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
                 "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER }, body
             });
             responseReceived = true;
+            if (response.status === 429) {
+              // The large endpoint asks for 60s; honor seconds or an HTTP date
+              // without shortening the server's wait to the usual 2s backoff.
+              const retryAfter = response.headers?.get("retry-after")?.trim();
+              const seconds = Number(retryAfter), retryAt = Date.parse(retryAfter);
+              if (retryAfter && seconds >= 0) retryAfterMs = seconds * 1000;
+              else if (Number.isNaN(seconds) && Number.isFinite(retryAt)) retryAfterMs = Math.max(0, retryAt - Date.now());
+            }
             checkpoint(logEntry, { stage: "headers", http_status: response.status, headers_ms: nowMs() - requestStarted });
             Object.assign(debug, { phase: "response_headers", http_status: response.status,
               headers_ms: Math.round(nowMs() - attemptStarted) });
@@ -1840,8 +1848,9 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
             const interruptedBody = error.summaryResponseInterrupted === true && !controller.signal.aborted;
             const transientFailure = (error.summaryServiceFailure && (error.status === 429 || error.status >= 500))
               || (requestSent && (controller.signal.aborted || (!responseReceived && error.name === "TypeError")));
+            const retryDelayMs = error.status === 429 ? retryAfterMs : 2000;
             const retry = attempt === 1 && !failureRecorded && !requestSignal.aborted
-              && (interruptedBody ? Date.now() < expiresAt : transientFailure && Date.now() + 2000 < requestDeadline);
+              && (interruptedBody ? Date.now() < expiresAt : transientFailure && Date.now() + retryDelayMs < requestDeadline);
             // The initiating request owns the diagnosis. Aborted sibling requests
             // must not overwrite it with a secondary cancellation or shared Error.
             // A recoverable body read is not a terminal part failure: the closed
@@ -1878,7 +1887,7 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
                 // The phase's abort signal also cancels the delay if a sibling or user stops work.
                 await new Promise((resolve, reject) => {
                   const onCancel = () => { clearTimeout(delay); reject(requestSignal.reason); };
-                  const delay = setTimeout(() => { requestSignal.removeEventListener("abort", onCancel); resolve(); }, 2000);
+                  const delay = setTimeout(() => { requestSignal.removeEventListener("abort", onCancel); resolve(); }, retryDelayMs);
                   requestSignal.addEventListener("abort", onCancel, { once: true });
                   if (requestSignal.aborted) onCancel();
                 });

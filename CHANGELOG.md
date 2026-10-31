@@ -6,7 +6,7 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-31
 
-- **Retry transient large-summary failures once.** If a part or final combine encounters a temporary service error, network failure or timeout, wait two seconds and retry that request while keeping completed parts. The existing overall and phase deadlines still apply, so a late failure may leave insufficient retry time. Interrupted response-body recovery shares the same single-retry limit.
+- **Retry transient large-summary failures once.** If a part or final combine encounters a temporary service error, network failure or timeout, retry that request while keeping completed parts. HTTP 429 honors the server's `Retry-After` (60 seconds by default); other transient failures wait two seconds. Stop immediately when the requested wait cannot fit within the existing phase/overall deadlines. Interrupted response-body recovery shares the same single-retry limit. Add coverage for server waits, exhausted deadlines and cancellation; owner testing remains pending.
 
 - **Overlap picker entrance and native capture on all five platforms.** Saved-chat capture no longer waits for the 160 ms picker animation to finish. Keep the frame/task yield that lets opening styles paint, then start preconnect and the existing JSON read during the entrance.
   - Preserve dismissal/navigation/selection guards, capture reuse, source validation and the boundary that prevents summary/destination work before selection. Advance the content-script instance marker so reinjection replaces the old scheduler.
