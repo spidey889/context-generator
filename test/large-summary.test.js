@@ -294,6 +294,7 @@ test("a rate-limited TokenHarbor primary uses its distinct backup once with the 
   assert.deepEqual(token[0].body, token[1].body);
   assert.equal(calls.length, 3);
   assert.equal(res.body.timing.keySlot, "backup");
+  assert.ok(res.body.timing.providerFailures.some(entry => entry.provider === "tokenharbor" && entry.key_slot === "primary" && entry.http_status === 429));
   assert.ok(res.body.receipt);
   assert.doesNotMatch(JSON.stringify(res.body), /limited-primary|working-backup|PRIVATE_QUOTA/);
 });
@@ -307,11 +308,23 @@ test("two rate-limited TokenHarbor keys are bounded and skipped on subsequent wa
   const body = { conversation: "a".repeat(600000), large: metadata };
   const first = response(); await handler(request(body), first);
   assert.equal(first.statusCode, 502);
+  assert.equal(first.body.providerFailures.length, 2);
+  assert.deepEqual(first.body.providerFailures.map(entry => entry.key_slot), ["primary", "backup"]);
+  assert.ok(first.body.providerFailures.every(entry => Object.keys(entry).every(key =>
+    ["provider", "key_slot", "failure_reason", "phase", "elapsed_ms", "http_status"].includes(key))));
   assert.deepEqual(calls, ["Bearer limited-primary", "Bearer limited-backup"]);
   const second = response(); await handler(request(body), second);
   assert.equal(second.statusCode, 503);
   assert.equal(calls.length, 2, "Do not repeatedly hit known rate-limited keys while they cool down.");
   assert.equal(second.body.receipt, undefined);
+  process.env.TOKENHARBOR_API_KEY = "fresh-primary";
+  global.fetch = async (_url, options) => {
+    calls.push(options.headers.Authorization);
+    return new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }));
+  };
+  const rotated = response(); await handler(request(body), rotated);
+  assert.equal(rotated.statusCode, 200);
+  assert.equal(calls[2], "Bearer fresh-primary", "An environment rotation must not inherit another key's cooldown.");
 });
 
 test("TokenHarbor does not rotate identical credentials or use a second key after non-quota errors", async t => {
@@ -329,6 +342,21 @@ test("TokenHarbor does not rotate identical credentials or use a second key afte
     await handler(request(body), response());
     assert.equal(calls, 1, `HTTP ${status} must not consume a second key.`);
   }
+});
+
+test("cancellation before a TokenHarbor quota response cannot spend the backup key", async t => {
+  let calls = 0;
+  const res = response();
+  setup(t, async () => {
+    calls++;
+    res.destroyed = true; res.emit("close");
+    return new Response("", { status: 429 });
+  });
+  delete process.env.OPENROUTER_API_KEY;
+  process.env.TOKENHARBOR_API_KEY = "primary"; process.env.TOKENHARBOR_BACKUP_API_KEY = "backup";
+  await handler(request({ conversation: "a".repeat(600000), large: metadata }), res);
+  assert.equal(calls, 1);
+  assert.equal(res.body?.receipt, undefined);
 });
 
 clockTest("the TokenHarbor backup shares the original deadline and a limited key recovers after cooldown", { tickMs: 1000, maxElapsedMs: 85000 }, async t => {

@@ -2,6 +2,7 @@ const { applyCorsHeaders, isValidPreflightRequest, isTrustedExtensionRequest, ac
 const { getHeader } = require("./request-validation");
 const protocol = require("./large-summary-protocol");
 const { createProviderFailureLog } = require("./provider-failure-log");
+const { schema: providerFailureSchema } = require("../supabase/functions/_shared/provider-failure");
 const { createHash } = require("node:crypto");
 const { createSummaryWithProvider, getInitialSummaryMessages, getProviderRequestBody,
   getSummaryProfile, createLongSummaryResponse } = require("./summarize").__test;
@@ -95,6 +96,19 @@ async function handler(req, res) {
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const channel = createLongSummaryResponse(res, { stream: getHeader(req, "accept").includes("application/x-ndjson") });
   const failures = createProviderFailureLog({ attemptId: validation.telemetry?.attempt_id, telemetry: validation.telemetry });
+  const providerFailures = [];
+  const recordFailure = observation => {
+    failures.record(observation);
+    // A small response-side diagnosis also works without optional telemetry.
+    // Project only existing closed metadata; never return upstream error text.
+    if (providerFailures.length >= 3) return;
+    const record = {};
+    for (const key of ["provider", "key_slot", "failure_reason", "phase", "elapsed_ms", "http_status"]) {
+      const value = observation[key], rule = providerFailureSchema[key];
+      if (rule.values ? rule.values.includes(value) : Number.isInteger(value) && value >= rule.min && value <= rule.max) record[key] = value;
+    }
+    providerFailures.push(record);
+  };
   try {
     const modelsTried = [], providerTimes = { openrouterMs: 0, tokenharborMs: 0 };
     // Both approved free routes share one wall-clock deadline. Waiting 45s for
@@ -127,7 +141,7 @@ async function handler(req, res) {
                 requestContext: { signal, maxAttempts: 1, firstAnswerTimeoutMs: budgetMs,
                   inputChars: conversation.length, routeIndex: index + 1, ...(credential.keySlot ? { keySlot: credential.keySlot } : {}),
                   // Control-only acknowledgement must precede any model wait.
-                  onDelta() {}, onStart: channel.reset, onProviderFailure: observation => failures.record(observation) } });
+                  onDelta() {}, onStart: channel.reset, onProviderFailure: recordFailure } });
               return { ...result, ...(credential.keySlot ? { keySlot: credential.keySlot } : {}) };
             } catch (error) {
               if (route.provider.id !== "tokenharbor" || error.providerStatus !== 429) throw error;
@@ -162,9 +176,9 @@ async function handler(req, res) {
     }
     controller.signal.throwIfAborted();
     if (Date.now() - startedAt >= REQUEST_TIMEOUT_MS || !result) {
-      return channel.send(502, { code: "summary_failed", error: "Conversation part could not be summarized" });
+      return channel.send(502, { code: "summary_failed", error: "Conversation part could not be summarized", providerFailures });
     }
-    const timing = { ...result, summary: undefined, modelsTried,
+    const timing = { ...result, summary: undefined, modelsTried, providerFailures,
       openrouterModelsTried: modelsTried.filter(model => model === MODEL),
       tokenharborModelsTried: modelsTried.filter(model => model === BACKUP_MODEL), ...providerTimes,
       fallback: { attempted: modelsTried.includes(BACKUP_MODEL), used: result.provider === "tokenharbor", servedBy: result.provider, model: result.model },
@@ -186,7 +200,7 @@ async function handler(req, res) {
     return channel.send(200, response);
   } catch {
     if (!res.destroyed && !res.writableEnded) return channel.send(controller.signal.aborted ? 504 : 502,
-      { code: controller.signal.aborted ? "summary_timeout" : "summary_failed", error: "Large conversation could not be summarized" });
+      { code: controller.signal.aborted ? "summary_timeout" : "summary_failed", error: "Large conversation could not be summarized", providerFailures });
   } finally {
     clearTimeout(timer);
     res.removeListener?.("close", onClose);
