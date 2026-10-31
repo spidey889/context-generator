@@ -171,7 +171,7 @@
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
     "editor_seen", "editor_connected", "draft_present", "paste_populated", "paste_stable", "user_handled",
     "summary_cache_hit", "summary_fallback", "events_truncated", "destination_route_allowed", "destination_platform_match", "destination_auth_prompt",
-    "editor_retained", "editor_insert_attempted", "editor_document_focused"];
+    "editor_retained", "editor_insert_attempted", "editor_document_focused", "destination_loading", "destination_error_prompt", "destination_challenge_prompt"];
   const numbers = ["duration_ms", "deadline_remaining_ms", "capture_ms", "capture_chars", "capture_bytes",
     "candidate_turns", "captured_turns", "useful_turns", "raw_candidate_chars", "initial_rendered_turns",
     "sweep_scrolls", "sweep_stale_scrolls", "sweep_quiet_checks", "capture_retries", "expanded_blocks",

@@ -3,6 +3,7 @@
 function beforePasteDiagnosis(schema) {
   const result = structuredClone(schema);
   delete result.insertion_blocked_reason;
+  for (const key of ["destination_loading", "destination_error_prompt", "destination_challenge_prompt"]) delete result[key];
   return result;
 }
 function withoutPasteEditorFields(schema) {

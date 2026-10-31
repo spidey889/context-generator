@@ -1075,6 +1075,7 @@
       recordTransferFailureDiagnostics,
       recordJsonCaptureFailure,
       observeSourcePageState,
+      observeDestinationPageState,
       reportCaptureProgress,
       resetRunningFlag,
       markCaptureDone,
@@ -3260,7 +3261,7 @@
     const reportCheckpoint = checkpoint => {
       if (!transferId || !instanceActive || (checkpoint !== "searching" && sentCheckpoints.has(checkpoint))) return;
       globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt });
-      const snapshot = globalThis.CapTransferDiagnostics?.snapshot(diagnostics);
+      let snapshot = globalThis.CapTransferDiagnostics?.snapshot(diagnostics);
       if (!snapshot) return;
       if (checkpoint === "searching") {
         const key = JSON.stringify([snapshot.editor_match_count, snapshot.editor_ready_count, snapshot.editor_hidden_count,
@@ -3269,6 +3270,10 @@
         if (searchReports >= 8 || Date.now() - lastSearchAt < (key === lastSearchKey ? 5000 : 1000)) return;
         searchReports++; lastSearchAt = Date.now(); lastSearchKey = key;
       }
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { ...observeDestinationPageState(), document_ready_state: document.readyState,
+        visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown" });
+      snapshot = globalThis.CapTransferDiagnostics?.snapshot(diagnostics);
+      if (!snapshot) return;
       sentCheckpoints.add(checkpoint);
       // A blocked insert or lost final reply must not erase earlier progress.
       // Milestones and bounded search snapshots never gate paste.
@@ -3347,7 +3352,7 @@
       }
       return timing;
     } finally {
-      globalThis.CapTransferDiagnostics?.update(diagnostics, { destination_auth_prompt: observeDestinationAuthPrompt(),
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { ...observeDestinationPageState(),
         document_ready_state: document.readyState });
       if (!retainedGuard) guard.dispose();
     }
@@ -8334,28 +8339,31 @@
     state.controller.abort();
   }
 
-  function observeSourcePageState() {
+  function observeSourcePageState() { return observePageState("source"); }
+  function observeDestinationPageState() { return observePageState("destination"); }
+
+  function observePageState(prefix) {
     try {
       const excluded = [...currentPlatform.conversationSelectors, ...GENERIC_CONVERSATION_SELECTORS,
         "pre", "code", "textarea", "input", "[contenteditable]"].join(",");
       const challenge = 'iframe[src^="https://challenges.cloudflare.com/"], iframe[title*="reCAPTCHA"]';
       const prompts = "h1, h2, [role='alert'], [role='alertdialog'], [role='status']";
-      const state = { source_loading: document.readyState === "loading" || document.readyState === "interactive",
-        source_error_prompt: false, source_challenge_prompt: false };
+      const state = { [`${prefix}_loading`]: document.readyState === "loading" || document.readyState === "interactive",
+        [`${prefix}_error_prompt`]: false, [`${prefix}_challenge_prompt`]: false };
       const auth = typeof observeDestinationAuthPrompt === "function" ? observeDestinationAuthPrompt() : undefined;
-      if (typeof auth === "boolean") state.source_auth_prompt = auth;
+      if (typeof auth === "boolean") state[`${prefix}_auth_prompt`] = auth;
       // Classify native UI only. Exclude both descendants and containers of chat,
       // code and editors before reading a label; keep only boolean observations.
       for (const node of document.querySelectorAll(`${prompts}, [role='progressbar'], [aria-busy='true'], ${challenge}`)) {
         if (!isVisible(node) || isContextGeneratorNode(node) || node.closest(excluded)
           || node.closest("[hidden], [aria-hidden='true']") || node.querySelector(excluded)) continue;
-        if (node.matches("[role='progressbar'], [aria-busy='true']")) state.source_loading = true;
-        if (node.matches(challenge)) state.source_challenge_prompt = true;
+        if (node.matches("[role='progressbar'], [aria-busy='true']")) state[`${prefix}_loading`] = true;
+        if (node.matches(challenge)) state[`${prefix}_challenge_prompt`] = true;
         if (!node.matches(prompts)) continue;
         const label = (node.getAttribute("aria-label") || node.innerText || node.textContent || "").trim().slice(0, 300);
-        if (/\b(?:something went wrong|an (?:unexpected )?error (?:has )?occurred|unable to load|failed to load|could(?:n['’]t| not) load|temporarily unavailable|service unavailable)\b/i.test(label)) state.source_error_prompt = true;
-        if (/\b(?:verif(?:y|ying) (?:that )?(?:you['’]re|you are) (?:a )?human|making sure (?:you['’]re|you are) human|checking your browser|checking (?:if )?(?:you['’]re|you are) human|complete the (?:security check|captcha)|security verification)\b/i.test(label)) state.source_challenge_prompt = true;
-        if (/^(?:loading|please wait)(?:\b|[.…])/i.test(label)) state.source_loading = true;
+        if (/\b(?:something went wrong|an (?:unexpected )?error (?:has )?occurred|unable to load|failed to load|could(?:n['’]t| not) load|temporarily unavailable|service unavailable)\b/i.test(label)) state[`${prefix}_error_prompt`] = true;
+        if (/\b(?:verif(?:y|ying) (?:that )?(?:you['’]re|you are) (?:a )?human|making sure (?:you['’]re|you are) human|checking your browser|checking (?:if )?(?:you['’]re|you are) human|complete the (?:security check|captcha)|security verification)\b/i.test(label)) state[`${prefix}_challenge_prompt`] = true;
+        if (/^(?:loading|please wait)(?:\b|[.…])/i.test(label)) state[`${prefix}_loading`] = true;
       }
       return state;
     } catch { return {}; } // Optional diagnosis must never affect capture/recovery.

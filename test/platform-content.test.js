@@ -535,6 +535,9 @@ test("source failure observations distinguish native loading, sign-in, error and
   assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeSourcePageState())), {
     source_loading: true, source_auth_prompt: true, source_error_prompt: true, source_challenge_prompt: true
   });
+  assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeDestinationPageState())), {
+    destination_loading: true, destination_auth_prompt: true, destination_error_prompt: true, destination_challenge_prompt: true
+  });
   nodes.pop();
   assert.equal(hooks.observeSourcePageState().source_loading, false);
   hooks.document.readyState = "interactive";
@@ -560,6 +563,9 @@ test("source failure flags never read chat, code, hidden prompts or containers h
   }
   assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeSourcePageState())), {
     source_loading: false, source_auth_prompt: false, source_error_prompt: false, source_challenge_prompt: false
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeDestinationPageState())), {
+    destination_loading: false, destination_auth_prompt: false, destination_error_prompt: false, destination_challenge_prompt: false
   });
 });
 
