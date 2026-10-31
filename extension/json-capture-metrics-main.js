@@ -56,6 +56,20 @@
     step_stage: enums.capture_request_stage,
     route_reason: ["path_unrecognized", "no_matching_endpoint", "available"],
     hook_status: ["no_reply", "version_mismatch", "runtime_missing", "install_rejected", "install_failed", "ready"],
+    // Preserve the recovery category while naming the exact structural guard.
+    incomplete_reason: ["completeness_metadata_invalid", "conversation_mismatch", "messages_missing", "conversation_tree_missing",
+      "branch_leaf_missing", "branch_parent_missing", "no_usable_text", "history_missing", "gemini_rpc_response_invalid",
+      "gemini_frame_pairs_incomplete", "gemini_frame_length_mismatch", "gemini_frame_invalid", "gemini_history_response_invalid",
+      "gemini_history_page_invalid", "gemini_history_pages_remaining", "gemini_pagination_stalled", "gemini_parent_turn_invalid", "gemini_parent_response_invalid",
+      "gemini_response_missing", "gemini_selected_response_missing", "grok_history_missing", "grok_response_count_mismatch",
+      "grok_message_bodies_missing", "grok_message_bodies_invalid", "grok_message_body_mismatch", "deepseek_conversation_unavailable", "deepseek_snapshot_mismatch",
+      "deepseek_fragments_missing", "skipped_file_notice_invalid", "omitted_file_notice_invalid", "capture_payload_invalid", "capture_message_boundaries_invalid",
+      ...["truncated", "is_truncated", "partial", "is_partial", "incomplete", "is_incomplete", "has_more", "has_more_messages",
+        "has_previous_page", "has_next_page", "has_missing_messages", "missing_message_count", "cut_off", "complete", "is_complete",
+        "next_cursor", "previous_cursor", "next_page", "previous_page", "missing_messages", "missing_message_ids", "missing_message_uuids",
+        "has_previous", "has_next", "has_missing_nodes", "missing_node_count", "missing_nodes", "missing_node_ids", "context_truncation_continuation",
+        "hasMore", "hasNextPage", "hasPreviousPage", "isPartial", "isIncomplete", "isTruncated", "missingMessages", "nextCursor", "previousCursor", "isComplete"]
+        .map(field => `metadata_${field}`)],
     mode: ["prefetch", "fresh", "retry"],
     failure_check: ["raw_header_limit", "raw_total_stream_limit", "raw_response_stream_limit", "raw_remaining_files_limit", "supported_files_limit", "transcript_char_limit", "transcript_byte_limit",
       "auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "invalid_utf8", "non_json_response",
@@ -445,13 +459,14 @@
       if (data.failure_check && !recoveredFileFailure) return;
       // A skipped file keeps its first closed cause separately. A later fatal
       // guard must own failure_* so its stage, size and type remain consistent.
-      if (recoveredFileFailure) for (const key of Object.keys(data)) if (key.startsWith("failure_")) delete data[key];
+      if (recoveredFileFailure) for (const key of Object.keys(data)) if (key.startsWith("failure_") || key === "incomplete_reason") delete data[key];
       recoveredFileFailure = false;
       set({ ...details, failure_check: check, failure_stage: stage, failure_value_source: source,
         failure_value: value, failure_limit: limit, http_status: status });
     };
     const recoverFile = (error, requestStage = "attachment_body") => {
       if (!data.failure_check) fail(error?.captureDetail || "attachment_failed", requestStage);
+      if (data.failure_check === "incomplete_history") set({ incomplete_reason: error?.jsonIncompleteReason });
       set({ skipped_file_check: data.skipped_file_check || data.failure_check, outcome: "partial" });
       add("files_skipped");
       recoveredFileFailure = true;
@@ -514,6 +529,8 @@
         fail(detail || "unknown", failedStage);
         // Do not derive categories from exception prose or fetch/parser snippets.
         if (!data.failure_check) fail("unknown", failedStage);
+        // Fixed guard labels only; never copy the exception message into telemetry.
+        if (data.failure_check === "incomplete_history") set({ incomplete_reason: error.jsonIncompleteReason });
         exception(error);
         set({ outcome: detail === "conversation_changed" || detail === "cancelled" ? "cancelled" : "failed" });
       }

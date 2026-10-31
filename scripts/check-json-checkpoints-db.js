@@ -2,9 +2,14 @@ const assert = require("node:assert/strict");
 const contract = require("../extension/transfer-diagnostics");
 const { checkDiagnosticsSamples } = require("./check-diagnostics-samples");
 const checkpointKeys = ["skipped_file_check","files_skipped","step","step_stage","hook_status","route_reason","saved_chat","hook_ready","route_found","history_request_sent","history_response_read","history_parsed","history_checked","route_candidates","route_resources","progress_seq"];
+function beforeIncompleteReasons(schema = contract.jsonAttemptSchema) {
+  const previous = structuredClone(schema);
+  delete previous.incomplete_reason;
+  return previous;
+}
 // Each historical replay compares the contract that existed at that boundary.
 function beforeCheckpoints(schema = contract.jsonAttemptSchema) {
-  const previous = structuredClone(schema);
+  const previous = beforeIncompleteReasons(schema);
   for (const key of checkpointKeys) delete previous[key];
   previous.outcome.values = previous.outcome.values.filter(value => value !== "started");
   return previous;
@@ -23,7 +28,7 @@ async function checkJsonCheckpoints(db, sql) {
   await db.exec(sql);
   equal(await snapshot(), before);
   const definition = (await rows("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) sql"))[0].sql;
-  equal(JSON.parse(definition.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.jsonAttemptSchema);
+  equal(JSON.parse(definition.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), beforeIncompleteReasons());
   const first = { outcome: "failed", mode: "prefetch", step: "route", step_stage: "history", hook_ready: true,
     route_found: false, route_reason: "no_matching_endpoint", route_candidates: 0, route_resources: 20,
     failure_check: "routing_unavailable", progress_seq: 3 };

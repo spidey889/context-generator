@@ -11,6 +11,32 @@ const scripts = new Map(["transfer-diagnostics.js", "json-capture-metrics.js", "
 
 const chat = "test-chat";
 const endpoint = `https://claude.ai/api/organizations/test-org/chat_conversations/${chat}?tree=True`;
+
+test("Claude incomplete history retains the specific guard without private values", async () => {
+  for (const [reason, mutate] of [
+    ["completeness_metadata_invalid", data => { data.page_info = []; }],
+    ["metadata_truncated", data => { data.truncated = true; }],
+    ["metadata_complete", data => { data.complete = false; }],
+    ["metadata_next_cursor", data => { data.next_cursor = "PRIVATE"; }],
+    ["metadata_missing_messages", data => { data.missing_messages = ["PRIVATE"]; }],
+    ["conversation_mismatch", data => { data.uuid = "PRIVATE"; }],
+    ["messages_missing", data => { delete data.chat_messages; }],
+    ["branch_leaf_missing", data => { data.current_leaf_message_uuid = "PRIVATE"; }],
+    ["branch_parent_missing", data => { data.chat_messages[2].parent_message_uuid = "PRIVATE"; }],
+    ["no_usable_text", data => { for (const message of data.chat_messages) { message.content = []; message.text = ""; } }]
+  ]) {
+    const h = setup(fixture(), { resources: [endpoint], beforeMessage(reply) {
+      if (reply.type === "response" && reply.data) mutate(reply.data);
+    } });
+    await assert.rejects(h.window.__capCaptureClaudeJson(), error => {
+      assert.equal(error.diagnostics.capture_detail, "incomplete_history");
+      assert.equal(error.jsonCapture.failure_check, "incomplete_history");
+      assert.equal(error.jsonCapture.incomplete_reason, reason);
+      assert.doesNotMatch(JSON.stringify(error.jsonCapture), /PRIVATE/);
+      return true;
+    });
+  }
+});
 test("Claude accepts case-insensitive JSON response media types with optional parameters", async () => {
   for (const contentType of ["Application/JSON; charset=utf-8", "APPLICATION/JSON"]) {
     const capture = await setup(fixture(), { resources: [endpoint], headers: { "content-type": contentType } }).window.__capCaptureClaudeJson();

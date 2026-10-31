@@ -6,6 +6,8 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-31
 
+- **Distinguish incomplete JSON-history checks in diagnostics.** Add fixed guard/metadata-flag reasons alongside the existing `incomplete_history` category across native capture adapters and bridge validation, preserving capture and recovery behavior. Include matching validator allowlists, a local additive migration and regression cases; no deployment or tests were run for this local-only change at the owner's request. Historical records cannot acquire the missing reason retrospectively.
+
 - **Use the existing TokenHarbor backup after primary quota failure for large chats.** Real-browser diagnostics showed NVIDIA/OpenRouter HTTP 502 alongside TokenHarbor primary HTTP 429, leaving no serving route even though a separate backup credential was configured.
   - The old `primary || backup` selection only used the backup when the primary environment variable was absent. A configured, quota-limited primary prevented the backup from being attempted; the owner explicitly authorized trying that existing key.
   - Try the distinct backup once only after TokenHarbor HTTP 429, with identical model/input and the remaining shared 75-second budget. Preserve the concurrent NVIDIA race, cancellation, strict receipts, final proof and ordinary up-to-1M routing. No paid route or new model is introduced.
