@@ -22,6 +22,7 @@ This Privacy Policy explains how Cap Context ("we", "our", or "us") handles user
 - **Local Diagnostics**: The extension stores one latest-run receipt in browser extension storage for the connected analysis page. It contains transfer timing, counts, provider/model/fallback details, token usage, status, and the exact captured transcript used for the transfer, but not the generated summary. The raw transcript and its expiry marker are removed after 24 hours, while the remaining diagnostics stay until the next transfer replaces the receipt. The transcript stays collapsed behind the analysis page's raw-text control until the user opens it.
 - **Telemetry Delivery**: Undelivered metadata-only telemetry is kept in local extension storage for up to seven days, with a maximum of 500 queued entries, and retried after the extension starts again. A telemetry outage never blocks or changes the transfer itself.
 - **Abuse Protection**: The backend temporarily processes ordinary request metadata, such as an IP address supplied by the hosting platform, to enforce rate limits and protect the public service from automated abuse. This metadata is not used for advertising.
+- **Coarse Location Diagnostics**: With transfer telemetry enabled, the backend records Vercel's country and region codes and city name inside the existing transfer diagnostics, using `unknown` when unavailable. These approximate request hints share transfer retention and are not verified physical locations. No IP address, latitude or longitude is stored in this observation.
 
 ## Data Sharing and Sale
 

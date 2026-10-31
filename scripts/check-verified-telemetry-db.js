@@ -462,6 +462,8 @@ async function main() {
         checks += await require("./check-rejected-capture-count-db.js").checkRejectedCaptureCount(db, sql);
       } else if (/_provider_(safe_errors|error_identity|failure_details|large_steps|route_skips)\.sql$/.test(name)) {
         checks += await require("./check-provider-logging-db.js").checkProviderLogging(db, sql);
+      } else if (name.endsWith("_request_location_diagnostics.sql")) {
+        checks += await require("./check-request-location-db.js").checkRequestLocation(db, sql);
       } else await db.exec(sql);
     }
     const providerDefinition = (await one("select pg_get_functiondef('public.is_valid_provider_failure(jsonb)'::regprocedure) value")).value;

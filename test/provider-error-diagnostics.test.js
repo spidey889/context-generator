@@ -1,6 +1,17 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { safeProviderError, retryAfterMs, readSafeProviderError, providerRequestId, embeddedProviderError } = require("../api/provider-error-diagnostics");
+const { safeProviderError, retryAfterMs, readSafeProviderError, providerRequestId, embeddedProviderError } = require("../lib/provider-error-diagnostics");
+
+test("Vercel automatic API entries stay within the project's 12-function limit", () => {
+  const fs = require("node:fs"), path = require("node:path");
+  const root = path.join(__dirname, "..");
+  const ignored = new Set(fs.readFileSync(path.join(root, ".vercelignore"), "utf8").split(/\r?\n/));
+  // Vercel counts helper files in api/ as functions too, even without a handler.
+  const entries = fs.readdirSync(path.join(root, "api"), { recursive: true })
+    .filter(name => /\.(?:[cm]?js|[cm]?ts|py|go|rb)$/.test(name)
+      && !ignored.has(`api/${name.replace(/\\/g, "/")}`));
+  assert.ok(entries.length <= 12, `${entries.length} automatic API functions exceed the deployment limit`);
+});
 
 test("provider errors retain fixed safe fields and never echoed text", async () => {
   const result = await readSafeProviderError(new Response(JSON.stringify({ error: { code: 429, type: "rate_limit_error",

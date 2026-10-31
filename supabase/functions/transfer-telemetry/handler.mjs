@@ -1,6 +1,7 @@
 import { validateTelemetryPayload } from "./validation.mjs";
 import { verifySummaryReceipt } from "../_shared/summary-proof.mjs";
 import "../_shared/provider-failure.js";
+import "../_shared/request-location.js";
 
 const MAX_BODY_BYTES = 24576;
 
@@ -36,8 +37,20 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
     if (providerEvent && (input.context !== undefined && (!providerContext || providerContext.status !== "started"
       || providerContext.attempt_id !== providerEvent.attempt_id || providerContext.summary_proof !== undefined
       || providerContext.summary_confirmed_at !== undefined))) return failure(400, "invalid_payload");
+    // Only the authenticated Vercel relay adds location. Keep the public/client
+    // diagnostics validator closed so extension payloads cannot supply it.
+    const location = input?.diagnostics?.location;
+    if (location !== undefined) {
+      input = { ...input, diagnostics: { ...input.diagnostics } };
+      delete input.diagnostics.location;
+    }
     const payload = providerEvent ? null : validateTelemetryPayload(input);
     if (!payload && !providerEvent) return failure(400, "invalid_payload");
+    if (location !== undefined) {
+      const safe = globalThis.CapRequestLocation.validate(location);
+      if (!payload || !safe) return failure(400, "invalid_payload");
+      payload.diagnostics = { ...payload.diagnostics, location: safe };
+    }
 
     const signingSecret = getEnv("TELEMETRY_SIGNING_KEY");
     if (payload?.summary_proof !== undefined && (!signingSecret || new TextEncoder().encode(signingSecret).length < 32)) {

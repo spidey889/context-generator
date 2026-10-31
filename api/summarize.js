@@ -8,7 +8,7 @@ const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const { getHeader } = require("./request-validation");
 const { readProviderStream } = require("./provider-stream");
 const { createProviderFailureLog, createProviderSkipReporter } = require("./provider-failure-log");
-const { retryAfterMs, readSafeProviderError, safeProviderError, providerRequestId, embeddedProviderError, providerParseError } = require("./provider-error-diagnostics");
+const { retryAfterMs, readSafeProviderError, safeProviderError, providerRequestId, embeddedProviderError, providerParseError } = require("../lib/provider-error-diagnostics");
 const {
   SUMMARY_PROMPT_CACHE_VERSION,
   CONTEXT_CARRY_TITLE,

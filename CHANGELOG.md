@@ -6,6 +6,16 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-31
 
+- **Keep diagnostic helpers within Vercel deployment limits.** Both `logs-provider` previews built successfully but failed while deploying their outputs.
+  - Vercel reported `exceeded_serverless_functions_per_deployment`: the new helper in `api/` became a thirteenth function against this project's twelve-function limit.
+  - Move that imported helper to `lib/`, updating both backend imports and its tests. Keep provider behavior, deadlines, privacy rules and all existing endpoints unchanged.
+  - Add a deployment-entry regression that reproduces the thirteen-function failure before the move and enforces the current project limit afterward.
+  - The earlier local gate covered runtime/SQL/browser behavior, but lacked this hosting-plan check; a successful local build alone did not verify deployment acceptance.
+  - Rename the latest branch commit to the owner's neutral title, `Update Supabase diagnostics`. No merge, production deployment or live database change is part of this correction.
+
+- **Add coarse Vercel location to existing transfer diagnostics.** Store only country/region codes and a decoded, bounded city under `diagnostics.location`, using `unknown` for missing or invalid hints. Reject client-supplied location and keep the first request's snapshot through retries without blocking later client diagnostics. No IP, coordinates, chat text, new table/column or live database change; prepare the compatible validator migration locally.
+  - The full local gate passes on its single run: 1,061 regular tests, three slow regressions, 1,944 database checks and the isolated Brave worker/relay/Edge/database flow. Verify Unicode decoding, missing/malformed hints, private-field rejection, retained diagnostics and unchanged counters/access.
+
 - **Close provider failure-logging gaps without retaining private error bodies.** Read bounded error JSON and retain only known code/type labels, a fixed short message and retry-after time. Unknown/echoed text never becomes a log excerpt. Prepare additive validators and regression coverage locally, with tests deferred until all five requested commits; no live database change.
   - Retain only bounded named-header provider request IDs and recognize HTTP-200 JSON/SSE/choice errors plus Gemini safety blocks. Transport status stays separate from provider error code; raw message text and arbitrary body IDs remain excluded.
   - Keep separate closed reasons for JSON/shape/UTF-8/SSE/completion failures and for empty, refusal-only, self-reasoning or unfinished-thinking output. The broad failure category remains compatible with older diagnostics; parser messages never include rejected bytes.

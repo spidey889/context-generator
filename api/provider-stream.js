@@ -1,6 +1,6 @@
 // Fold provider SSE into the existing result shape. Only completed results may
 // pass summary validation; deltas are previews and reset on every retry/route.
-const { embeddedProviderError, providerParseError } = require("./provider-error-diagnostics");
+const { embeddedProviderError, providerParseError } = require("../lib/provider-error-diagnostics");
 async function readProviderStream(response, provider, { onDelta, checkDeadline, onAnswerStart, onProgress }) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
