@@ -8462,6 +8462,16 @@
     globalThis.CapTransferDiagnostics.jsonAttempt(trace.diagnostics, {
       ...previous, ...safe, mode, progress_seq: (previous?.progress_seq || 0) + 1
     });
+    if (safe.outcome !== "started" || (previous && previous.outcome !== "started") || !safe.step || !safe.step_stage
+      || !trace.telemetryStarted || trace.telemetryLastStage !== "capture_started") return;
+    // Persist each semantic milestone without waiting for the read to finish.
+    // File/page loops reuse these steps: bound their traffic with the existing
+    // 30-second progress throttle, with no timer or per-chunk reporting.
+    const key = `${mode}:${safe.step_stage}:${safe.step}`;
+    trace.reportedJsonCheckpoints ||= new Set();
+    const first = !trace.reportedJsonCheckpoints.has(key);
+    trace.reportedJsonCheckpoints.add(key);
+    reportCaptureProgress(trace, `${currentPlatform.id}-json`, first);
   }
 
   async function takePickerJsonCapture(expectedPath, omitLargeFiles = false) {
