@@ -183,7 +183,8 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled, summaryMod
       await rpcChain;
       const row = (await database.query("select status,last_stage,failure_reason,diagnostics from public.transfers where attempt_id=$1", [terminal.attempt_id])).rows[0];
       assert.deepEqual(row, { status: "failed", last_stage: terminal.last_stage,
-        failure_reason: terminal.failure_reason, diagnostics: terminal.diagnostics });
+        failure_reason: terminal.failure_reason, diagnostics: { ...terminal.diagnostics,
+          location: { country: "unknown", region: "unknown", city: "unknown" } } });
       assert.equal(row.diagnostics.cancelled, true);
       assert.ok(["conversation_changed", "source_tab_closed"].includes(row.diagnostics.error_code));
     },
