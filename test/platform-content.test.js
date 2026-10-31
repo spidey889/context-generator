@@ -967,12 +967,12 @@ clockTest("local handoff uses a short final sweep and adds no hold after the bar
     if (key === "--context-generator-stage-progress-duration") durations.push(value);
   };
   hooks.document.querySelector = () => stage;
-  // Simulate a visible source with suspended frames: both paint waits are bounded.
+  // Simulate a visible source with suspended frames: all paint waits are bounded.
   const trace = hooks.createTransferTrace("chatgpt", "test");
   const start = Date.now();
   await hooks.completeLocalHandoff(trace, Promise.resolve({ tabId: 42 }));
   assert.deepEqual(durations.filter(value => value !== "0ms"), ["100ms", "160ms"]);
-  assert.ok(Date.now() - start <= 550, "Two bounded paint cues and 260 ms of motion must not acquire another hold.");
+  assert.ok(Date.now() - start <= 950, "Five bounded paint cues and 260 ms of motion must not acquire another hold.");
   assert.equal(trace.marks.at(-1).label, "local handoff done");
 });
 
@@ -1103,8 +1103,19 @@ function createHandoffCompletionFixture(activeStage = "summary") {
   for (const [id, element] of [["context-generator-overlay", overlay], ["context-generator-handoff-progress", progress],
     ["context-generator-text", status], ["context-generator-text-label", new FakeElement()]]) hooks.registerElementId(id, element);
   hooks.document.querySelector = findStage;
-  return { hooks, stage: stages[stageIds.indexOf(activeStage)] };
+  return { hooks, stage: stages[stageIds.indexOf(activeStage)], stages };
 }
+
+test("local capture and carry preparation leave presentation stages for the sequential handoff", async () => {
+  const { hooks, stages: [capture, summary] } = createHandoffCompletionFixture("capture");
+  const transcript = "ChatGPT conversation:\n\nUser: Preserve this exact local conversation.";
+  const trace = hooks.createTransferTrace("chatgpt", "test");
+  hooks.markCaptureDone(trace, transcript);
+  await hooks.summarizeWithBackend(transcript, trace);
+  assert.equal(capture.dataset.state, "active", "Preparing local text must not start the capture completion glide early.");
+  assert.equal(summary.dataset.state, "upcoming", "The local handoff owns when the summary stage becomes visible.");
+  assert.ok(!trace.marks.some(mark => mark.label === "local handoff done"));
+});
 
 test("handoff completion glides from the rendered position and the next stage preserves that glide", () => {
   for (const activeStage of ["capture", "summary"]) {

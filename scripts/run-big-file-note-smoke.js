@@ -73,12 +73,35 @@ async function run() {
     source = await CdpSession.connect(target.webSocketDebuggerUrl); await source.call("Runtime.enable");
     const context = await waitFor(() => source.getExtensionContextId(), "source extension");
     await waitFor(() => source.evaluate('typeof window.__capSmokeStartDomTransfer === "function"', context), "transfer helper");
+    if (localTransfer) {
+      await source.call("Page.bringToFront");
+      await source.call("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await waitFor(() => source.evaluate("document.visibilityState === 'visible'"), "visible local handoff source");
+    }
     await source.evaluate(`window.__localHandoffShown = false; window.__localHandoffCompleted = false; new MutationObserver(() => {
       const card = document.getElementById('context-generator-overlay');
       if (card?.getAttribute('aria-hidden') === 'false') window.__localHandoffShown = true;
       const stages = [...(card?.querySelectorAll('.context-generator-handoff-stage') || [])].slice(0,2);
       if (stages.length === 2 && stages.every(stage => stage.dataset.state === 'complete')) window.__localHandoffCompleted = true;
     }).observe(document.documentElement, {subtree:true,childList:true,attributes:true,attributeFilter:['style','aria-hidden']});`);
+    if (localTransfer) await source.evaluate(`(() => {
+      window.__localHandoffFrames = [];
+      const sample = () => {
+        const card = document.getElementById('context-generator-overlay');
+        let pasting = false;
+        if (card?.getAttribute('aria-hidden') === 'false') {
+          const stages = [...card.querySelectorAll('.context-generator-handoff-stage')].map(stage => ({
+            state: stage.dataset.state,
+            progress: stage.querySelector('.context-generator-handoff-stage-connector-fill')?.getBoundingClientRect().width
+              / stage.querySelector('.context-generator-handoff-stage-connector')?.getBoundingClientRect().width
+          }));
+          window.__localHandoffFrames.push(stages);
+          pasting = stages[2]?.state === 'active';
+        }
+        if (!pasting) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    })()`);
     const clickedAt = Date.now();
     await source.evaluate("window.__capSmokeStartDomTransfer()", context);
     const dest = await waitFor(async () => (await getTargets(port)).find(t => t.type === "page" && t.url.startsWith(origin + "/destination")), "destination tab");
@@ -97,6 +120,18 @@ async function run() {
     if (localTransfer) {
       assert.equal(await source.evaluate("window.__localHandoffShown"), true, "Local transfer retains its handoff card.");
       assert.equal(await source.evaluate("window.__localHandoffCompleted"), true, "Both bars finish before delivery.");
+      // Check rendered widths, not just completed state/100% CSS targets:
+      // the old local path marked both stages ready while their lines overlapped.
+      const frames = await source.evaluate("window.__localHandoffFrames");
+      assert.ok(frames.some(([capture, summary]) => capture.progress > 0.05 && capture.progress < 0.999
+        && summary.state === 'upcoming'), `Capture must have its own visible completion sweep: ${JSON.stringify(frames.slice(0, 12))}`);
+      assert.ok(frames.every(([capture, summary]) => summary.state === 'upcoming' || capture.progress >= 0.999),
+        "Summary must wait until capture has visibly finished.");
+      assert.ok(frames.some(([capture, summary]) => capture.progress >= 0.999
+        && summary.progress > 0.05 && summary.progress < 0.999), "Summary must have its own visible completion sweep.");
+      assert.ok(frames.some(([, , paste]) => paste.state === 'active'), "Paint the paste stage after both lines finish.");
+      assert.ok(frames.every(([, summary, paste]) => paste.state !== 'active' || summary.progress >= 0.999),
+        "Paste must wait until summary has visibly finished.");
     }
     assert.equal(destinations, 1);
     assert.equal(await destination.evaluate("window.sendClicks"), 0);

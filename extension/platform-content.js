@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-summary-countdown-30-120-v235";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-local-handoff-sequence-v236";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1317,7 +1317,6 @@
 
     advanceTransferTelemetryStage(trace, "summary_request_started");
     markTransferTrace(trace, "summary start", { chars: conversationText.length, inputChars: conversationText.length });
-    setHandoffProgress("summary", "active", null, conversationText.length);
     let summary;
     let timing;
     const largeConversation = conversationText.length > MAX_BACKEND_CONVERSATION_CHARS;
@@ -1326,6 +1325,7 @@
     if (conversationText.length < MIN_BACKEND_CONVERSATION_CHARS) {
       ({ summary, timing } = createLocalContextCarry(conversationText));
     } else {
+      setHandoffProgress("summary", "active", null, conversationText.length);
       try {
         if (trace) trace.onSummaryNearEnd = onNearEnd;
         if (trace && largeConversation) trace.largeSummaryPending = true;
@@ -1942,7 +1942,9 @@
     });
     advanceTransferTelemetryStage(trace, "capture_completed");
     stopHandoffActivityProgress();
-    setHandoffProgress("capture", "done");
+    // The local handoff owns both short sweeps. Advancing here starts the
+    // ordinary completion glide before its sequential presentation can run.
+    if (conversationText.length >= MIN_BACKEND_CONVERSATION_CHARS) setHandoffProgress("capture", "done");
   }
 
   async function prepareSourceForCapture() {
@@ -9784,17 +9786,27 @@
     stageElement.style.setProperty("--context-generator-stage-progress-easing", "linear");
     setHandoffStageLineProgress(stageId, 1);
 
-    if (!skipMotion) await delay(durationMs);
+    if (!skipMotion) {
+      // The compositor may not start a CSS transition in the task that sets
+      // its target. Start the clock after a paint, especially on a fast carry.
+      await waitForHandoffPaint();
+      await delay(durationMs);
+    }
   }
 
   async function completeLocalHandoff(trace, destinationPreparation = null) {
     markTransferTrace(trace, "local handoff start");
     // Work is ready. Do not re-enter the ordinary 400 ms capture caption hold.
+    clearTimeout(handoffStageAdvanceTimer);
+    handoffStageAdvanceTimer = null;
     handoffCapturePresentation = null;
     await waitForHandoffPaint();
     checkTransferDeadline(trace);
     stopHandoffActivityProgress();
     await completeHandoffStageLine("capture", 100);
+    // A timer can resolve between browser frames. Paint the finished capture
+    // line before activating summary so their visible motion cannot overlap.
+    await waitForHandoffPaint();
     checkTransferDeadline(trace);
     setHandoffProgress("summary", "active");
     await destinationPreparation;
