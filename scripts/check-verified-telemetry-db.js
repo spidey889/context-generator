@@ -464,6 +464,12 @@ async function main() {
         checks += await require("./check-provider-logging-db.js").checkProviderLogging(db, sql);
       } else await db.exec(sql);
     }
+    const providerDefinition = (await one("select pg_get_functiondef('public.is_valid_provider_failure(jsonb)'::regprocedure) value")).value;
+    const providerRules = JSON.parse(providerDefinition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]);
+    const expectedProviderRules = structuredClone(require("../supabase/functions/_shared/provider-failure").schema);
+    // The historical migration appended NVIDIA; enum order has no meaning.
+    providerRules.model.values.sort(); expectedProviderRules.model.values.sort();
+    equal(providerRules, expectedProviderRules);
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
     // One default restore at the complete current schema covers file-size
     // reasons and provider evidence together, including the later validators.

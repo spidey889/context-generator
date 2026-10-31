@@ -1,7 +1,7 @@
 const { applyCorsHeaders, isValidPreflightRequest, isTrustedExtensionRequest, acquireRequestSlot } = require("./request-security");
 const { getHeader } = require("./request-validation");
 const protocol = require("./large-summary-protocol");
-const { createProviderFailureLog } = require("./provider-failure-log");
+const { createProviderFailureLog, createProviderSkipReporter } = require("./provider-failure-log");
 const { schema: providerFailureSchema } = require("../supabase/functions/_shared/provider-failure");
 const { createHash } = require("node:crypto");
 const { createSummaryWithProvider, getInitialSummaryMessages, getProviderRequestBody,
@@ -64,6 +64,28 @@ function strictResultFailure(candidate, route) {
   return null;
 }
 
+function createLargeProviderLog(validation) {
+  const failures = createProviderFailureLog({ attemptId: validation.telemetry?.attempt_id, telemetry: validation.telemetry });
+  const providerFailures = [], part = validation.large.phase === "part";
+  const recordFailure = raw => {
+    const observation = { ...raw, summary_phase: validation.large.phase,
+      part_index: part ? validation.large.index : validation.large.total, part_total: validation.large.total };
+    failures.record(observation);
+    // Response-side diagnosis also works without optional transfer telemetry.
+    if (providerFailures.length >= 3) return;
+    const record = {};
+    for (const key of ["provider", "key_slot", "failure_reason", "failure_detail", "skip_reason", "phase", "elapsed_ms", "http_status",
+      "summary_phase", "part_index", "part_total"]) {
+      const value = observation[key], rule = providerFailureSchema[key];
+      if (rule.values ? rule.values.includes(value) : Number.isInteger(value) && value >= rule.min && value <= rule.max) record[key] = value;
+    }
+    providerFailures.push(record);
+  };
+  const recordSkip = createProviderSkipReporter({ onProviderFailure: recordFailure,
+    inputChars: part ? validation.conversation.length : finalConversation(validation.parts).length });
+  return { failures, providerFailures, recordFailure, recordSkip };
+}
+
 async function handler(req, res) {
   const cors = applyCorsHeaders(req, res);
   if (req.method === "OPTIONS") {
@@ -81,8 +103,21 @@ async function handler(req, res) {
     ...(process.env.OPENROUTER_ENABLED !== "false" && apiKey ? [{ provider: PROVIDER, model: MODEL, apiKey }] : []),
     ...(process.env.TOKENHARBOR_ENABLED !== "false" && credentials.length ? [{ provider: BACKUP_PROVIDER, model: BACKUP_MODEL, credentials }] : [])
   ];
-  if (process.env.LARGE_SUMMARY_ENABLED === "false" || !routes.length || !protocol.validSecret(secret))
+  if (process.env.LARGE_SUMMARY_ENABLED === "false" || !protocol.validSecret(secret))
     return res.status(503).json({ code: "summary_unavailable", error: "Large summary service is unavailable" });
+  const { failures, providerFailures, recordFailure, recordSkip } = createLargeProviderLog(validation);
+  const recordUnavailable = () => {
+    if (!routes.some(route => route.provider.id === "openrouter"))
+      recordSkip("openrouter", MODEL, process.env.OPENROUTER_ENABLED === "false" ? "disabled" : "missing_key", 1);
+    if (!routes.some(route => route.provider.id === "tokenharbor"))
+      recordSkip("tokenharbor", BACKUP_MODEL, process.env.TOKENHARBOR_ENABLED === "false" ? "disabled"
+        : process.env.TOKENHARBOR_API_KEY?.trim() || process.env.TOKENHARBOR_BACKUP_API_KEY?.trim() ? "credential_cooldown" : "missing_key", 2);
+  };
+  if (!routes.length) {
+    recordUnavailable();
+    await failures.flush();
+    return res.status(503).json({ code: "summary_unavailable", error: "Large summary service is unavailable", providerFailures });
+  }
   if (!consumeRateLimit(req)) { res.setHeader("Retry-After", "60"); return res.status(429).json({ code: "rate_limited", error: "Please retry later" }); }
   const part = validation.large.phase === "part";
   if (!part && !protocol.verifyParts(validation, secret)) return res.status(400).json({ code: "invalid_parts", error: "Conversation parts could not be verified" });
@@ -104,24 +139,8 @@ async function handler(req, res) {
   if (res.destroyed || req.aborted) controller.abort();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const channel = createLongSummaryResponse(res, { stream: getHeader(req, "accept").includes("application/x-ndjson") });
-  const failures = createProviderFailureLog({ attemptId: validation.telemetry?.attempt_id, telemetry: validation.telemetry });
-  const providerFailures = [];
-  const recordFailure = raw => {
-    const observation = { ...raw, summary_phase: validation.large.phase,
-      part_index: part ? validation.large.index : validation.large.total, part_total: validation.large.total };
-    failures.record(observation);
-    // A small response-side diagnosis also works without optional telemetry.
-    // Project only existing closed metadata; never return upstream error text.
-    if (providerFailures.length >= 3) return;
-    const record = {};
-    for (const key of ["provider", "key_slot", "failure_reason", "failure_detail", "phase", "elapsed_ms", "http_status",
-      "summary_phase", "part_index", "part_total"]) {
-      const value = observation[key], rule = providerFailureSchema[key];
-      if (rule.values ? rule.values.includes(value) : Number.isInteger(value) && value >= rule.min && value <= rule.max) record[key] = value;
-    }
-    providerFailures.push(record);
-  };
   try {
+    recordUnavailable();
     const modelsTried = [], providerTimes = { openrouterMs: 0, tokenharborMs: 0 };
     // Both approved free routes share one wall-clock deadline. Waiting 45s for
     // a stalled primary left only 30s for DeepSeek's thinking/completion. Race
@@ -145,7 +164,10 @@ async function handler(req, res) {
           for (let keyIndex = 0; keyIndex < keys.length; keyIndex++) {
             signal.throwIfAborted();
             const budgetMs = REQUEST_TIMEOUT_MS - (Date.now() - startedAt), credential = keys[keyIndex];
-            if (budgetMs <= 0) { controller.abort(); controller.signal.throwIfAborted(); }
+            if (budgetMs <= 0) {
+              recordSkip(route.provider.id, route.model, "route_budget_exhausted", index + 1);
+              controller.abort(); controller.signal.throwIfAborted();
+            }
             modelsTried.push(route.model);
             try {
               const result = await createSummaryWithProvider({ ...route, ...credential, profile,

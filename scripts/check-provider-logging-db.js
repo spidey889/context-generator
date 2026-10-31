@@ -36,6 +36,17 @@ async function checkProviderLogging(db, sql) {
         contract.validate(sample) !== null); checks++;
     }
   }
+  if (rules.skip_reason) {
+    const skip = { ...base, failure_reason: "provider_skipped", phase: "route_selection", request_attempt: 0,
+      request_bytes: 0, max_output_tokens: 0, budget_ms: 0, elapsed_ms: 0 };
+    for (const changes of [...rules.skip_reason.values.map(skip_reason => ({ skip_reason })),
+      { skip_reason: "PRIVATE" }, { skip_reason: "missing_key", request_attempt: 1 },
+      { skip_reason: "missing_key", failure_reason: "provider_http_error" }, {}, { skip_reason: "missing_key", budget_ms: 1 }]) {
+      const sample = { ...skip, ...changes };
+      assert.equal((await db.query("select public.is_valid_provider_failure($1::jsonb) valid", [JSON.stringify(sample)])).rows[0].valid,
+        contract.validate(sample) !== null); checks++;
+    }
+  }
   return checks;
 }
 module.exports = { checkProviderLogging };

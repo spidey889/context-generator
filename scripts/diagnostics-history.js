@@ -23,7 +23,10 @@ function beforeRetentionRecovery(schema) {
 function beforeProviderLogging(schema) {
   const result = structuredClone(schema);
   for (const key of ["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id", "failure_detail",
-    "summary_phase", "part_index", "part_total"]) delete result[key];
+    "summary_phase", "part_index", "part_total", "skip_reason"]) delete result[key];
+  result.failure_reason.values = result.failure_reason.values.filter(value => value !== "provider_skipped");
+  result.phase.values = result.phase.values.filter(value => value !== "route_selection");
+  for (const key of ["request_attempt", "max_output_tokens", "budget_ms"]) result[key].min = 1;
   return result;
 }
 module.exports = { withoutPasteEditorFields, beforePasteDiagnosis, beforeRetentionRecovery, beforeProviderLogging };

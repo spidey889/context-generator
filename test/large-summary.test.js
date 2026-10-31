@@ -308,13 +308,16 @@ test("two rate-limited TokenHarbor keys are bounded and skipped on subsequent wa
   const body = { conversation: "a".repeat(600000), large: metadata };
   const first = response(); await handler(request(body), first);
   assert.equal(first.statusCode, 502);
-  assert.equal(first.body.providerFailures.length, 2);
-  assert.deepEqual(first.body.providerFailures.map(entry => entry.key_slot), ["primary", "backup"]);
+  const failures = first.body.providerFailures.filter(entry => entry.failure_reason !== "provider_skipped");
+  assert.equal(failures.length, 2);
+  assert.deepEqual(failures.map(entry => entry.key_slot), ["primary", "backup"]);
   assert.ok(first.body.providerFailures.every(entry => Object.keys(entry).every(key =>
-    ["provider", "key_slot", "failure_reason", "phase", "elapsed_ms", "http_status", "summary_phase", "part_index", "part_total"].includes(key))));
+    ["provider", "key_slot", "failure_reason", "skip_reason", "phase", "elapsed_ms", "http_status", "summary_phase", "part_index", "part_total"].includes(key))));
   assert.deepEqual(calls, ["Bearer limited-primary", "Bearer limited-backup"]);
   const second = response(); await handler(request(body), second);
   assert.equal(second.statusCode, 503);
+  assert.deepEqual(second.body.providerFailures.map(entry => [entry.provider, entry.skip_reason]),
+    [["openrouter", "missing_key"], ["tokenharbor", "credential_cooldown"]]);
   assert.equal(calls.length, 2, "Do not repeatedly hit known rate-limited keys while they cool down.");
   assert.equal(second.body.receipt, undefined);
   process.env.TOKENHARBOR_API_KEY = "fresh-primary";
@@ -489,6 +492,24 @@ test("strict large result checks identify each rejection cause", () => {
     assert.equal(handler.__test.strictResultFailure({ ...candidate, ...changes }, route), reason);
 });
 
+test("large requests with no credentials durably record both skipped providers", async t => {
+  const observations = [];
+  setup(t, async (url, options) => {
+    assert.equal(url, "https://edge.invalid/failures", "No upstream request is allowed without a key");
+    observations.push(JSON.parse(options.body).event);
+    return new Response(null, { status: 204 });
+  });
+  delete process.env.OPENROUTER_API_KEY;
+  Object.assign(process.env, { SUPABASE_TELEMETRY_FUNCTION_URL: "https://edge.invalid/failures",
+    SUPABASE_TELEMETRY_PUBLISHABLE_KEY: "test-public", TELEMETRY_RELAY_SECRET: secret });
+  const res = response();
+  await handler(request({ conversation: "a".repeat(600000), large: metadata, telemetry }), res);
+  assert.equal(res.statusCode, 503);
+  assert.deepEqual(observations.map(entry => [entry.provider, entry.skip_reason, entry.request_attempt]),
+    [["openrouter", "missing_key", 0], ["tokenharbor", "missing_key", 0]]);
+  assert.ok(observations.every(entry => entry.summary_phase === "part" && entry.part_index === 0 && entry.part_total === 2));
+});
+
 test("strict rejection durably logs the original part or final step exactly once", async t => {
   const observations = [];
   setup(t, async (url, options) => {
@@ -508,8 +529,9 @@ test("strict rejection durably logs the original part or final step exactly once
     assert.equal(res.body.receipt, undefined);
     assert.equal(res.body.summaryProofV3, undefined);
   }
-  assert.equal(observations.length, 2);
-  for (const [index, entry] of observations.entries()) {
+  const failures = observations.filter(entry => entry.failure_reason !== "provider_skipped");
+  assert.equal(failures.length, 2);
+  for (const [index, entry] of failures.entries()) {
     assert.equal(entry.failure_detail, "large_token_limit");
     assert.equal(entry.summary_phase, index ? "final" : "part");
     assert.equal(entry.part_index, index ? 2 : 0);

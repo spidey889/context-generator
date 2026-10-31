@@ -150,8 +150,9 @@ for (const answerStarted of [false, true]) test(`provider timeout records ${answ
     tokenharborApiKey: "TEST_ONLY", geminiApiKey: "TEST_ONLY", requestContext: { onDelta() {},
       onProviderFailure: observation => observations.push(observation) } });
   assert.equal(result.model, "gemini-3.6-flash");
-  assert.equal(observations.length, 1);
-  const observation = observations[0];
+  const failures = observations.filter(entry => entry.failure_reason !== "provider_skipped");
+  assert.equal(failures.length, 1);
+  const observation = failures[0];
   assert.equal(observation.failure_reason, "provider_timeout");
   assert.equal(observation.phase, answerStarted ? "answer_stream" : "waiting_answer");
   assert.equal(observation.timeout_kind, answerStarted ? "completion" : "first_answer");
@@ -175,12 +176,13 @@ test("empty output exhausted by thinking retains actual tokens and the length fi
   const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
     tokenharborApiKey: "TEST_ONLY", geminiApiKey: "TEST_ONLY", requestContext: { onProviderFailure: value => observations.push(value) } });
   assert.equal(result.model, "gemini-3.6-flash");
-  assert.equal(observations.length, 1);
-  assert.equal(observations[0].failure_reason, "provider_empty");
-  assert.equal(observations[0].finish_reason, "length");
-  assert.equal(observations[0].completion_tokens, 10092);
-  assert.equal(observations[0].reasoning_tokens, 10092);
-  assert.equal(observations[0].answer_chars, 0);
+  const failures = observations.filter(entry => entry.failure_reason !== "provider_skipped");
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].failure_reason, "provider_empty");
+  assert.equal(failures[0].finish_reason, "length");
+  assert.equal(failures[0].completion_tokens, 10092);
+  assert.equal(failures[0].reasoning_tokens, 10092);
+  assert.equal(failures[0].answer_chars, 0);
   assert.doesNotMatch(JSON.stringify(observations), /PRIVATE_THINKING|TEST_ONLY/);
 });
 
@@ -223,4 +225,44 @@ test("HTTP-200 upstream errors retain safe status, type and request identity", a
   assert.equal(observed.length, 1); assert.equal(observed[0].http_status, 200);
   assert.equal(observed[0].upstream_code, "429"); assert.equal(observed[0].upstream_request_id, "req_abcdefgh1234");
   assert.doesNotMatch(JSON.stringify(observed), /PRIVATE|TEST_ONLY/);
+});
+
+test("missing keys and budget refusal produce one skip per reached provider without HTTP work", async t => {
+  const original = global.fetch; t.after(() => { global.fetch = original; });
+  global.fetch = () => assert.fail("Missing credentials or a refused budget must not contact a provider");
+  const conversation = "User: Prepare the quiet library review.\n".repeat(300), observed = [];
+  await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+    geminiApiKey: "PRIVATE", mistralApiKey: "PRIVATE", tokenharborEnabled: true,
+    requestContext: { reserveFunded: async () => false, onProviderFailure: entry => observed.push(entry) } });
+  assert.deepEqual(observed.map(entry => [entry.provider, entry.skip_reason]), [
+    ["openrouter", "missing_key"], ["tokenharbor", "missing_key"], ["gemini", "funded_budget_refused"], ["mistral", "funded_budget_refused"]
+  ]);
+  for (const entry of observed) {
+    assert.equal(entry.request_attempt, 0);
+    const sample = event({ ...entry, timeout_kind: undefined }); delete sample.timeout_kind;
+    assert.ok(schema.validate(sample));
+  }
+  assert.doesNotMatch(JSON.stringify(observed), /PRIVATE|quiet library/);
+});
+
+test("an exhausted free window logs one skipped TokenHarbor provider and preserves funded fallback", async t => {
+  const original = global.fetch; t.after(() => { global.fetch = original; });
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const observed = [], calls = [], conversation = "User: Prepare the library review.\n".repeat(350);
+  global.fetch = async url => {
+    calls.push(url);
+    if (url.includes("openrouter")) {
+      t.mock.timers.setTime(Date.now() + 90000);
+      return new Response(null, { status: 429 });
+    }
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Prepare the library review." }] }, finishReason: "STOP" }] }));
+  };
+  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+    openrouterApiKey: "PRIVATE", tokenharborApiKey: "PRIVATE", tokenharborBackupApiKey: "PRIVATE_BACKUP", geminiApiKey: "PRIVATE",
+    requestContext: { onProviderFailure: entry => observed.push(entry) } });
+  assert.equal(result.provider, "gemini");
+  assert.equal(calls.length, 2);
+  assert.ok(!calls.some(url => url.includes("tokenharbor")));
+  assert.deepEqual(observed.filter(entry => entry.failure_reason === "provider_skipped").map(entry => [entry.provider, entry.skip_reason]),
+    [["tokenharbor", "route_budget_exhausted"]]);
 });

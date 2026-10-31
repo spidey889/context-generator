@@ -492,6 +492,8 @@ Provider failures retain their broad category plus a closed `failure_detail`: JS
 
 Above 1M characters, each provider observation identifies `summary_phase`, zero-based `part_index` (the final combine uses `part_total`) and `part_total`. The existing strict large-result gate records model/provider mismatch, token-limit termination, empty result or output-size excess through the original attempt recorder before rejecting. This retains observed headers/timing and produces one record; cancelled race peers remain silent. Large response-side observations include these closed details as well.
 
+At provider selection, log at most one `provider_skipped` record per provider/request with a closed `skip_reason`: missing key, route budget exhausted, funded budget refused, disabled, account unavailable or large-route credential cooldown. Skips have `request_attempt: 0` and zero request bytes/output allowance/budget/elapsed work; they cannot masquerade as HTTP failures. Ordinary fallback records unavailable providers only when their position is reached, and records the remaining skipped routes when the chain stops for time or funded-budget refusal. Large concurrent selection records unavailable peers, including a no-routes response. Routing, reservations and retry policy stay unchanged.
+
 [Provider fallbacks](docs/provider-fallbacks.md) holds the detailed configuration/retry reference. Current order:
 
 ```text

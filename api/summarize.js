@@ -7,7 +7,7 @@ const transferDiagnostics = require("../extension/transfer-diagnostics");
 const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const { getHeader } = require("./request-validation");
 const { readProviderStream } = require("./provider-stream");
-const { createProviderFailureLog } = require("./provider-failure-log");
+const { createProviderFailureLog, createProviderSkipReporter } = require("./provider-failure-log");
 const { retryAfterMs, readSafeProviderError, safeProviderError, providerRequestId, embeddedProviderError, providerParseError } = require("./provider-error-diagnostics");
 const {
   SUMMARY_PROMPT_CACHE_VERSION,
@@ -546,6 +546,22 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
   const fallbackMessages = getInitialSummaryMessages(conversation, profile, { messages, platform });
   const geminiMessages = getInitialSummaryMessages(conversation, profile, { messages, platform, plainHeader: true });
   const routes = getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled, largeInput });
+  const recordSkip = createProviderSkipReporter({ onProviderFailure: requestContext.onProviderFailure, inputChars: conversation.length });
+  const inventory = [
+    { provider: SUMMARY_PROVIDERS.openrouter, model: OPENROUTER_MODELS[0].model, disabled: !getEnabledOpenRouterModels().length },
+    { provider: SUMMARY_PROVIDERS.tokenharbor, model: TOKENHARBOR_BACKUP_MODEL, disabled: !tokenharborEnabled },
+    ...(!largeInput ? [{ provider: SUMMARY_PROVIDERS.gemini, model: GEMINI_PRIMARY_MODEL },
+      { provider: SUMMARY_PROVIDERS.mistral, model: MISTRAL_PRIMARY_MODEL, disabled: process.env.MISTRAL_ENABLED === "false" }] : [])
+  ];
+  // Visit unavailable providers only when fallback reaches their place. Keep
+  // the configured route indices and every existing time slice unchanged.
+  const plannedRoutes = inventory.flatMap(item => {
+    const configured = routes.flatMap((route, index) => route.provider.id === item.provider.id ? [{ ...route, index }] : []);
+    return configured.length ? configured : [{ ...item, skipReason: item.disabled ? "disabled" : "missing_key" }];
+  });
+  const skipRemaining = (start, reason) => {
+    for (const route of plannedRoutes.slice(start)) recordSkip(route.provider.id, route.model, route.skipReason || reason, (route.index ?? 0) + 1);
+  };
 
   const modelsTried = [];
   const tokenharborModelsTried = [];
@@ -572,16 +588,20 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
     : PROVIDER_ATTEMPT_TIMEOUT_MS;
   let lastProviderFailure = null;
 
-  for (const [index, route] of routes.entries()) {
+  for (const [plannedIndex, route] of plannedRoutes.entries()) {
     requestContext.signal?.throwIfAborted();
-    if (unavailableProviders.has(route.provider.id)) continue;
+    const index = route.index ?? 0;
+    if (route.skipReason || unavailableProviders.has(route.provider.id)) {
+      recordSkip(route.provider.id, route.model, route.skipReason || "account_unavailable", index + 1);
+      continue;
+    }
     const { provider, model, apiKey } = route;
     const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) break;
+    if (remainingMs <= 0) { skipRemaining(plannedIndex, "route_budget_exhausted"); break; }
     let routeBudgetMs = index === 0 ? PROVIDER_ATTEMPT_TIMEOUT_MS : fallbackBudgetMs;
     if (sharedFreeWindow && ["tokenharbor", "openrouter"].includes(provider.id)) {
       const freeRemainingMs = freeDeadline - Date.now();
-      if (freeRemainingMs <= 0) continue; // Funded fallbacks still have their own time.
+      if (freeRemainingMs <= 0) { recordSkip(provider.id, model, "route_budget_exhausted", index + 1); continue; }
       const remainingOpenRouterRoutes = routes.slice(index).filter(item => item.provider.id === "openrouter" && !unavailableProviders.has(item.provider.id)).length;
       if (provider.id === "tokenharbor") {
         tokenharborDeadline ??= Math.min(freeDeadline, Date.now() + (bothGatewaysConfigured
@@ -593,7 +613,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
       }
     }
     const requestBudgetMs = Math.min(routeBudgetMs, remainingMs);
-    if (requestBudgetMs <= 0) continue;
+    if (requestBudgetMs <= 0) { recordSkip(provider.id, model, "route_budget_exhausted", index + 1); continue; }
     const startedAt = Date.now();
     modelsTried.push(model);
     if (provider.id === "tokenharbor") tokenharborModelsTried.push(model);
@@ -636,7 +656,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
         unavailableProviders.add(provider.id);
       }
       console.error(`[Context Generator] ${model} failed:`, getProviderFailureLog(lastProviderFailure));
-      if (error?.code === "funded_budget_unavailable") break;
+      if (error?.code === "funded_budget_unavailable") { skipRemaining(plannedIndex, "funded_budget_refused"); break; }
     }
   }
   return createEmergencyDirectCarryResult({

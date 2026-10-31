@@ -74,4 +74,19 @@ function createProviderFailureLog({ attemptId, telemetry, fetchImpl = (...args) 
   };
 }
 
-module.exports = { createProviderFailureLog };
+// A skipped route is not a failed HTTP attempt. Zero work counters make that
+// distinction explicit, and multiple models/keys cannot duplicate the provider.
+function createProviderSkipReporter({ onProviderFailure, inputChars = 0 } = {}) {
+  const reported = new Set();
+  return (provider, model, reason, routeIndex = 1) => {
+    if (!onProviderFailure || reported.has(provider)) return;
+    reported.add(provider);
+    try {
+      onProviderFailure({ provider, model, failure_reason: "provider_skipped", phase: "route_selection", skip_reason: reason,
+        route_index: routeIndex, request_attempt: 0, input_chars: inputChars, request_bytes: 0,
+        max_output_tokens: 0, elapsed_ms: 0, budget_ms: 0 });
+    } catch { console.warn("cap_context_provider_failure_log", { reason: "callback_failed" }); }
+  };
+}
+
+module.exports = { createProviderFailureLog, createProviderSkipReporter };

@@ -15,12 +15,12 @@
     environment: enumeration(["production", "preview", "development"]),
     provider: enumeration(Object.keys(models)), model: enumeration(Object.values(models).flat()),
     failure_reason: enumeration(["provider_timeout", "provider_request_failed", "provider_http_error", "provider_invalid_json",
-      "provider_generation_failed", "provider_empty", "provider_output_rejected"]),
-    phase: enumeration(["waiting_headers", "reading_body", "waiting_answer", "answer_stream", "parsing_response", "validating_output", "http_error"]),
+      "provider_generation_failed", "provider_empty", "provider_output_rejected", "provider_skipped"]),
+    phase: enumeration(["waiting_headers", "reading_body", "waiting_answer", "answer_stream", "parsing_response", "validating_output", "http_error", "route_selection"]),
     timeout_kind: enumeration(["first_answer", "completion"]), key_slot: enumeration(["primary", "backup"]),
-    route_index: integer(1, 16), request_attempt: integer(1, 2), input_chars: integer(0, 1000000),
-    request_bytes: integer(0, 10000000), max_output_tokens: integer(1, 1000000),
-    elapsed_ms: integer(0, 360000), budget_ms: integer(1, 90000), first_answer_budget_ms: integer(1, 90000), headers_ms: integer(0, 360000),
+    route_index: integer(1, 16), request_attempt: integer(0, 2), input_chars: integer(0, 1000000),
+    request_bytes: integer(0, 10000000), max_output_tokens: integer(0, 1000000),
+    elapsed_ms: integer(0, 360000), budget_ms: integer(0, 90000), first_answer_budget_ms: integer(1, 90000), headers_ms: integer(0, 360000),
     first_answer_ms: integer(0, 360000), answer_chars: integer(), reasoning_chars: integer(), stream_chunks: integer(),
     http_status: integer(100, 599), finish_reason: enumeration(["stop", "length", "other"]),
     prompt_tokens: integer(), completion_tokens: integer(), reasoning_tokens: integer(),
@@ -37,7 +37,8 @@
       "stream_event_shape_invalid", "stream_incomplete", "response_read_failed", "empty_answer", "empty_content", "refusal_only",
       "thinking_instead_of_summary", "unfinished_thinking", "upstream_error", "safety_filter",
       "large_model_mismatch", "large_provider_mismatch", "large_token_limit", "large_empty_result", "large_output_limit"]),
-    summary_phase: enumeration(["part", "final"]), part_index: integer(0, 16), part_total: integer(2, 16)
+    summary_phase: enumeration(["part", "final"]), part_index: integer(0, 16), part_total: integer(2, 16),
+    skip_reason: enumeration(["missing_key", "route_budget_exhausted", "funded_budget_refused", "disabled", "account_unavailable", "credential_cooldown"])
   };
   const required = ["id", "request_id", "occurred_at", "environment", "provider", "model", "failure_reason", "phase", "route_index",
     "request_attempt", "input_chars", "request_bytes", "max_output_tokens", "elapsed_ms", "budget_ms"];
@@ -55,6 +56,11 @@
         : !Number.isInteger(value) || value < rule.min || value > rule.max) return null;
     }
     if (!models[input.provider]?.includes(input.model)) return null;
+    if (input.failure_reason === "provider_skipped") {
+      if (input.phase !== "route_selection" || !input.skip_reason || input.request_attempt !== 0
+        || input.request_bytes !== 0 || input.max_output_tokens !== 0 || input.budget_ms !== 0 || input.elapsed_ms !== 0) return null;
+    } else if (input.skip_reason !== undefined || input.phase === "route_selection" || input.request_attempt < 1
+      || input.max_output_tokens < 1 || input.budget_ms < 1) return null;
     if (input.timeout_kind !== undefined && input.failure_reason !== "provider_timeout") return null;
     if (["summary_phase", "part_index", "part_total"].some(key => input[key] !== undefined)
       && (input.summary_phase === undefined || input.part_index === undefined || input.part_total === undefined
