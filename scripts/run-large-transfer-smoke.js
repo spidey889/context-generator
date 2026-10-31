@@ -14,6 +14,7 @@ const largeHandler = require("../api/large-summary");
 // Keep this mode free of worker debugging: attaching a debugger changes MV3
 // lifetime and masked the zero-request preparation failure in investigation.
 const lateTimeoutSmoke = process.env.CAP_CONTEXT_LARGE_SLOW_SMOKE === "timeout";
+const backupKeySmoke = process.env.CAP_CONTEXT_LARGE_BACKUP_SMOKE === "1";
 const slowProviderMs = process.env.CAP_CONTEXT_LARGE_SLOW_SMOKE === "1" || lateTimeoutSmoke ? 30000 : 0;
 const finalSummary = 'Verified final handoff: preserve the accepted implementation, all decisions and unresolved work. '
   + 'Continue the latest request by testing the complete transfer before any release.\n\nNext step:\n\n'
@@ -33,6 +34,7 @@ async function scenario(failPart, failTransport = false, interruptedPhase = null
   const requests = [], reports = [], upstreamPartIndices = new Map();
   let bodyInterrupted = false;
   let providerCalls = 0;
+  let primaryKeyCalls = 0, backupKeyCalls = 0;
   const env = { ...process.env }, nativeFetch = global.fetch;
   process.env.OPENROUTER_API_KEY = "synthetic-smoke-key";
   process.env.TELEMETRY_SIGNING_KEY = "synthetic-large-transfer-smoke-signing-key-only";
@@ -43,13 +45,27 @@ async function scenario(failPart, failTransport = false, interruptedPhase = null
     process.env.TOKENHARBOR_API_KEY = "synthetic-smoke-backup";
     process.env.TOKENHARBOR_ENABLED = "true";
   }
+  if (backupKeySmoke) {
+    process.env.TOKENHARBOR_API_KEY = "synthetic-limited-key";
+    process.env.TOKENHARBOR_BACKUP_API_KEY = "synthetic-working-key";
+    process.env.TOKENHARBOR_ENABLED = "true";
+  }
   delete process.env.LARGE_SUMMARY_ENABLED;
   delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
   largeHandler.__test.resetRateLimit();
   global.fetch = async (input, options) => {
     if (String(input) === "https://openrouter.ai/api/v1/chat/completions"
-        || lateTimeoutSmoke && String(input) === "https://tokenharbor.ai/v1/chat/completions") {
+        || (lateTimeoutSmoke || backupKeySmoke) && String(input) === "https://tokenharbor.ai/v1/chat/completions") {
       providerCalls++;
+      if (backupKeySmoke) {
+        if (String(input).includes("openrouter")) return new Response("", { status: 503 });
+        if (options.headers.Authorization === "Bearer synthetic-limited-key") {
+          primaryKeyCalls++;
+          return new Response("", { status: 429 });
+        }
+        assert.equal(options.headers.Authorization, "Bearer synthetic-working-key");
+        backupKeyCalls++;
+      }
       // Finish the first batch, then let the real primary/backup deadlines
       // expire. No worker debugger or synthetic client-side timeout is used.
       const inputPart = lateTimeoutSmoke ? JSON.parse(JSON.parse(options.body).messages[1].content).conversation : null;
@@ -172,7 +188,11 @@ async function scenario(failPart, failTransport = false, interruptedPhase = null
       assert.equal(partRequests.length, parts.length + (interruptedPhase === "part" ? 1 : 0));
       assert.equal(parts.map(r => r.conversation).join(""), transcript, "All source text must appear once, in order.");
       let offset = 0; for (const part of parts) { assert.equal(part.large.offset, offset); offset += part.conversation.length; }
-      assert.equal(providerCalls, parts.length + 1);
+      if (backupKeySmoke) {
+        assert.equal(backupKeyCalls, parts.length + 1);
+        assert.ok(primaryKeyCalls >= 1 && primaryKeyCalls <= 3, "Only the initial concurrent batch may encounter primary quota.");
+        assert.equal(providerCalls, 2 * (parts.length + 1) + primaryKeyCalls);
+      } else assert.equal(providerCalls, parts.length + 1);
       assert.ok(destination, "Successful summary opens the destination.");
       assert.equal(await destination.evaluate("document.getElementById('prompt-textarea').value"), finalSummary);
       if (interruptedPhase) {
@@ -188,7 +208,7 @@ async function scenario(failPart, failTransport = false, interruptedPhase = null
     }
     if (destination) assert.equal(await destination.evaluate("window.sendClicks"), 0);
     assert.doesNotMatch(JSON.stringify(reports), /SYNTHETIC_TOKEN|Decision: preserve source text|Verified final handoff|PRIVATE_INCOMPLETE_RESULT|receipt/);
-    console.log(`PASS ${transcriptChars} chars ${interruptedPhase ? `interrupted ${interruptedPhase} recovery and final paste` : lateTimeoutSmoke ? "3/12 then provider-timeout recovery" : failTransport ? "zero-provider connection failure diagnosis" : failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
+    console.log(`PASS ${transcriptChars} chars ${backupKeySmoke ? "quota cooldown, backup key and final paste" : interruptedPhase ? `interrupted ${interruptedPhase} recovery and final paste` : lateTimeoutSmoke ? "3/12 then provider-timeout recovery" : failTransport ? "zero-provider connection failure diagnosis" : failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
   } catch (error) {
     console.error(JSON.stringify({ requestPhases: requests.map(r => r.large.phase), providerCalls,
       reports: reports.map(r => ({ status: r.status, stage: r.last_stage, reason: r.failure_reason, diagnostics: r.diagnostics })),
@@ -208,6 +228,7 @@ async function scenario(failPart, failTransport = false, interruptedPhase = null
   }
 }
 async function run() {
+  if (backupKeySmoke) { await scenario(false); return; }
   if (lateTimeoutSmoke) { await scenario(true); return; }
   await scenario(false);
   if (!slowProviderMs) { await scenario(true); await scenario(true, true); await scenario(false, false, "part"); await scenario(false, false, "final"); }
