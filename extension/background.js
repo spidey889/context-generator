@@ -770,7 +770,7 @@ function recordDeliveryDiagnostics(attemptId, destinationId, sourceTab, diagnost
 
 function recordPasteCheckpoint(message, sender) {
   const searching = message.checkpoint === "searching";
-  const steps = ["received", "editor_found", "inserted", "verified"];
+  const steps = ["received", "editor_found", "insert_started", "insert_blocked", "inserted", "verified"];
   const index = steps.indexOf(message.checkpoint);
   const operation = transferOperations.get(message.transferId);
   const target = operation?.pasteCheckpoint;
@@ -783,8 +783,9 @@ function recordPasteCheckpoint(message, sender) {
       || activeTransferSourceTabs.get(message.transferId) !== operation.sourceTabId
       || Object.keys(message).some(key => !["type", "transferId", "destination", "checkpoint", "diagnostics"].includes(key))) return false;
   const safe = globalThis.CapTransferDiagnostics?.validate(message.diagnostics);
-  if (!safe || (index === 1 || index === 2) && safe.editor_seen !== true || index === 3 && safe.paste_populated !== true) return false;
-  // Each dispatched paste has four fixed observations. Duplicates and delayed
+  if (!safe || (index >= 1 && index <= 4) && safe.editor_seen !== true || index === 5 && safe.paste_populated !== true
+    || index === 2 && safe.editor_insert_attempted !== true || index === 3 && !safe.insertion_blocked_reason) return false;
+  // Each dispatched paste has bounded semantic observations. Duplicates and delayed
   // earlier milestones cannot overwrite newer progress or flood the outbox.
   if (searching) {
     const key = JSON.stringify([safe.editor_match_count, safe.editor_ready_count, safe.editor_hidden_count,
@@ -803,11 +804,11 @@ function recordPasteCheckpoint(message, sender) {
   const keys = ["document_ready_state", "visibility", "editor_seen", "editor_connected", "editor_kind", "editor_text_chars",
     "composer_wait_ms", "paste_retry_limit_ms", "paste_verify_limit_ms", "paste_stability_ms", "paste_attempts", "editor_remounts",
     "insertion_method", "paste_populated", "paste_stable", "draft_present", "user_handled", "page_load_ms", "destination_message_count",
-    "destination_auth_prompt", "paste_ms", "insertion_method", "editor_insert_attempted", "editor_retained", "editor_document_focused",
+    "destination_auth_prompt", "paste_ms", "insertion_method", "insertion_blocked_reason", "editor_insert_attempted", "editor_retained", "editor_document_focused",
     "editor_match_count", "editor_match_peak", "editor_unmatched_count", "editor_hidden_count", "editor_aria_hidden_count",
     "editor_modal_count", "editor_owned_count", "editor_disabled_count", "editor_readonly_count", "editor_not_editable_count", "editor_ready_count"];
   for (const key of keys) if (safe[key] !== undefined) snapshot[key] = safe[key];
-  snapshot.last_operation = searching ? "editor_wait" : ["paste_start", "editor_wait", "paste_verify", "paste_complete"][index];
+  snapshot.last_operation = searching ? "editor_wait" : ["paste_start", "editor_wait", "editor_insert", "editor_insert", "paste_verify", "paste_complete"][index];
   target.events.push({ event: snapshot.last_operation,
     at_ms: safe.paste_ms ?? Math.max(0, Date.now() - target.startedAt) });
   snapshot.paste_events = target.events.slice();

@@ -44,7 +44,8 @@
     summary_mode: ["remote", "local", "local_fallback", "cache"],
     message_reply: ["ack_success", "ack_failed", "timeout", "missing", "invalid", "transport_failed", "receiver_missing"],
     editor_kind: ["textarea", "input", "contenteditable", "other"],
-    insertion_method: ["value_setter", "insert_text", "insert_html", "dom_text", "chatgpt", "already_present"]
+    insertion_method: ["value_setter", "insert_text", "insert_html", "dom_text", "chatgpt", "already_present"],
+    insertion_blocked_reason: ["detached", "not_ready", "focus_changed", "draft_present"]
   };
   enums.summary_failure_site = enums.capture_failure_site = enums.failure_site;
   enums.summary_error_type = enums.capture_error_type = enums.error_type;

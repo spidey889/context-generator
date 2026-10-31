@@ -3512,6 +3512,7 @@
           observe({ draft_present: false, last_operation: "editor_insert", ...(alreadyPasted ? { insertion_method: "already_present" } : {}) }, "editor_insert");
           if (!alreadyPasted) {
             observe({ editor_insert_attempted: true });
+            guard?.reportCheckpoint?.("insert_started");
             guard.insert(input);
           }
 
@@ -3773,9 +3774,22 @@
     return score;
   }
 
+  function insertionBlocked(guard, reason) {
+    globalThis.CapTransferDiagnostics?.update(guard?.diagnostics, { insertion_blocked_reason: reason });
+    guard?.reportCheckpoint?.("insert_blocked");
+    return false;
+  }
+
+  function canWriteEditor(element, guard) {
+    if (!element.isConnected) return insertionBlocked(guard, "detached");
+    if (!isEditorReady(element)) return insertionBlocked(guard, "not_ready");
+    if (!element.contains(document.activeElement)) return insertionBlocked(guard, "focus_changed");
+    return true;
+  }
+
   function setEditorText(element, text, destination = currentPlatform, guard = null) {
     const observe = changes => globalThis.CapTransferDiagnostics?.update(guard?.diagnostics, changes);
-    const remount = () => observe({ editor_connected: false, editor_remounts: (guard?.diagnostics?.editor_remounts || 0) + 1, editor_last_error_code: "editor_detached" });
+    const remount = () => { observe({ editor_connected: false, editor_remounts: (guard?.diagnostics?.editor_remounts || 0) + 1, editor_last_error_code: "editor_detached" }); insertionBlocked(guard, "detached"); };
     guard?.check();
     element.click();
     guard?.check();
@@ -3785,11 +3799,12 @@
     // Claude's startup composer can hydrate/remount on click or focus. Never
     // insert into the detached placeholder; pasteWithRetry finds its successor.
     if (!element.isConnected) { remount(); return false; }
-    if (!isEditorReady(element)) return false;
+    if (!isEditorReady(element)) return insertionBlocked(guard, "not_ready");
     // Focusing a native composer can restore its saved draft synchronously.
     if (getElementText(element).trim()) {
       if (editorContainsText(element, text)) return true;
       observe({ draft_present: true });
+      insertionBlocked(guard, "draft_present");
       throw createDiagnosticError(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`, "editor_has_draft");
     }
 
@@ -3820,10 +3835,11 @@
       return true;
     }
 
-    const canWrite = () => element.isConnected && isEditorReady(element) && element.contains(document.activeElement);
+    const canWrite = () => canWriteEditor(element, guard);
     const prepareRetry = () => {
       guard?.check();
-      if (!element.isConnected || !isEditorReady(element)) return false;
+      if (!element.isConnected) return insertionBlocked(guard, "detached");
+      if (!isEditorReady(element)) return insertionBlocked(guard, "not_ready");
       element.focus();
       guard?.check();
       if (!canWrite()) return false;
@@ -3832,6 +3848,7 @@
       if (getElementText(element).trim()) {
         if (editorContainsText(element, text)) return false;
         observe({ draft_present: true });
+        insertionBlocked(guard, "draft_present");
         throw createDiagnosticError(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`, "editor_has_draft");
       }
       selectEditorContents(element);
@@ -3874,10 +3891,11 @@
   }
 
   function setChatGptEditorText(element, text, guard = null) {
-    const canWrite = () => element.isConnected && isEditorReady(element) && element.contains(document.activeElement);
+    const canWrite = () => canWriteEditor(element, guard);
     const prepareRetry = () => {
       guard?.check();
-      if (!element.isConnected || !isEditorReady(element)) return false;
+      if (!element.isConnected) return insertionBlocked(guard, "detached");
+      if (!isEditorReady(element)) return insertionBlocked(guard, "not_ready");
       element.focus();
       guard?.check();
       if (!canWrite()) return false;
@@ -3887,6 +3905,7 @@
       if (getElementText(element).trim()) {
         if (editorContainsText(element, text)) return false;
         globalThis.CapTransferDiagnostics?.update(guard?.diagnostics, { draft_present: true });
+        insertionBlocked(guard, "draft_present");
         throw createDiagnosticError("ChatGPT editor already contains text. Use an empty chat or copy the context manually.", "editor_has_draft");
       }
       selectEditorContents(element);

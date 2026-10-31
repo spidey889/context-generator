@@ -2529,8 +2529,9 @@ clockTest("paste checkpoints expose large insertion progress without waiting for
     }
   });
   await hooks.pasteIntoPlatform(text, "gemini", "checkpoint-transfer", Date.now() + 60000);
-  assert.deepEqual(checkpoints.map(({ message }) => message.checkpoint), ["received", "editor_found", "inserted", "verified"]);
-  assert.deepEqual(checkpoints.map(({ editorChars }) => editorChars), [0, 0, text.length, text.length]);
+  assert.deepEqual(checkpoints.map(({ message }) => message.checkpoint), ["received", "editor_found", "insert_started", "inserted", "verified"]);
+  assert.deepEqual(checkpoints.map(({ editorChars }) => editorChars), [0, 0, 0, text.length, text.length]);
+  assert.equal(checkpoints[2].message.diagnostics.editor_insert_attempted, true);
   assert.equal(checkpoints.at(-1).message.diagnostics.paste_populated, true);
   assert.equal(checkpoints.at(-1).message.diagnostics.editor_text_chars, text.length);
   assert.equal(editor.value, text);

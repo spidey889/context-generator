@@ -1006,10 +1006,12 @@ clockTest("destination paste progress survives a lost paste reply and a sparse t
     ["received", { paste_ms: 0 }],
     ["editor_found", { paste_ms: 10, editor_seen: true, editor_kind: "contenteditable", editor_match_count: 3,
       editor_disabled_count: 2, editor_ready_count: 1, editor_document_focused: true }],
+    ["insert_started", { paste_ms: 15, editor_seen: true, editor_insert_attempted: true }],
+    ["insert_blocked", { paste_ms: 16, editor_seen: true, insertion_blocked_reason: "focus_changed" }],
     ["inserted", { paste_ms: 20, editor_seen: true, editor_text_chars: 457957, editor_insert_attempted: true, insertion_method: "insert_text" }]
   ]) assert.equal((await pasteCheckpoint(background, checkpoint, diagnostics)).ok, true);
   await background.settled();
-  assert.deepEqual(delivered.at(-1).diagnostics.paste_events.map(entry => entry.event), ["paste_start", "editor_wait", "paste_verify"]);
+  assert.deepEqual(delivered.at(-1).diagnostics.paste_events.map(entry => entry.event), ["paste_start", "editor_wait", "editor_insert", "editor_insert", "paste_verify"]);
   await assert.rejects(pending, error => error.code === "paste_unconfirmed" && error.diagnosticCode === "message_timeout");
   assert.equal(background.evaluate("fixturePasteTrace.diagnostics.editor_text_chars"), 457957);
   await background.ack(event(1, { destinationPlatform: "gemini", status: "failed", lastStage: "paste_started", failureReason: "paste_failed",
@@ -1024,7 +1026,8 @@ clockTest("destination paste progress survives a lost paste reply and a sparse t
   assert.equal(terminal.diagnostics.editor_ready_count, 1);
   assert.equal(terminal.diagnostics.editor_insert_attempted, true);
   assert.equal(terminal.diagnostics.insertion_method, "insert_text");
-  assert.equal(terminal.diagnostics.paste_events.length, 3);
+  assert.equal(terminal.diagnostics.paste_events.length, 5);
+  assert.equal(terminal.diagnostics.insertion_blocked_reason, "focus_changed");
   assert.equal(terminal.diagnostics.paste_populated, undefined, "insertion is not verified delivery");
   assert.equal((await pasteCheckpoint(background, "verified", { paste_populated: true })).ok, false);
   assert.doesNotMatch(JSON.stringify(delivered), /PRIVATE_CARRY/);
