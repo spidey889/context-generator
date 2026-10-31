@@ -228,8 +228,8 @@ test("large fetch failures retain safe dispatch evidence before local recovery a
     assert.equal(record.aborted, false);
     return true;
   });
-  assert.equal(state.checkpoints.filter(report => report.diagnostics.summary_response_failures).length, 1,
-    "Sibling cancellation cannot replace the initiating failure.");
+  assert.equal(state.checkpoints.filter(report => report.diagnostics.summary_response_failures).length, 2,
+    "Both attempts are retained; sibling cancellation cannot replace the initiating failure.");
   assert.doesNotMatch(JSON.stringify(state.checkpoints), /PRIVATE|https:|stack|headers|receipt/);
   const debug = state.localDebug["context-generator-summary-response-debug-v1"];
   assert.equal(debug.large_phase, "part");
@@ -347,7 +347,7 @@ clockTest("large body retries share the original absolute request budget", { tic
   assert.equal(failure.aborted, true);
 });
 
-clockTest("large requests record an elapsed timeout before response headers", { tickMs: 1000, maxElapsedMs: 115000 }, async () => {
+clockTest("large requests record an elapsed timeout before response headers", { tickMs: 1000, maxElapsedMs: 215000 }, async () => {
   const state = backgroundFixture((_url, { signal }) => new Promise((_, reject) => {
     signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   }));
@@ -359,6 +359,76 @@ clockTest("large requests record an elapsed timeout before response headers", { 
     assert.ok(record.elapsed_ms >= 110000);
     return true;
   });
+});
+
+for (const phase of ["part", "final"]) clockTest(`large ${phase} retries transient service failure once after two seconds`, { tickMs: 100, maxElapsedMs: 15000 }, async () => {
+  const calls = [], attempts = new Map();
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body), key = `${payload.large.phase}:${payload.large.index ?? "final"}`;
+    calls.push({ payload, at: Date.now() });
+    const count = (attempts.get(key) || 0) + 1; attempts.set(key, count);
+    if (payload.large.phase === phase && (phase === "final" || payload.large.index === 0) && count === 1)
+      return new Response(JSON.stringify({ code: phase === "part" ? "service_busy" : "summary_timeout" }), { status: phase === "part" ? 503 : 504 });
+    return new Response(JSON.stringify(payload.large.phase === "part"
+      ? { summary: "Part", receipt: `proof-${payload.large.index}` } : { summary: "Final" }));
+  });
+  assert.equal((await state.run()).summary, "Final");
+  const repeated = calls.filter(call => call.payload.large.phase === phase && (phase === "final" || call.payload.large.index === 0));
+  assert.equal(repeated.length, 2);
+  assert.ok(repeated[1].at - repeated[0].at >= 2000);
+  assert.deepEqual(repeated[0].payload, repeated[1].payload);
+  assert.equal(calls.length, 6, "Completed parts are not repeated.");
+  assert.ok(state.checkpoints.at(-1).diagnostics.large_summary_requests.every(entry => entry.stage === "completed"));
+});
+
+clockTest("large service failures stop after one retry without combining partial results", { tickMs: 100, maxElapsedMs: 15000 }, async () => {
+  const calls = [];
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body); calls.push(payload.large);
+    if (payload.large.index === 0) return new Response(JSON.stringify({ code: "summary_failed" }), { status: 502 });
+    return new Response(JSON.stringify({ summary: "Part", receipt: "proof" }));
+  });
+  await assert.rejects(state.run(), error => error.code === "summary_failed");
+  assert.equal(calls.filter(call => call.index === 0).length, 2);
+  assert.equal(calls.some(call => call.phase === "final"), false);
+});
+
+clockTest("a timed-out large request retries with time left in its phase", { tickMs: 1000, maxElapsedMs: 150000 }, async () => {
+  let attempts = 0;
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    if (payload.large.index === 0 && ++attempts === 1)
+      return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+    return new Response(JSON.stringify(payload.large.phase === "part"
+      ? { summary: "Part", receipt: `proof-${payload.large.index}` } : { summary: "Final" }));
+  });
+  assert.equal((await state.run()).summary, "Final");
+  assert.equal(attempts, 2);
+});
+
+test("a permanent large request rejection is not retried", async () => {
+  let attempts = 0;
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    if (payload.large.index === 0) {
+      attempts++;
+      return new Response(JSON.stringify({ code: "client_not_allowed" }), { status: 403 });
+    }
+    return new Response(JSON.stringify({ summary: "Part", receipt: "proof" }));
+  });
+  await assert.rejects(state.run(), error => error.code === "client_not_allowed");
+  assert.equal(attempts, 1);
+});
+
+clockTest("cancellation during large retry delay prevents another request", { tickMs: 100, maxElapsedMs: 15000 }, async () => {
+  let calls = 0;
+  const state = backgroundFixture(async () => {
+    calls++;
+    if (calls === 1) setTimeout(() => state.operation.controller.abort(Object.assign(new Error("cancelled"), { code: "user_cancelled" })), 500);
+    return new Response(JSON.stringify({ code: "service_busy" }), { status: 503 });
+  });
+  await assert.rejects(state.run());
+  assert.equal(calls, 3, "Only the already concurrent first requests were sent.");
 });
 
 clockTest("large request transit can finish after 85 seconds without aborting accepted work", { tickMs: 1000, maxElapsedMs: 105000 }, async () => {

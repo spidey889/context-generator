@@ -1763,9 +1763,10 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
       },
       async post(payload, { signal: requestSignal, deadlineAt: requestDeadline }) {
         const requestStarted = nowMs();
-        // Retry only an interrupted response body, retaining all accepted parts.
-        // Both attempts share this absolute budget; a retry cannot extend work.
-        const expiresAt = Math.min(requestDeadline, Date.now() + 110000);
+        // A failed part/final request gets one retry, without repeating accepted parts.
+        // Response-body recovery retains its original budget; service retries get a
+        // fresh request window, still bounded by the existing phase deadline.
+        let expiresAt = Math.min(requestDeadline, Date.now() + 110000);
         const logEntry = { phase: payload.large.phase, index: payload.large.index ?? payload.large.total,
           total: payload.large.total, stage: "request", started_ms: Math.max(0, Math.round(requestStarted - started)) };
         checkpoint(logEntry, { deadline_remaining_ms: expiresAt - Date.now() });
@@ -1836,8 +1837,11 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
               openrouter_ms: data.timing?.openrouterMs, tokenharbor_ms: data.timing?.tokenharborMs });
             return data;
           } catch (error) {
-            const retry = attempt === 1 && error.summaryResponseInterrupted === true
-              && !controller.signal.aborted && !requestSignal.aborted && Date.now() < expiresAt;
+            const interruptedBody = error.summaryResponseInterrupted === true && !controller.signal.aborted;
+            const transientFailure = (error.summaryServiceFailure && (error.status === 429 || error.status >= 500))
+              || (requestSent && (controller.signal.aborted || (!responseReceived && error.name === "TypeError")));
+            const retry = attempt === 1 && !failureRecorded && !requestSignal.aborted
+              && (interruptedBody ? Date.now() < expiresAt : transientFailure && Date.now() + 2000 < requestDeadline);
             // The initiating request owns the diagnosis. Aborted sibling requests
             // must not overwrite it with a secondary cancellation or shared Error.
             // A recoverable body read is not a terminal part failure: the closed
@@ -1869,7 +1873,19 @@ async function summarizeLargeWithBackend(conversation, transferId, deadlineAt, o
                 }
               } catch {}
             }
-            if (retry) continue;
+            if (retry) {
+              if (!interruptedBody) {
+                // The phase's abort signal also cancels the delay if a sibling or user stops work.
+                await new Promise((resolve, reject) => {
+                  const onCancel = () => { clearTimeout(delay); reject(requestSignal.reason); };
+                  const delay = setTimeout(() => { requestSignal.removeEventListener("abort", onCancel); resolve(); }, 2000);
+                  requestSignal.addEventListener("abort", onCancel, { once: true });
+                  if (requestSignal.aborted) onCancel();
+                });
+                expiresAt = Math.min(requestDeadline, Date.now() + 110000);
+              }
+              continue;
+            }
             failureRecorded = true;
             if (responseFailures.length) diagnostics.summary_response_failures = responseFailures.map(record => ({ ...record }));
             error.diagnostics = globalThis.CapTransferDiagnostics?.validate(diagnostics) || null;
