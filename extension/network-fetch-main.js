@@ -362,7 +362,7 @@
           metrics.add("pages"); metrics.add("history_items", page.turns.length);
           pages.push(page);
           if (measureOnly) publishEstimate(api.roughSize(platform, pages, null, chat));
-          if (page.cursor !== null && (cursors.has(page.cursor) || !page.turns.length)) throw new api.CaptureError("Gemini history pagination did not advance.");
+          if (page.cursor !== null && (cursors.has(page.cursor) || !page.turns.length)) throw new api.CaptureError("Gemini history pagination did not advance.", undefined, undefined, undefined, "gemini_pagination_stalled");
           cursors.add(page.cursor); args[2] = page.cursor;
         } while (args[2] !== null);
         reply.capture = metrics.timed("serialize_ms", () => api.gemini(pages, chat, metrics, measureOnly));
@@ -378,7 +378,7 @@
         for (let i = 0; i < branch.length; i += 100) {
           const data = await read(`${base}/load-responses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ responseIds: branch.slice(i, i + 100).map(node => node.responseId) }) });
           api.complete(data);
-          if (!Array.isArray(data?.responses)) throw new api.CaptureError("Grok returned incomplete message bodies.");
+          if (!Array.isArray(data?.responses)) throw new api.CaptureError("Grok returned incomplete message bodies.", undefined, undefined, undefined, "grok_message_bodies_invalid");
           responses.push(...data.responses);
         }
         reply.capture = metrics.timed("serialize_ms", () => api.grok(nodes, responses, selected, metrics, measureOnly));
@@ -515,7 +515,7 @@
       reply.captureRequestStage = error?.captureRequestStage || "serialize";
       if (Number.isInteger(error?.captureHttpStatus)) reply.status = error.captureHttpStatus;
       // Keep observed evidence separate from the broad, user-facing wrapper.
-      metrics.finish({ name: error?.name, captureDetail: controller.signal.reason === "capture_timeout" ? "timeout"
+      metrics.finish({ name: error?.name, jsonIncompleteReason: error?.jsonIncompleteReason, captureDetail: controller.signal.reason === "capture_timeout" ? "timeout"
         : error?.captureDetail || (error?.name === "SyntaxError" ? "invalid_json" : undefined), captureRequestStage: error?.captureRequestStage });
     } finally {
       clearTimeout(timer);

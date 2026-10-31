@@ -198,6 +198,24 @@ test("destination observations wait for cold identity storage and survive an alr
   assert.equal(delivered.at(-1).diagnostics.delivery_events[0].event, "destination_prepare");
 });
 
+test("pending JSON checkpoints persist the newest milestone through offline delivery and worker restart", async () => {
+  const background = worker(async () => { throw new Error("offline"); });
+  await background.settled();
+  for (const [seq, step] of [[1, "request"], [2, "read"], [1, "request"]]) {
+    await background.ack(event(1, { lastStage: "capture_started", diagnostics: { version: 1, json_attempts: [{
+      mode: "fresh", outcome: "started", step, step_stage: "history", history_request_sent: true, progress_seq: seq
+    }] } }));
+  }
+  await background.settled();
+  assert.equal(background.shared.local[OUTBOX][0].payload.diagnostics.json_attempts[0].step, "read");
+  const delivered = [];
+  const restarted = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); }, background.shared);
+  await restarted.settled();
+  await restarted.retry();
+  assert.equal(delivered.at(-1).diagnostics.json_attempts[0].step, "read");
+  assert.equal(delivered.at(-1).diagnostics.json_attempts[0].outcome, "started");
+});
+
 test("copy recovery enriches a failed transfer without replacing terminal facts, including after worker restart", async () => {
   const background = worker(async () => { throw new Error("offline"); });
   await background.settled();

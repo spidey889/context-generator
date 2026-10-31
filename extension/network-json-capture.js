@@ -13,12 +13,13 @@
   window.addEventListener("message", observeReply);
   window.__capNetworkReplyObserver = () => window.removeEventListener("message", observeReply);
   const changedError = message => Object.assign(new Error(message), { diagnosticCode: "conversation_changed", diagnostics: { version: 1, capture_detail: "conversation_changed", failure_site: "capture_history" } });
-  const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status) => Object.assign(new Error(message), {
-    captureFailureReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
+  const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status, incompleteReason) => Object.assign(new Error(message), {
+    captureFailureReason, jsonIncompleteReason: incompleteReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
       : detail === "conversation_changed" ? "conversation_changed" : captureFailureReason === "unavailable" ? "capture_json_unavailable" : "capture_json_failed",
     diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" && detail !== "attachment_size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
       ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
   });
+  const incomplete = (message, reason) => captureError(message, "incomplete", undefined, undefined, undefined, reason);
   const pinChat = ["gemini", "grok", "deepseek"].includes(platform);
   const current = (pathname = location.pathname, selected = platform === "grok" ? new URL(location.href).searchParams.get("rid") : null) => {
     const pattern = platform === "gemini" ? /\/app\/([^/]+)\/?$/ : platform === "grok" ? /\/c\/([^/]+)\/?$/ : /\/a\/chat\/s\/([^/]+)\/?$/;
@@ -108,17 +109,17 @@
             const capture = reply.capture;
             if (capture?.skippedFiles !== undefined && (platform !== "deepseek" || !Array.isArray(capture.skippedFiles)
               || capture.skippedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim() || /\.pdf$/i.test(file.name.trim()))))
-              return reject(captureError("Invalid unreadable-file notice.", "incomplete"));
+              return reject(incomplete("Invalid unreadable-file notice.", "skipped_file_notice_invalid"));
             if (capture?.omittedFiles !== undefined && (!omitLargeFiles || platform !== "deepseek" || !Array.isArray(capture.omittedFiles)
               || capture.omittedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim()
-                || !Number.isSafeInteger(file.bytes) || file.bytes <= 4100000))) return reject(captureError("Invalid separate-file notice.", "incomplete"));
-            if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 4000000 || new TextEncoder().encode(capture.text).length > 16000000) return reject(captureError("Fast capture returned an invalid or incomplete conversation.", "incomplete"));
+                || !Number.isSafeInteger(file.bytes) || file.bytes <= 4100000))) return reject(incomplete("Invalid separate-file notice.", "omitted_file_notice_invalid"));
+            if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 4000000 || new TextEncoder().encode(capture.text).length > 16000000) return reject(incomplete("Fast capture returned an invalid or incomplete conversation.", "capture_payload_invalid"));
             const name = { gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" }[platform];
             // MAIN owns the native adapter. Verify both views agree before accepting
             // its message boundaries; never infer roles from flattened text.
             if (!Array.isArray(capture.messages) || capture.messages.length !== capture.messageTurnCount
               || capture.messages.some(turn => !turn || !["user", "assistant"].includes(turn.role) || typeof turn.text !== "string" || !turn.text.trim())
-              || capture.text !== `${name} conversation:\n\n${capture.messages.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`) return reject(captureError("Fast capture returned invalid message boundaries.", "incomplete"));
+              || capture.text !== `${name} conversation:\n\n${capture.messages.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`) return reject(incomplete("Fast capture returned invalid message boundaries.", "capture_message_boundaries_invalid"));
             resolve(capture);
           } catch (error) { reject(error); }
         };

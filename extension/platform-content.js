@@ -1074,6 +1074,7 @@
       finishTransferTrace,
       recordTransferFailureDiagnostics,
       recordJsonCaptureFailure,
+      observeSourcePageState,
       reportCaptureProgress,
       resetRunningFlag,
       markCaptureDone,
@@ -8305,6 +8306,33 @@
     state.controller.abort();
   }
 
+  function observeSourcePageState() {
+    try {
+      const excluded = [...currentPlatform.conversationSelectors, ...GENERIC_CONVERSATION_SELECTORS,
+        "pre", "code", "textarea", "input", "[contenteditable]"].join(",");
+      const challenge = 'iframe[src^="https://challenges.cloudflare.com/"], iframe[title*="reCAPTCHA"]';
+      const prompts = "h1, h2, [role='alert'], [role='alertdialog'], [role='status']";
+      const state = { source_loading: document.readyState === "loading" || document.readyState === "interactive",
+        source_error_prompt: false, source_challenge_prompt: false };
+      const auth = typeof observeDestinationAuthPrompt === "function" ? observeDestinationAuthPrompt() : undefined;
+      if (typeof auth === "boolean") state.source_auth_prompt = auth;
+      // Classify native UI only. Exclude both descendants and containers of chat,
+      // code and editors before reading a label; keep only boolean observations.
+      for (const node of document.querySelectorAll(`${prompts}, [role='progressbar'], [aria-busy='true'], ${challenge}`)) {
+        if (!isVisible(node) || isContextGeneratorNode(node) || node.closest(excluded)
+          || node.closest("[hidden], [aria-hidden='true']") || node.querySelector(excluded)) continue;
+        if (node.matches("[role='progressbar'], [aria-busy='true']")) state.source_loading = true;
+        if (node.matches(challenge)) state.source_challenge_prompt = true;
+        if (!node.matches(prompts)) continue;
+        const label = (node.getAttribute("aria-label") || node.innerText || node.textContent || "").trim().slice(0, 300);
+        if (/\b(?:something went wrong|an (?:unexpected )?error (?:has )?occurred|unable to load|failed to load|could(?:n['’]t| not) load|temporarily unavailable|service unavailable)\b/i.test(label)) state.source_error_prompt = true;
+        if (/\b(?:verif(?:y|ying) (?:that )?(?:you['’]re|you are) (?:a )?human|making sure (?:you['’]re|you are) human|checking your browser|checking (?:if )?(?:you['’]re|you are) human|complete the (?:security check|captcha)|security verification)\b/i.test(label)) state.source_challenge_prompt = true;
+        if (/^(?:loading|please wait)(?:\b|[.…])/i.test(label)) state.source_loading = true;
+      }
+      return state;
+    } catch { return {}; } // Optional diagnosis must never affect capture/recovery.
+  }
+
   function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false, omitLargeFiles = false, signal = null, onProgress) {
     try { onProgress?.({ outcome: "started", mode: "fresh", step: "queue", step_stage: "hook" }); } catch {}
     // Native bridges allow one read at a time. Cancellation releases this queue
@@ -8333,6 +8361,13 @@
         traceChatGptCapture("queue_done", { queue, ok: false, elapsed_ms: Date.now() - queuedAt, aborted: Boolean(signal?.aborted) });
         throw error;
       });
+    }).catch(error => {
+      // Sample when the read fails, including an unselected prefetch. Selection,
+      // retry or DOM recovery can happen after the source UI has changed.
+      if (!measureOnly && error && typeof error === "object") {
+        try { error.sourcePageState = observeSourcePageState(); } catch {}
+      }
+      throw error;
     });
     // Keep only completion in the queue; unused transcripts/errors are not retained.
     pendingJsonCapture = pending.then(() => {}, () => {});
@@ -8429,6 +8464,16 @@
     globalThis.CapTransferDiagnostics.jsonAttempt(trace.diagnostics, {
       ...previous, ...safe, mode, progress_seq: (previous?.progress_seq || 0) + 1
     });
+    if (safe.outcome !== "started" || (previous && previous.outcome !== "started") || !safe.step || !safe.step_stage
+      || !trace.telemetryStarted || trace.telemetryLastStage !== "capture_started") return;
+    // Persist each semantic milestone without waiting for the read to finish.
+    // File/page loops reuse these steps: bound their traffic with the existing
+    // 30-second progress throttle, with no timer or per-chunk reporting.
+    const key = `${mode}:${safe.step_stage}:${safe.step}`;
+    trace.reportedJsonCheckpoints ||= new Set();
+    const first = !trace.reportedJsonCheckpoints.has(key);
+    trace.reportedJsonCheckpoints.add(key);
+    reportCaptureProgress(trace, `${currentPlatform.id}-json`, first);
   }
 
   async function takePickerJsonCapture(expectedPath, omitLargeFiles = false) {
@@ -8444,7 +8489,7 @@
           ...(value?.diagnosticCode === "capture_json_unavailable" ? { step: "hook", hook_ready: false } : {}),
           failure_check: value?.diagnosticCode === "capture_json_unavailable" ? "hook_unavailable"
             : value?.diagnosticCode === "conversation_changed" ? "conversation_changed" : "unknown" });
-      recordJsonCaptureProgress(trace, observations, mode);
+      recordJsonCaptureProgress(trace, { ...observations, ...value?.sourcePageState }, mode);
       // Persist failed reads before retry/DOM recovery or a lost final source
       // callback. This uses the same attempt, durable outbox and Supabase JSONB.
       if (observations.outcome !== "succeeded") reportCaptureProgress(trace, `${currentPlatform.id}-json`, true);

@@ -55,6 +55,20 @@
     step_stage: enums.capture_request_stage,
     route_reason: ["path_unrecognized", "no_matching_endpoint", "available"],
     hook_status: ["no_reply", "version_mismatch", "runtime_missing", "install_rejected", "install_failed", "ready"],
+    // Preserve the recovery category while naming the exact structural guard.
+    incomplete_reason: ["completeness_metadata_invalid", "conversation_mismatch", "messages_missing", "conversation_tree_missing",
+      "branch_leaf_missing", "branch_parent_missing", "no_usable_text", "history_missing", "gemini_rpc_response_invalid",
+      "gemini_frame_pairs_incomplete", "gemini_frame_length_mismatch", "gemini_frame_invalid", "gemini_history_response_invalid",
+      "gemini_history_page_invalid", "gemini_history_pages_remaining", "gemini_pagination_stalled", "gemini_parent_turn_invalid", "gemini_parent_response_invalid",
+      "gemini_response_missing", "gemini_selected_response_missing", "grok_history_missing", "grok_response_count_mismatch",
+      "grok_message_bodies_missing", "grok_message_bodies_invalid", "grok_message_body_mismatch", "deepseek_conversation_unavailable", "deepseek_snapshot_mismatch",
+      "deepseek_fragments_missing", "skipped_file_notice_invalid", "omitted_file_notice_invalid", "capture_payload_invalid", "capture_message_boundaries_invalid",
+      ...["truncated", "is_truncated", "partial", "is_partial", "incomplete", "is_incomplete", "has_more", "has_more_messages",
+        "has_previous_page", "has_next_page", "has_missing_messages", "missing_message_count", "cut_off", "complete", "is_complete",
+        "next_cursor", "previous_cursor", "next_page", "previous_page", "missing_messages", "missing_message_ids", "missing_message_uuids",
+        "has_previous", "has_next", "has_missing_nodes", "missing_node_count", "missing_nodes", "missing_node_ids", "context_truncation_continuation",
+        "hasMore", "hasNextPage", "hasPreviousPage", "isPartial", "isIncomplete", "isTruncated", "missingMessages", "nextCursor", "previousCursor", "isComplete"]
+        .map(field => `metadata_${field}`)],
     mode: ["prefetch", "fresh", "retry"],
     failure_check: ["raw_header_limit", "raw_total_stream_limit", "raw_response_stream_limit", "raw_remaining_files_limit", "supported_files_limit", "transcript_char_limit", "transcript_byte_limit",
       "auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "invalid_utf8", "non_json_response",
@@ -86,7 +100,8 @@
     "transcript_chars", "transcript_bytes", "transcript_char_limit", "transcript_byte_limit", "hook_ms", "auth_ms", "download_ms",
     "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms", "route_candidates", "route_resources", "progress_seq", "files_skipped"];
   const jsonAttemptSchema = {
-    ...Object.fromEntries(["saved_chat", "hook_ready", "route_found", "history_request_sent", "history_response_read", "history_parsed", "history_checked"]
+    ...Object.fromEntries(["saved_chat", "hook_ready", "route_found", "history_request_sent", "history_response_read", "history_parsed", "history_checked",
+      "source_loading", "source_auth_prompt", "source_error_prompt", "source_challenge_prompt"]
       .map(key => [key, { type: "boolean" }])),
     ...Object.fromEntries(Object.entries(jsonAttemptEnums).map(([key, values]) => [key, { type: "string", values }])),
     ...Object.fromEntries(jsonAttemptNumbers.map(key => [key, { type: "number", max: 2147483647 }])),
