@@ -13,4 +13,11 @@ function withoutPasteEditorFields(schema) {
     "editor_retained", "editor_insert_attempted", "editor_document_focused"]) delete result[key];
   return result;
 }
-module.exports = { withoutPasteEditorFields, beforePasteDiagnosis };
+function beforeRetentionRecovery(schema) {
+  const result = structuredClone(schema);
+  result.event.values = result.event.values.filter(value => !value.startsWith("retention_"));
+  result.surface.values = result.surface.values.filter(value => value !== "retention");
+  delete result.reason; delete result.cause;
+  return result;
+}
+module.exports = { withoutPasteEditorFields, beforePasteDiagnosis, beforeRetentionRecovery };

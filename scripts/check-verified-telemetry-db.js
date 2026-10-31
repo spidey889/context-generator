@@ -456,6 +456,8 @@ async function main() {
       } else if (name.endsWith("_paste_page_state.sql")) {
         checks += await require("./check-paste-diagnostics-db.js").checkPasteDiagnostics(db, sql,
           ["destination_loading", "destination_error_prompt", "destination_challenge_prompt"]);
+      } else if (name.endsWith("_paste_retention_diagnostics.sql")) {
+        checks += await require("./check-paste-retention-db.js").checkPasteRetention(db, sql);
       } else if (name.endsWith("_rejected_capture_character_count.sql")) {
         checks += await require("./check-rejected-capture-count-db.js").checkRejectedCaptureCount(db, sql);
       } else await db.exec(sql);

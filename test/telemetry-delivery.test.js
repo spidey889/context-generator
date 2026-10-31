@@ -263,6 +263,21 @@ test("recovery checkpoints require an owned source or dispatched destination and
   assert.equal(active.status, "started");
 });
 
+test("post-terminal retention reports preserve success and reject blaming the user or an unknown actor", async () => {
+  const background = worker(async () => { throw new Error("offline"); }); await background.settled();
+  await background.ack(event(1, { destinationPlatform: "gemini", lastStage: "paste_started" })); await startOwnedPaste(background);
+  background.evaluate("fixturePasteTrace.operation.tabIds.add(84)");
+  await background.ack(event(1, { destinationPlatform: "gemini", status: "succeeded", lastStage: "completed" }));
+  const sender = { tab: { id: 84, url: "https://gemini.google.com/app" } };
+  for (const cause of ["user", "unknown"]) assert.equal((await recoveryCheckpoint(background, "retention_failed",
+    { surface: "retention", cause, reason: "paste_not_retained" }, sender)).ok, false);
+  assert.equal((await recoveryCheckpoint(background, "retention_user_handled", { surface: "retention", cause: "user" }, sender)).ok, true);
+  await background.settled();
+  const payload = background.shared.local[OUTBOX][0].payload;
+  assert.equal(payload.status, "succeeded"); assert.equal(payload.failure_reason, null);
+  assert.equal(payload.diagnostics.recovery_events[0].event, "retention_user_handled");
+});
+
 function pasteCheckpoint(background, checkpoint, diagnostics = {}, sender = {}, overrides = {}) {
   return new Promise(resolve => background.listeners.message({ type: "RECORD_PASTE_CHECKPOINT", transferId: id(1),
     destination: "gemini", checkpoint, diagnostics: { version: 1, ...diagnostics }, ...overrides },

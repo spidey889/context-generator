@@ -4452,6 +4452,33 @@ clockTest("waiting paste recovery preserves drafts and stops for user actions, n
   }
 });
 
+for (const [destination, hostname] of Object.entries({ claude: "claude.ai", gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }))
+for (const scenario of ["retained", "user", "unknown", "remounted", "exception"])
+clockTest(`${destination} retention diagnosis distinguishes ${scenario} without blaming user edits`, { tickMs: 100, maxElapsedMs: 45000 }, async () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const elements = [editor], messages = [];
+  const hooks = loadPlatformContent(elements, hostname, { visibilityState: "hidden", runtimeSendMessage: async message => {
+    messages.push(message); return { ok: true };
+  } });
+  const modal = new FakeElement(); hooks.registerElementId("context-generator-fallback-modal", modal);
+  await hooks.pasteIntoPlatform("PRIVATE complete carry", destination, "retention-diagnosis", Date.now() + 60000);
+  if (scenario === "user") hooks.dispatchDocumentEvent("beforeinput", { target: editor, isTrusted: true, inputType: "deleteContentBackward" });
+  if (scenario !== "retained") editor.value = "";
+  if (scenario === "remounted") { editor.isConnected = false; elements.length = 0; }
+  if (scenario === "unknown") editor.setAttribute("aria-disabled", "true");
+  if (scenario === "exception") editor.click = () => { throw new Error("PRIVATE native failure"); };
+  hooks.setVisibility("visible");
+  await new Promise(resolve => setTimeout(resolve, 30000));
+  const retention = messages.filter(message => message.type === "RECORD_RECOVERY_CHECKPOINT" && message.surface === "retention");
+  const expected = { retained: "retention_ok", user: "retention_user_handled", unknown: "retention_unknown", remounted: "retention_failed", exception: "retention_failed" };
+  assert.equal(retention.length, 1); assert.equal(retention[0].checkpoint, expected[scenario]);
+  if (scenario === "user") { assert.equal(retention[0].cause, "user"); assert.notEqual(modal.style.display, "flex"); assert.equal(editor.value, ""); }
+  if (scenario === "remounted") assert.equal(retention[0].cause, "page");
+  if (scenario === "exception") assert.equal(retention[0].cause, "extension");
+  assert.doesNotMatch(JSON.stringify(retention), /PRIVATE|complete carry/);
+  hooks.teardownContextGeneratorInstance();
+});
+
 clockTest("delayed paste recovery bounds a permanent editor gap and retains the complete carry", async () => {
   const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
   const hooks = loadPlatformContent([editor], "gemini.google.com", { visibilityState: "hidden" });

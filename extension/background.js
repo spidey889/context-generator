@@ -825,7 +825,7 @@ function recordPasteCheckpoint(message, sender) {
 async function recordRecoveryCheckpoint(message, sender) {
   if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)
       || !isUuid(message.transferId)
-      || Object.keys(message).some(key => !["type", "transferId", "destination", "checkpoint", "surface", "method", "stopConfirmed"].includes(key))
+      || Object.keys(message).some(key => !["type", "transferId", "destination", "checkpoint", "surface", "method", "stopConfirmed", "reason", "cause"].includes(key))
       || message.stopConfirmed !== undefined && typeof message.stopConfirmed !== "boolean") return false;
   const event = await enqueueTelemetryWork(async () => {
     await restoreActiveTransferTelemetry();
@@ -840,6 +840,7 @@ async function recordRecoveryCheckpoint(message, sender) {
     if (!side) return null;
     const observation = globalThis.CapTransferDiagnostics.validateRecoveryEvent({ event: message.checkpoint, surface: message.surface, side,
       at_ms: Math.max(0, Math.min(2147483647, Date.now() - Date.parse(active.attemptedAt))),
+      ...(message.reason !== undefined ? { reason: message.reason } : {}), ...(message.cause !== undefined ? { cause: message.cause } : {}),
       ...(message.method !== undefined ? { method: message.method } : {}),
       ...(message.stopConfirmed !== undefined ? { stop_confirmed: message.stopConfirmed } : {}) });
     if (!observation) return null;

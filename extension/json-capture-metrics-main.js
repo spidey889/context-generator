@@ -161,11 +161,15 @@
     return [...records.values()].sort((a, b) => a.index - b.index).slice(0, 17);
   }
   const recoveryEventSchema = {
-    event: { type: "string", values: ["box_shown", "copy_started", "copy_succeeded", "copy_failed", "copy_unconfirmed"] },
-    surface: { type: "string", values: ["dialog", "handoff_copy", "copy_notice"] },
+    event: { type: "string", values: ["box_shown", "copy_started", "copy_succeeded", "copy_failed", "copy_unconfirmed",
+      "retention_ok", "retention_user_handled", "retention_recovered", "retention_failed", "retention_unknown"] },
+    surface: { type: "string", values: ["dialog", "handoff_copy", "copy_notice", "retention"] },
     side: { type: "string", values: ["source", "destination"] },
     method: { type: "string", values: ["clipboard", "native", "manual_selection"] },
-    at_ms: { type: "number", max: 2147483647 }, stop_confirmed: { type: "boolean" }
+    at_ms: { type: "number", max: 2147483647 }, stop_confirmed: { type: "boolean" },
+    reason: { type: "string", values: ["editor_missing", "editor_detached", "editor_has_draft", "paste_not_retained", "paste_not_populated",
+      "insertion_exception", "message_timeout", "conversation_changed", "transfer_timeout", "user_cancelled", "unknown_error"] },
+    cause: { type: "string", values: ["user", "page", "extension", "unknown"] }
   };
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
@@ -239,11 +243,17 @@
     if (!input || typeof input !== "object" || Array.isArray(input)
       || !["event", "surface", "side", "at_ms"].every(key => Object.hasOwn(input, key))
       || Object.entries(input).some(([key, value]) => !validField(key, value, recoveryEventSchema))) return null;
-    if (input.event !== "box_shown" && input.method === undefined) return null;
+    if (input.event.startsWith("retention_")) {
+      if (input.surface !== "retention" || input.side !== "destination" || input.method !== undefined || input.stop_confirmed !== undefined
+        || input.event === "retention_failed" && (!input.reason || !["page", "extension"].includes(input.cause))
+        || input.event === "retention_user_handled" && input.cause !== "user"
+        || input.event === "retention_unknown" && input.cause !== "unknown") return null;
+    } else if (input.surface === "retention" || input.reason !== undefined || input.cause !== undefined
+      || input.event !== "box_shown" && input.method === undefined) return null;
     return { ...input };
   }
   function recoveryEventKey(entry) {
-    return JSON.stringify([entry.event, entry.surface, entry.side, entry.method ?? null, entry.stop_confirmed ?? null]);
+    return JSON.stringify([entry.event, entry.surface, entry.side, entry.method ?? null, entry.stop_confirmed ?? null, entry.reason ?? null, entry.cause ?? null]);
   }
   function mergeRecoveryEvents(first = [], second = []) {
     const records = new Map();

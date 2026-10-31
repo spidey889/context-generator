@@ -1649,13 +1649,14 @@
     }, Math.max(0, deadlineAt - Date.now()));
   }
 
-  function recordRecoveryCheckpoint(recovery, checkpoint, surface, method = null, stopConfirmed = undefined) {
+  function recordRecoveryCheckpoint(recovery, checkpoint, surface, method = null, stopConfirmed = undefined, details = {}) {
     if (!instanceActive || !recovery?.transferId || !getPlatform(recovery.destination)) return;
     // Recovery can happen after the transfer outcome is final. Send only fixed
     // observations under that original identity; clipboard contents stay local.
     try {
       Promise.resolve(extensionRuntime.sendMessage({ type: "RECORD_RECOVERY_CHECKPOINT",
         transferId: recovery.transferId, destination: recovery.destination, checkpoint, surface,
+        ...details,
         ...(method ? { method } : {}), ...(typeof stopConfirmed === "boolean" ? { stopConfirmed } : {}) })).catch(() => {});
     } catch {}
   }
@@ -3363,6 +3364,7 @@
     let verified = false;
     let writing = false;
     let userHandled = false;
+    let retentionReported = false, pageRemounted = false;
     let cancelled = false;
     let rejectActiveCheck = null;
     const eventTypes = ["beforeinput", "input", "keydown", "click", "submit"];
@@ -3389,12 +3391,20 @@
       }
       if (!handled) return;
       userHandled = true;
+      guard.reportRetention("retention_user_handled", null, "user");
       if (pendingPasteRecheck?.guard === guard) cancelPendingPasteRecheck();
     };
     const guard = {
       ...routeGuard,
       recovery: { transferId, destination: destination.id },
       get userHandled() { return userHandled; },
+      get pageRemounted() { return pageRemounted || Boolean(verified && editor && !editor.isConnected); },
+      reportRetention(event, reason = null, cause = null) {
+        if (retentionReported) return;
+        retentionReported = true;
+        recordRecoveryCheckpoint(this.recovery, event, "retention", null, undefined,
+          { ...(reason ? { reason } : {}), ...(cause ? { cause } : {}) });
+      },
       check() {
         if (cancelled || !instanceActive) throw createTransferCancelledError();
         // Awaited source checks and synchronous native focus/input handlers can
@@ -3431,6 +3441,7 @@
         if (pendingPasteRecheck?.guard === guard) cancelPendingPasteRecheck();
       },
       observe(input) {
+        if (verified && editor && editor !== input && !editor.isConnected) pageRemounted = true;
         editor = input;
         if (editorContainsText(input, text)) verified = true;
       },
@@ -3664,7 +3675,10 @@
     const pending = { timer: null, expiryTimer: null, onVisible: null, deadlineAt, guard };
     pendingPasteRecheck = pending;
     pending.expiryTimer = setTimeout(() => {
-      if (pendingPasteRecheck === pending) cancelPendingPasteRecheck();
+      if (pendingPasteRecheck === pending) {
+        guard?.reportRetention("retention_unknown", "transfer_timeout", "unknown");
+        cancelPendingPasteRecheck();
+      }
     }, Math.max(0, (deadlineAt || Date.now() + RUNNING_AUTO_RESET_MS) - Date.now()));
     pending.onVisible = () => {
       if (deadlineAt && Date.now() >= deadlineAt) {
@@ -3690,6 +3704,7 @@
   async function recheckPastedContext(text, destination, pending) {
     let needsCopy = true;
     let draftPresent = false;
+    let reason = "editor_missing", cause = "unknown", recovered = false, writeEntered = false;
     const recoveryDeadlineAt = Math.min(pending.deadlineAt || Infinity,
       Date.now() + (destination.pasteRetryTimeoutMs || PASTE_RETRY_TIMEOUT_MS));
     const checkRecovery = async (beforeWrite = false) => {
@@ -3716,6 +3731,7 @@
         if (!await checkRecovery()) return;
         if (Date.now() >= recoveryDeadlineAt) break;
         const input = findReadyPlatformInput(destination);
+        if (pending.guard?.pageRemounted) { cause = "page"; reason = "editor_detached"; }
         if (input) {
           pending.guard.observe(input);
           if (editorContainsText(input, text)) {
@@ -3723,27 +3739,40 @@
             return;
           }
           // Preserve drafts restored on focus or typed while discovery waits.
-          if (getElementText(input).trim()) { draftPresent = true; return; }
+          if (getElementText(input).trim()) { draftPresent = true; reason = "editor_has_draft"; return; }
           if (!await checkRecovery(true)) return;
+          reason = "paste_not_retained";
+          writeEntered = true;
           if (pending.guard.insert(input) !== false) {
+            writeEntered = false;
             const verifyMs = Math.min(destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS,
               Math.max(0, recoveryDeadlineAt - Date.now()));
             if (await waitForEditorText(input, text, verifyMs)) {
               if (!await checkRecovery()) return;
               await delay(Math.min(PASTE_STABILITY_MS, Math.max(0, recoveryDeadlineAt - Date.now())));
               if (!await checkRecovery()) return;
-              if (input.isConnected && editorContainsText(input, text)) needsCopy = false;
+              if (input.isConnected && editorContainsText(input, text)) { needsCopy = false; recovered = true; }
             }
             return;
           }
+          writeEntered = false;
         }
         await delay(Math.min(PASTE_RETRY_INTERVAL_MS, Math.max(0, recoveryDeadlineAt - Date.now())));
       }
     } catch (error) {
-      if (["transfer_timeout", "conversation_changed", "user_cancelled"].includes(error?.code)) needsCopy = false;
+      reason = globalThis.CapTransferDiagnostics?.errorCode(error, "unknown_error") || "unknown_error";
+      if (["transfer_timeout", "conversation_changed", "user_cancelled"].includes(reason)) {
+        needsCopy = false;
+        pending.guard?.reportRetention("retention_unknown", reason, "unknown");
+      } else if (writeEntered) { cause = "extension"; reason = "insertion_exception"; }
       console.debug("[Context Generator] Delayed paste check failed:", error?.message || error);
     } finally {
       if (pendingPasteRecheck === pending) {
+        // Silent text loss has no reliable actor. Only a witnessed native
+        // remount or our write exception is classified as a retention failure.
+        pending.guard?.reportRetention(needsCopy ? (cause === "unknown" ? "retention_unknown" : "retention_failed")
+          : recovered ? "retention_recovered" : "retention_ok", needsCopy ? reason : null,
+          needsCopy ? cause : recovered && cause !== "unknown" ? cause : null);
         cancelPendingPasteRecheck();
         if (needsCopy) showFallbackModal(text, destination.name, false, false, draftPresent,
           { destinationCopy: true, recovery: pending.guard.recovery });
