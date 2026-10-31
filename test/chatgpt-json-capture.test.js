@@ -1082,7 +1082,8 @@ clockTest("ChatGPT completes healthy original files after history consumes most 
   const h = setup(data, 200, { fetchImpl: async request => {
     if (request.options?.signal) {
       const url = new URL(request.url, "https://chatgpt.com");
-      const delay = url.pathname === `/backend-api/conversation/${chat}` ? 11000
+      // Still cross the old 15s capture cap when the 1s/4s files overlap.
+      const delay = url.pathname === `/backend-api/conversation/${chat}` ? 12000
         : url.pathname === "/backend-api/estuary/content" ? url.searchParams.get("id") === files[0].id ? 1000 : 4000 : 0;
       if (delay) await new Promise((resolve, reject) => {
         const timer = setTimeout(resolve, delay);
@@ -1203,8 +1204,15 @@ test("ChatGPT counts rejected file chunks against the shared raw download limit"
     return new Response(new Uint8Array(16000001), { headers: { "content-type": "text/plain" } });
   } });
   await discover(harness);
-  await assert.rejects(harness.window.__capCaptureChatGptJson(), /pasted text attachment/);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.jsonCapture.failure_check, "raw_total_stream_limit");
+    assert.equal(error.jsonCapture.failure_stage, "attachment_body");
+    assert.equal(error.jsonCapture.failure_limit, 32000000);
+    assert.ok(error.jsonCapture.failure_value > error.jsonCapture.failure_limit);
+    return true;
+  });
   assert.equal(downloads, 2);
+  assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
 });
 
 test("ChatGPT captures the full big paste with parameterized or mixed-case MIME metadata", async () => {
