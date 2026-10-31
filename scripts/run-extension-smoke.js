@@ -2484,7 +2484,7 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
 async function verifyHandoffPalette(session) {
   const contextId = session.getExtensionContextId();
   // Inspect the first frame, not just settled data-state attributes: a fading
-  // capture badge can still look active after the heading says Summarizing.
+  // capture badge can still look active after the AI headline appears.
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
   // Start and sample in one browser task: a second CDP request can arrive
   // after the entire 400 ms cue on a busy runner, missing its first frame.
@@ -2495,17 +2495,17 @@ async function verifyHandoffPalette(session) {
     requestAnimationFrame(() => resolve(document.getElementById("context-generator-text-label").textContent));
   })`, contextId);
   assert.equal(firstCaption, "Capturing chat", "Instant JSON capture must paint its own caption before the summary caption");
-  await waitFor(async () => await session.evaluate('document.getElementById("context-generator-text-label").textContent') === "Summarizing", "the capture cue completing before summary presentation");
+  await waitFor(async () => await session.evaluate('document.getElementById("context-generator-text-label").textContent') === "Thinking", "the capture cue completing before AI summary presentation");
   // The real stage can advance while its nonblocking finish glide is visible.
   await waitFor(() => session.evaluate(`(() => {
     const capture = document.querySelector('[data-context-generator-stage="capture"]');
     return capture.querySelector('.context-generator-handoff-stage-connector-fill').getBoundingClientRect().width
       / capture.querySelector('.context-generator-handoff-stage-connector').getBoundingClientRect().width >= 0.999;
-  })()`), "capture line finishing its glide after Summarizing starts", 1000);
+  })()`), "capture line finishing its glide after Thinking starts", 1000);
   await session.evaluate('window.__capSmokeRebuildHandoff(); window.__capSmokeHandoffStage("capture"); window.__capSmokeHandoffStage("capture", "done"); window.__capSmokeHandoffStage("summary"); window.__capSmokeHandoffStage("paste", "done")', contextId);
   await session.evaluate("new Promise(resolve => setTimeout(resolve, 500))");
   assert.equal(await session.evaluate('document.getElementById("context-generator-text-label").textContent'), "Pasted into Claude",
-    "A ready transfer must supersede the capture cue without a late Summarizing caption");
+    "A ready transfer must supersede the capture cue without a late Thinking caption");
   await session.evaluate('window.__capSmokeHandoffStage("capture")', contextId);
   await session.evaluate("window.__capSmokeHandoffStylesReady()", contextId);
   await session.evaluate("new Promise(resolve => setTimeout(resolve, 400))");
@@ -2517,7 +2517,7 @@ async function verifyHandoffPalette(session) {
       return [style.color, style.backgroundColor, style.borderTopColor, style.boxShadow];
     });
   })()`;
-  assert.equal(await session.evaluate('document.getElementById("context-generator-text-label").textContent'), "Summarizing");
+  assert.equal(await session.evaluate('document.getElementById("context-generator-text-label").textContent'), "Thinking");
   const firstFrameMarkers = await session.evaluate(markerStyles);
   await session.evaluate("new Promise(resolve => setTimeout(resolve, 400))");
   assert.deepEqual(firstFrameMarkers, await session.evaluate(markerStyles),
@@ -2552,32 +2552,34 @@ async function verifyHandoffPalette(session) {
   assert.ok(lineMotion.end >= 0.999, "The completion glide reaches the end.");
   process.stdout.write("✓ Handoff line keeps moving while pending and glides to completion across stage changes.\n");
   await session.evaluate('window.__capSmokeHandoffStage("summary")', contextId);
-  await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Polishing"'),
-    "the slow AI summary headline rotation", 20000);
+  assert.equal(await session.evaluate('document.getElementById("context-generator-text-label").textContent'), "Thinking");
+  await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Summarizing"'),
+    "Thinking advancing to Summarizing", 10000);
+  await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Crafting"'),
+    "Summarizing advancing to Crafting", 20000);
   assert.equal(await session.evaluate('document.querySelector("[data-context-generator-stage=summary] .context-generator-handoff-stage-label").textContent'),
     "Summarizing", "Activity words must not rename the actual summary step.");
   if (HANDOFF_SCREENSHOT_PATH) {
+    await session.evaluate("document.getElementById('context-generator-text').getAnimations().forEach(animation => animation.finish())");
     const shot = await session.call("Page.captureScreenshot", { format: "png" });
     await fs.promises.mkdir(path.dirname(HANDOFF_SCREENSHOT_PATH), { recursive: true });
-    await fs.promises.writeFile(HANDOFF_SCREENSHOT_PATH.replace(/\.png$/, "-polishing.png"), Buffer.from(shot.data, "base64"));
+    await fs.promises.writeFile(HANDOFF_SCREENSHOT_PATH.replace(/\.png$/, "-crafting.png"), Buffer.from(shot.data, "base64"));
   }
-  await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Summarizing"'),
-    "the primary summary headline returning", 8000);
-  process.stdout.write("✓ AI headline briefly shows Polishing after 12 seconds, then returns to Summarizing with a stable stage label.\n");
+  process.stdout.write("✓ AI headline starts Thinking, advances to Summarizing then Crafting, and keeps its summary step label stable.\n");
   // Seek the real CSS animations so a busy runner cannot skip the short fade.
   const fadingOut = await session.evaluate(`(() => {
     const headline = document.getElementById('context-generator-text');
     headline.getAnimations().forEach(animation => animation.finish());
-    window.__capSmokeSummaryWord('Polishing');
+    window.__capSmokeSummaryWord('Refining');
     const animation = headline.getAnimations().find(animation => animation.animationName === 'contextGeneratorSummaryWordOut');
     if (!animation) throw new Error('Summary word fade-out is missing');
     animation.pause(); animation.currentTime = 60;
     return { word: document.getElementById('context-generator-text-label').textContent,
       opacity: Number(getComputedStyle(headline).opacity) };
   })()`, contextId);
-  assert.equal(fadingOut.word, "Summarizing");
+  assert.equal(fadingOut.word, "Crafting");
   assert.ok(fadingOut.opacity > 0 && fadingOut.opacity < 1, "The old word must visibly fade before replacement.");
-  await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Polishing"'),
+  await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Refining"'),
     "the word changing after its outgoing fade", 2000);
   const fadingIn = await session.evaluate(`(() => {
     const headline = document.getElementById('context-generator-text');

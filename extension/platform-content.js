@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-summary-label-transitions-v238";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-summary-label-lineup-v239";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -214,9 +214,14 @@
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
   const HANDOFF_REASSURANCE_TEXT = "Taking a little longer—still working.";
-  const HANDOFF_SUMMARY_LABELS = ["Polishing", "Refining", "Crafting"];
-  const HANDOFF_SUMMARY_PRIMARY_LABEL_MS = 12000;
-  const HANDOFF_SUMMARY_ALTERNATE_LABEL_MS = 4000;
+  const HANDOFF_SUMMARY_LABELS = [
+    { label: "Thinking", durationMs: 5000 },
+    { label: "Summarizing", durationMs: 15000 },
+    { label: "Crafting", durationMs: 8000 },
+    { label: "Refining", durationMs: 8000 },
+    { label: "Polishing", durationMs: 8000 },
+    { label: "Still working", durationMs: 0 }
+  ];
   const HANDOFF_SUMMARY_WORD_OUT_MS = 120;
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
   // native capture and summary creep below completion; DOM capture uses scroll diagnostics.
@@ -9711,18 +9716,22 @@
     const label = document.getElementById("context-generator-text-label");
     const stage = document.getElementById("context-generator-handoff-progress")
       ?.querySelector("[data-context-generator-stage='summary']");
-    let alternate = 0;
+    let index = 0;
+    label.textContent = HANDOFF_SUMMARY_LABELS[0].label;
     const advance = () => {
       handoffSummaryLabelTimer = null;
       if (!isHandoffOverlayVisible() || stage?.dataset.state !== "active"
-          || !["Summarizing", ...HANDOFF_SUMMARY_LABELS].includes(label?.textContent)) return;
-      const primary = label.textContent !== "Summarizing";
-      changeHandoffSummaryLabel(primary ? "Summarizing" : HANDOFF_SUMMARY_LABELS[alternate++ % HANDOFF_SUMMARY_LABELS.length], () => {
-        handoffSummaryLabelTimer = setTimeout(advance,
-          primary ? HANDOFF_SUMMARY_PRIMARY_LABEL_MS : HANDOFF_SUMMARY_ALTERNATE_LABEL_MS);
+          || label?.textContent !== HANDOFF_SUMMARY_LABELS[index].label) return;
+      const next = HANDOFF_SUMMARY_LABELS[index + 1];
+      if (!next) return;
+      changeHandoffSummaryLabel(next.label, () => {
+        index++;
+        // Advance once through the lineup. The final neutral label stays while
+        // real work is pending; cosmetic time can never claim completion.
+        if (next.durationMs) handoffSummaryLabelTimer = setTimeout(advance, next.durationMs);
       });
     };
-    handoffSummaryLabelTimer = setTimeout(advance, HANDOFF_SUMMARY_PRIMARY_LABEL_MS);
+    handoffSummaryLabelTimer = setTimeout(advance, HANDOFF_SUMMARY_LABELS[0].durationMs);
   }
 
   function setHandoffProgress(stageId, phase = "active", destinationName = null, inputChars = 0) {

@@ -1117,39 +1117,43 @@ test("local capture and carry preparation leave presentation stages for the sequ
   assert.ok(!trace.marks.some(mark => mark.label === "local handoff done"));
 });
 
-clockTest("AI summary labels rotate slowly with Summarizing occupying most of the wait", (t) => {
+clockTest("AI summary labels advance once from Thinking to a neutral pending label", (t) => {
   const { hooks, stage } = createHandoffCompletionFixture();
   const label = hooks.document.getElementById("context-generator-text-label");
   hooks.setHandoffProgress("summary", "active", "Claude", 20000);
-  for (const alternate of ["Polishing", "Refining", "Crafting", "Polishing"]) {
-    t.mock.timers.tick(11999);
-    assert.equal(label.textContent, "Summarizing");
+  assert.equal(label.textContent, "Thinking", "AI summaries must start with Thinking, without a Summarizing flash.");
+  const lineup = [
+    ["Thinking", 5000, "Summarizing"], ["Summarizing", 15000, "Crafting"],
+    ["Crafting", 8000, "Refining"], ["Refining", 8000, "Polishing"], ["Polishing", 8000, "Still working"]
+  ];
+  for (const [current, duration, next] of lineup) {
+    t.mock.timers.tick(duration - 1);
+    assert.equal(label.textContent, current);
     t.mock.timers.tick(1);
-    assert.equal(label.textContent, "Summarizing", "Keep the old word until its fade out ends.");
+    assert.equal(label.textContent, current, "Keep the old word until its fade out ends.");
     assert.match(hooks.document.getElementById("context-generator-text").style.animation, /SummaryWordOut/);
     t.mock.timers.tick(120);
-    assert.equal(label.textContent, alternate);
+    assert.equal(label.textContent, next);
     assert.match(hooks.document.getElementById("context-generator-text").style.animation, /SummaryWordIn/);
     assert.equal(stage.dataset.state, "active", "Cosmetic words cannot complete a stage.");
-    t.mock.timers.tick(3999);
-    assert.equal(label.textContent, alternate);
-    t.mock.timers.tick(1);
-    assert.equal(label.textContent, alternate);
-    t.mock.timers.tick(120);
-    assert.equal(label.textContent, "Summarizing");
   }
+  t.mock.timers.tick(120000);
+  assert.equal(label.textContent, "Still working", "A long request must neither repeat the lineup nor imply it is finished.");
+  assert.equal(stage.dataset.state, "active");
+  hooks.setHandoffProgress("summary", "done");
+  assert.equal(label.textContent, "Summary ready", "The actual result supersedes the pending label immediately.");
 });
 
-clockTest("summary label rotation cannot affect local carries or replace real part progress", (t) => {
+clockTest("summary label lineup cannot affect local carries or replace real part progress", (t) => {
   const { hooks } = createHandoffCompletionFixture();
   const label = hooks.document.getElementById("context-generator-text-label");
   hooks.setHandoffProgress("summary", "active", "Claude", 20000);
-  t.mock.timers.tick(12000);
+  t.mock.timers.tick(5000);
   t.mock.timers.tick(120);
-  assert.equal(label.textContent, "Polishing");
+  assert.equal(label.textContent, "Summarizing");
   hooks.setHandoffProgress("summary", "active");
   t.mock.timers.tick(60000);
-  assert.equal(label.textContent, "Summarizing", "A slow local destination must never start the AI label rotation.");
+  assert.equal(label.textContent, "Summarizing", "A slow local destination must never start the AI label lineup.");
   hooks.setHandoffProgress("summary", "active", "Claude", 1000001);
   t.mock.timers.tick(60000);
   assert.equal(label.textContent, "Summarizing", "Large chats keep their dedicated part/combine presentation.");
@@ -1159,14 +1163,14 @@ clockTest("summary label rotation cannot affect local carries or replace real pa
   assert.equal(label.textContent, "Combining summaries", "Real large-chat progress takes priority over activity words.");
 });
 
-clockTest("summary label rotation stops on completion, paste, cancellation and teardown", (t) => {
+clockTest("summary label lineup stops on completion, paste, cancellation and teardown", (t) => {
   for (const end of ["complete", "paste", "cancel", "teardown", "capture"]) {
     const { hooks } = createHandoffCompletionFixture();
     const label = hooks.document.getElementById("context-generator-text-label");
     hooks.setHandoffProgress("summary", "active", "Claude", 20000);
-    t.mock.timers.tick(12000);
+    t.mock.timers.tick(5000);
     t.mock.timers.tick(120);
-    assert.equal(label.textContent, "Polishing");
+    assert.equal(label.textContent, "Summarizing");
     if (end === "complete") hooks.setHandoffProgress("summary", "done");
     else if (end === "paste") hooks.setHandoffProgress("paste", "active");
     else if (end === "capture") hooks.setHandoffProgress("capture", "active");
@@ -1183,8 +1187,8 @@ clockTest("a summary word fading out cannot overwrite a completed or cancelled t
     const { hooks } = createHandoffCompletionFixture();
     const label = hooks.document.getElementById("context-generator-text-label");
     hooks.setHandoffProgress("summary", "active", "Claude", 20000);
-    t.mock.timers.tick(12000);
-    assert.equal(label.textContent, "Summarizing");
+    t.mock.timers.tick(5000);
+    assert.equal(label.textContent, "Thinking");
     assert.match(hooks.document.getElementById("context-generator-text").style.animation, /SummaryWordOut/);
     if (end === "complete") hooks.setHandoffProgress("summary", "done");
     else if (end === "paste") hooks.setHandoffProgress("paste", "active");
@@ -1204,8 +1208,9 @@ clockTest("hidden and reduced-motion summary words change without a fading inter
     if (mode === "hidden") hooks.document.visibilityState = "hidden";
     else hooks.window.matchMedia = () => ({ matches: true });
     hooks.setHandoffProgress("summary", "active", "Claude", 20000);
-    t.mock.timers.tick(12000);
-    assert.equal(hooks.document.getElementById("context-generator-text-label").textContent, "Polishing");
+    assert.equal(hooks.document.getElementById("context-generator-text-label").textContent, "Thinking");
+    t.mock.timers.tick(5000);
+    assert.equal(hooks.document.getElementById("context-generator-text-label").textContent, "Summarizing");
     assert.equal(hooks.document.getElementById("context-generator-text").style.animation, "none");
   }
 });
