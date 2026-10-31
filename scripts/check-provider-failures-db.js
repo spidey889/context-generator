@@ -8,7 +8,7 @@ async function checkProviderFailures(db, sql, migrations) {
   const before = await rows("select (select jsonb_agg(t) from public.transfers t) as transfers,(select jsonb_agg(u) from public.users u) as users");
   await db.exec(sql);
   // This replay boundary predates the million-character admission migration.
-  const historicalSchema = structuredClone(contract.schema);
+  const historicalSchema = require("./diagnostics-history").beforeProviderLogging(contract.schema);
   delete historicalSchema.large_summary_requests;
   historicalSchema.input_chars.max = 350000;
   historicalSchema.model.values = historicalSchema.model.values.filter(model => model !== "nvidia/nemotron-3.5-super-vl:free");

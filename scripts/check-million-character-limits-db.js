@@ -26,7 +26,7 @@ async function checkMillionCharacterLimits(db, sql) {
   equal(await snapshot(), before);
   const definitions = (await rows(`select pg_get_functiondef('public.is_valid_provider_failure(jsonb)'::regprocedure) provider,
     pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) client`))[0];
-  const historicalProviderSchema = structuredClone(provider.schema);
+  const historicalProviderSchema = require("./diagnostics-history").beforeProviderLogging(provider.schema);
   historicalProviderSchema.model.values = historicalProviderSchema.model.values.filter(model => model !== "nvidia/nemotron-3.5-super-vl:free");
   equal(JSON.parse(definitions.provider.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalProviderSchema);
   const historicalAttemptSchema = require("./check-json-checkpoints-db").beforeCheckpoints();

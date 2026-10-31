@@ -460,6 +460,8 @@ async function main() {
         checks += await require("./check-paste-retention-db.js").checkPasteRetention(db, sql);
       } else if (name.endsWith("_rejected_capture_character_count.sql")) {
         checks += await require("./check-rejected-capture-count-db.js").checkRejectedCaptureCount(db, sql);
+      } else if (/_provider_(safe_errors|error_identity|failure_details|large_steps|route_skips)\.sql$/.test(name)) {
+        checks += await require("./check-provider-logging-db.js").checkProviderLogging(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

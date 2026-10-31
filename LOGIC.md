@@ -484,6 +484,8 @@ Before that local fallback, a summary response whose body read rejects with a ne
 
 ### Configured provider order
 
+Provider HTTP failures inspect at most 8 KiB of error JSON for at most 150 ms within the existing attempt deadline. Only allowlisted upstream code/type, a fixed canonical message (capped at 120 characters) and bounded retry-after milliseconds enter server diagnostics; raw/unknown message text is never saved. Error-body cleanup is not awaited. These additive fields need compatible database/Edge validators before backend rollout; local migrations alone do not deploy them.
+
 [Provider fallbacks](docs/provider-fallbacks.md) holds the detailed configuration/retry reference. Current order:
 
 ```text

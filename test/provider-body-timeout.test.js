@@ -262,7 +262,7 @@ for (const mode of ["throws", "rejects", "stalls", "absent"]) clockTest(`provide
   const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
   assert.equal(result.model, "gemini-3.5-flash-lite");
   assert.equal(requests, 2);
-  assert.equal(bodyReads, 0);
+  assert.equal(bodyReads, 1, "The bounded error read may fail without blocking status fallback");
   assert.equal(cancelled, mode !== "absent");
   assert.ok(Date.now() - startedAt < 1000);
 });

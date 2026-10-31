@@ -8,6 +8,7 @@ const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const { getHeader } = require("./request-validation");
 const { readProviderStream } = require("./provider-stream");
 const { createProviderFailureLog } = require("./provider-failure-log");
+const { retryAfterMs, readSafeProviderError } = require("./provider-error-diagnostics");
 const {
   SUMMARY_PROMPT_CACHE_VERSION,
   CONTEXT_CARRY_TITLE,
@@ -718,6 +719,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
       502,
       initialResponse.status
     );
+    Object.assign(error, initialResponse.errorDiagnostics);
     throw error;
   }
 
@@ -1034,7 +1036,9 @@ function getProviderFailureLog(error) {
     provider: error?.provider || null,
     message: getProviderFailureReason(error),
     statusCode: error?.statusCode || null,
-    providerStatus: error?.providerStatus || null
+    providerStatus: error?.providerStatus || null,
+    ...Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms"]
+      .filter(key => error?.[key] !== undefined).map(key => [key, error[key]]))
   };
 }
 
@@ -1207,6 +1211,8 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       const response = await fetch(url, { ...options, signal });
       observed.headers_ms = Math.max(0, Date.now() - attemptStartedAt);
       observed.http_status = response.status;
+      const retryMs = retryAfterMs(response.headers);
+      if (retryMs !== undefined) observed.retry_after_ms = retryMs;
       observed.phase = !response.ok ? "http_error" : context.onDelta && response.headers.get("content-type")?.includes("text/event-stream")
         ? "waiting_answer" : "reading_body";
       checkAttemptDeadline();
@@ -1254,12 +1260,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
         }
       } else {
         observed.phase = "http_error";
-        // Error payloads are unused. Start owned-body cancellation without
-        // waiting for cleanup; a stalled/rejected cancel must not block routing.
-        try {
-          const cancellation = response.body?.cancel?.();
-          cancellation?.catch?.(() => {});
-        } catch { /* Retain the HTTP status even if cleanup fails. */ }
+        Object.assign(observed, await readSafeProviderError(response, Math.max(0, Math.min(150, attemptDeadline - Date.now()))));
       }
       checkAttemptDeadline();
       lastResponse = {
@@ -1267,6 +1268,8 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
         status: response.status,
         headers: response.headers,
         recordFailure,
+        errorDiagnostics: Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms"]
+          .filter(key => observed[key] !== undefined).map(key => [key, observed[key]])),
         async json() {
           if (bodyError) throw bodyError;
           return payload;

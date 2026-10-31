@@ -456,7 +456,7 @@ clockTest("provider exhaustion preserves the exact transcript locally without ex
 
     assert.equal(res.statusCode, 200);
     assert.equal(responseTextReads, 0);
-    assert.equal(responseJsonReads, 0, "private error envelopes must remain unread");
+    assert.equal(responseJsonReads, 2, "Each error envelope is read once for closed safe metadata only");
     assert.equal(responseBodyCancels, 2, "both owned retry response bodies must be cancelled");
     assert.equal(requestTimes.length, 2);
     assert.equal(requestTimes[1] - requestTimes[0], 450, "exhaustion must retain the provider retry delay");

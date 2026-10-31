@@ -23,7 +23,15 @@
     elapsed_ms: integer(0, 360000), budget_ms: integer(1, 90000), first_answer_budget_ms: integer(1, 90000), headers_ms: integer(0, 360000),
     first_answer_ms: integer(0, 360000), answer_chars: integer(), reasoning_chars: integer(), stream_chunks: integer(),
     http_status: integer(100, 599), finish_reason: enumeration(["stop", "length", "other"]),
-    prompt_tokens: integer(), completion_tokens: integer(), reasoning_tokens: integer()
+    prompt_tokens: integer(), completion_tokens: integer(), reasoning_tokens: integer(),
+    upstream_code: enumeration(["400", "401", "402", "403", "404", "408", "413", "422", "429", "500", "502", "503", "504", "529",
+      "INVALID_ARGUMENT", "UNAUTHENTICATED", "PERMISSION_DENIED", "NOT_FOUND", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION", "INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED"]),
+    upstream_type: enumeration(["rate_limit_error", "insufficient_quota", "invalid_api_key", "authentication_error", "insufficient_credits",
+      "permission_error", "invalid_request_error", "context_length_exceeded", "server_error", "overloaded_error", "content_filter", "safety",
+      "RESOURCE_EXHAUSTED", "UNAUTHENTICATED", "PERMISSION_DENIED", "INVALID_ARGUMENT", "INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED"]),
+    upstream_message: enumeration(["Rate limit exceeded.", "Quota exhausted.", "Authentication failed.", "Insufficient credits.",
+      "Request blocked by safety policy.", "Context length exceeded.", "Provider unavailable.", "Provider returned an error."]),
+    retry_after_ms: integer(0, 86400000)
   };
   const required = ["id", "request_id", "occurred_at", "environment", "provider", "model", "failure_reason", "phase", "route_index",
     "request_attempt", "input_chars", "request_bytes", "max_output_tokens", "elapsed_ms", "budget_ms"];
