@@ -769,34 +769,46 @@ function recordDeliveryDiagnostics(attemptId, destinationId, sourceTab, diagnost
 }
 
 function recordPasteCheckpoint(message, sender) {
-  const steps = ["received", "editor_found", "inserted", "verified"];
+  const searching = message.checkpoint === "searching";
+  const steps = ["received", "editor_found", "insert_started", "insert_blocked", "inserted", "verified"];
   const index = steps.indexOf(message.checkpoint);
   const operation = transferOperations.get(message.transferId);
   const target = operation?.pasteCheckpoint;
   const active = activeTransferTelemetry.get(message.transferId);
   if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)
-      || index < 0 || !target || target.tabId !== sender.tab.id || sender.tab.id === operation.sourceTabId
+      || (index < 0 && !searching) || !target || target.tabId !== sender.tab.id || sender.tab.id === operation.sourceTabId
       || target.destinationId !== message.destination || getPlatformFromUrl(sender.url || sender.tab.url) !== message.destination
       || operation.controller.signal.aborted || operation.expiresAt <= Date.now()
       || active?.status !== "started" || active.destinationPlatform !== message.destination
       || activeTransferSourceTabs.get(message.transferId) !== operation.sourceTabId
       || Object.keys(message).some(key => !["type", "transferId", "destination", "checkpoint", "diagnostics"].includes(key))) return false;
   const safe = globalThis.CapTransferDiagnostics?.validate(message.diagnostics);
-  if (!safe || (index === 1 || index === 2) && safe.editor_seen !== true || index === 3 && safe.paste_populated !== true) return false;
-  // Each dispatched paste has four fixed observations. Duplicates and delayed
+  if (!safe || (index >= 1 && index <= 4) && safe.editor_seen !== true || index === 5 && safe.paste_populated !== true
+    || index === 2 && safe.editor_insert_attempted !== true || index === 3 && !safe.insertion_blocked_reason) return false;
+  // Each dispatched paste has bounded semantic observations. Duplicates and delayed
   // earlier milestones cannot overwrite newer progress or flood the outbox.
-  if (target.seen.has(index) || index < target.lastIndex) return false;
-  target.seen.add(index);
-  target.lastIndex = index;
+  if (searching) {
+    const key = JSON.stringify([safe.editor_match_count, safe.editor_ready_count, safe.editor_hidden_count,
+      safe.editor_disabled_count, safe.editor_readonly_count, safe.document_ready_state]);
+    if (target.lastIndex > 0 || safe.editor_seen !== false || !Number.isInteger(safe.editor_match_count)
+      || (target.searchReports || 0) >= 8
+      || Date.now() - (target.lastSearchAt ?? -Infinity) < (key === target.lastSearchKey ? 5000 : 1000)) return false;
+    target.searchReports = (target.searchReports || 0) + 1;
+    target.lastSearchAt = Date.now(); target.lastSearchKey = key;
+  } else {
+    if (target.seen.has(index) || index < target.lastIndex) return false;
+    target.seen.add(index);
+    target.lastIndex = index;
+  }
   const snapshot = { version: 1, diagnostics_revision: 3, summary_chars: target.textChars };
   const keys = ["document_ready_state", "visibility", "editor_seen", "editor_connected", "editor_kind", "editor_text_chars",
     "composer_wait_ms", "paste_retry_limit_ms", "paste_verify_limit_ms", "paste_stability_ms", "paste_attempts", "editor_remounts",
     "insertion_method", "paste_populated", "paste_stable", "draft_present", "user_handled", "page_load_ms", "destination_message_count",
-    "destination_auth_prompt", "paste_ms", "insertion_method", "editor_insert_attempted", "editor_retained", "editor_document_focused",
+    "destination_auth_prompt", "destination_loading", "destination_error_prompt", "destination_challenge_prompt", "paste_ms", "insertion_method", "insertion_blocked_reason", "editor_insert_attempted", "editor_retained", "editor_document_focused",
     "editor_match_count", "editor_match_peak", "editor_unmatched_count", "editor_hidden_count", "editor_aria_hidden_count",
     "editor_modal_count", "editor_owned_count", "editor_disabled_count", "editor_readonly_count", "editor_not_editable_count", "editor_ready_count"];
   for (const key of keys) if (safe[key] !== undefined) snapshot[key] = safe[key];
-  snapshot.last_operation = ["paste_start", "editor_wait", "paste_verify", "paste_complete"][index];
+  snapshot.last_operation = searching ? "editor_wait" : ["paste_start", "editor_wait", "editor_insert", "editor_insert", "paste_verify", "paste_complete"][index];
   target.events.push({ event: snapshot.last_operation,
     at_ms: safe.paste_ms ?? Math.max(0, Date.now() - target.startedAt) });
   snapshot.paste_events = target.events.slice();
@@ -813,7 +825,7 @@ function recordPasteCheckpoint(message, sender) {
 async function recordRecoveryCheckpoint(message, sender) {
   if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)
       || !isUuid(message.transferId)
-      || Object.keys(message).some(key => !["type", "transferId", "destination", "checkpoint", "surface", "method", "stopConfirmed"].includes(key))
+      || Object.keys(message).some(key => !["type", "transferId", "destination", "checkpoint", "surface", "method", "stopConfirmed", "reason", "cause"].includes(key))
       || message.stopConfirmed !== undefined && typeof message.stopConfirmed !== "boolean") return false;
   const event = await enqueueTelemetryWork(async () => {
     await restoreActiveTransferTelemetry();
@@ -828,6 +840,7 @@ async function recordRecoveryCheckpoint(message, sender) {
     if (!side) return null;
     const observation = globalThis.CapTransferDiagnostics.validateRecoveryEvent({ event: message.checkpoint, surface: message.surface, side,
       at_ms: Math.max(0, Math.min(2147483647, Date.now() - Date.parse(active.attemptedAt))),
+      ...(message.reason !== undefined ? { reason: message.reason } : {}), ...(message.cause !== undefined ? { cause: message.cause } : {}),
       ...(message.method !== undefined ? { method: message.method } : {}),
       ...(message.stopConfirmed !== undefined ? { stop_confirmed: message.stopConfirmed } : {}) });
     if (!observation) return null;
@@ -2541,7 +2554,7 @@ async function pasteIntoDestinationWithActivation(
   const pasteDiagnostics = globalThis.CapTransferDiagnostics?.validate(pasteResult?.diagnostics);
   if (pasteDiagnostics) Object.assign(trace.diagnostics ||= { version: 1 }, pasteDiagnostics);
   globalThis.CapTransferDiagnostics?.update(trace?.diagnostics, { message_reply: pasteResult?.ok ? "ack_success" : "ack_failed" });
-  markBackgroundTrace(trace, "paste message done", { tabId, responseTiming: pasteResult?.timing || null });
+  markBackgroundTrace(trace, "paste message done", { tabId, ok: pasteResult?.ok === true, responseTiming: pasteResult?.timing || null });
   return pasteResult;
 }
 
@@ -3093,7 +3106,10 @@ function markBackgroundTrace(trace, label, detail = null) {
     "tab activation settle start": "destination_settle", "tab activation settle done": "destination_settle",
     "paste message start": "message_send", "paste message done": "paste_complete",
     "content script inject attempt": "script_inject", "tab ready/message response": "message_send", "tab ready/message response after inject": "message_send" };
-  const operation = operations[label];
+  const failedReply = label === "paste message done" && detail?.ok === false;
+  // A reply ended the wait, not necessarily the paste. Preserve the failing
+  // destination operation; a sparse negative reply is only a message result.
+  const operation = failedReply ? trace.diagnostics?.failure_site || trace.diagnostics?.last_operation || "message_send" : operations[label];
   if (!operation) return;
   trace.diagnostics ||= { version: 1 };
   globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { last_operation: operation,
@@ -3103,7 +3119,8 @@ function markBackgroundTrace(trace, label, detail = null) {
     ...(label === "content script inject attempt" ? { script_injections: (trace.diagnostics.script_injections || 0) + 1 } : {}),
     ...(label.includes("message response") ? { message_ms: detail?.readyMs, message_attempts: detail?.attempts } : {}),
     ...(label === "tab activation settle start" ? { activation_settle_ms: detail?.settleMs } : {}) });
-  globalThis.CapTransferDiagnostics?.event(trace.diagnostics, operation, mark.totalMs, "delivery_events");
+  globalThis.CapTransferDiagnostics?.event(trace.diagnostics, failedReply ? "failure" : operation, mark.totalMs, "delivery_events",
+    failedReply ? trace.diagnostics.error_code || "paste_failed" : null);
   if (label.endsWith("open start")) trace.diagnosticOpenAt = at;
   if (label.endsWith("open done")) globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { destination_open_ms: Math.round(at - trace.diagnosticOpenAt) });
   if (label.endsWith("activate before paste start") || label === "final tab activate start") trace.diagnosticActivateAt = at;

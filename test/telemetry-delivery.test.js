@@ -263,11 +263,45 @@ test("recovery checkpoints require an owned source or dispatched destination and
   assert.equal(active.status, "started");
 });
 
+test("post-terminal retention reports preserve success and reject blaming the user or an unknown actor", async () => {
+  const background = worker(async () => { throw new Error("offline"); }); await background.settled();
+  await background.ack(event(1, { destinationPlatform: "gemini", lastStage: "paste_started" })); await startOwnedPaste(background);
+  background.evaluate("fixturePasteTrace.operation.tabIds.add(84)");
+  await background.ack(event(1, { destinationPlatform: "gemini", status: "succeeded", lastStage: "completed" }));
+  const sender = { tab: { id: 84, url: "https://gemini.google.com/app" } };
+  for (const cause of ["user", "unknown"]) assert.equal((await recoveryCheckpoint(background, "retention_failed",
+    { surface: "retention", cause, reason: "paste_not_retained" }, sender)).ok, false);
+  assert.equal((await recoveryCheckpoint(background, "retention_user_handled", { surface: "retention", cause: "user" }, sender)).ok, true);
+  await background.settled();
+  const payload = background.shared.local[OUTBOX][0].payload;
+  assert.equal(payload.status, "succeeded"); assert.equal(payload.failure_reason, null);
+  assert.equal(payload.diagnostics.recovery_events[0].event, "retention_user_handled");
+});
+
 function pasteCheckpoint(background, checkpoint, diagnostics = {}, sender = {}, overrides = {}) {
   return new Promise(resolve => background.listeners.message({ type: "RECORD_PASTE_CHECKPOINT", transferId: id(1),
     destination: "gemini", checkpoint, diagnostics: { version: 1, ...diagnostics }, ...overrides },
   { id: "fixture-extension", frameId: 0, tab: { id: 84, url: "https://gemini.google.com/app" }, ...sender }, resolve));
 }
+
+test("composer-search observations persist without a ready editor and reject bursts or late scans", async () => {
+  const background = worker(async () => { throw new Error("offline"); });
+  await background.settled();
+  await background.ack(event(1, { destinationPlatform: "gemini", lastStage: "paste_started" }));
+  const pending = startOwnedPaste(background, { stalled: true });
+  await new Promise(setImmediate);
+  const scan = { editor_seen: false, editor_match_count: 2, editor_ready_count: 0, editor_disabled_count: 2,
+    destination_loading: true, destination_error_prompt: false, destination_challenge_prompt: true };
+  assert.equal((await pasteCheckpoint(background, "searching", scan)).ok, true);
+  assert.equal((await pasteCheckpoint(background, "searching", scan)).ok, false);
+  await background.settled();
+  assert.equal(background.shared.local[OUTBOX][0].payload.diagnostics.editor_disabled_count, 2);
+  assert.equal(background.shared.local[OUTBOX][0].payload.diagnostics.destination_challenge_prompt, true);
+  assert.equal(background.shared.local[OUTBOX][0].payload.diagnostics.last_operation, "editor_wait");
+  assert.equal((await pasteCheckpoint(background, "editor_found", { editor_seen: true })).ok, true);
+  assert.equal((await pasteCheckpoint(background, "searching", scan)).ok, false);
+  await assert.rejects(pending);
+});
 
 function blockStorage(background, area, method) {
   background.evaluate(`globalThis.originalStorageMethod = chrome.storage.${area}.${method};
@@ -989,10 +1023,12 @@ clockTest("destination paste progress survives a lost paste reply and a sparse t
     ["received", { paste_ms: 0 }],
     ["editor_found", { paste_ms: 10, editor_seen: true, editor_kind: "contenteditable", editor_match_count: 3,
       editor_disabled_count: 2, editor_ready_count: 1, editor_document_focused: true }],
+    ["insert_started", { paste_ms: 15, editor_seen: true, editor_insert_attempted: true }],
+    ["insert_blocked", { paste_ms: 16, editor_seen: true, insertion_blocked_reason: "focus_changed" }],
     ["inserted", { paste_ms: 20, editor_seen: true, editor_text_chars: 457957, editor_insert_attempted: true, insertion_method: "insert_text" }]
   ]) assert.equal((await pasteCheckpoint(background, checkpoint, diagnostics)).ok, true);
   await background.settled();
-  assert.deepEqual(delivered.at(-1).diagnostics.paste_events.map(entry => entry.event), ["paste_start", "editor_wait", "paste_verify"]);
+  assert.deepEqual(delivered.at(-1).diagnostics.paste_events.map(entry => entry.event), ["paste_start", "editor_wait", "editor_insert", "editor_insert", "paste_verify"]);
   await assert.rejects(pending, error => error.code === "paste_unconfirmed" && error.diagnosticCode === "message_timeout");
   assert.equal(background.evaluate("fixturePasteTrace.diagnostics.editor_text_chars"), 457957);
   await background.ack(event(1, { destinationPlatform: "gemini", status: "failed", lastStage: "paste_started", failureReason: "paste_failed",
@@ -1007,7 +1043,8 @@ clockTest("destination paste progress survives a lost paste reply and a sparse t
   assert.equal(terminal.diagnostics.editor_ready_count, 1);
   assert.equal(terminal.diagnostics.editor_insert_attempted, true);
   assert.equal(terminal.diagnostics.insertion_method, "insert_text");
-  assert.equal(terminal.diagnostics.paste_events.length, 3);
+  assert.equal(terminal.diagnostics.paste_events.length, 5);
+  assert.equal(terminal.diagnostics.insertion_blocked_reason, "focus_changed");
   assert.equal(terminal.diagnostics.paste_populated, undefined, "insertion is not verified delivery");
   assert.equal((await pasteCheckpoint(background, "verified", { paste_populated: true })).ok, false);
   assert.doesNotMatch(JSON.stringify(delivered), /PRIVATE_CARRY/);

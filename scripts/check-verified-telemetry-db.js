@@ -451,10 +451,27 @@ async function main() {
         checks += await require("./check-large-summary-checkpoints-db.js").checkLargeSummaryCheckpoints(db, sql);
       } else if (name.endsWith("_paste_editor_diagnostics.sql")) {
         checks += await require("./check-paste-editor-diagnostics-db.js").checkPasteEditorDiagnostics(db, sql);
+      } else if (name.endsWith("_paste_insertion_diagnostics.sql")) {
+        checks += await require("./check-paste-diagnostics-db.js").checkPasteDiagnostics(db, sql, ["insertion_blocked_reason"]);
+      } else if (name.endsWith("_paste_page_state.sql")) {
+        checks += await require("./check-paste-diagnostics-db.js").checkPasteDiagnostics(db, sql,
+          ["destination_loading", "destination_error_prompt", "destination_challenge_prompt"]);
+      } else if (name.endsWith("_paste_retention_diagnostics.sql")) {
+        checks += await require("./check-paste-retention-db.js").checkPasteRetention(db, sql);
       } else if (name.endsWith("_rejected_capture_character_count.sql")) {
         checks += await require("./check-rejected-capture-count-db.js").checkRejectedCaptureCount(db, sql);
+      } else if (/_provider_(safe_errors|error_identity|failure_details|large_steps|route_skips)\.sql$/.test(name)) {
+        checks += await require("./check-provider-logging-db.js").checkProviderLogging(db, sql);
+      } else if (name.endsWith("_request_location_diagnostics.sql")) {
+        checks += await require("./check-request-location-db.js").checkRequestLocation(db, sql);
       } else await db.exec(sql);
     }
+    const providerDefinition = (await one("select pg_get_functiondef('public.is_valid_provider_failure(jsonb)'::regprocedure) value")).value;
+    const providerRules = JSON.parse(providerDefinition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]);
+    const expectedProviderRules = structuredClone(require("../supabase/functions/_shared/provider-failure").schema);
+    // The historical migration appended NVIDIA; enum order has no meaning.
+    providerRules.model.values.sort(); expectedProviderRules.model.values.sort();
+    equal(providerRules, expectedProviderRules);
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
     // One default restore at the complete current schema covers file-size
     // reasons and provider evidence together, including the later validators.

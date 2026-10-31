@@ -21,7 +21,7 @@ async function checkTransferFlowDiagnostics(db, sql) {
   const definition = (await rows("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) sql"))[0].sql;
   equal(JSON.parse(definition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), Object.fromEntries(Object.entries(require("./diagnostics-history").withoutPasteEditorFields(contract.schema)).filter(([key]) => key !== "large_summary_requests")));
   equal(JSON.parse(definition.match(/summary_response_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.summaryResponseFailureSchema);
-  equal(JSON.parse(definition.match(/recovery_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.recoveryEventSchema);
+  equal(JSON.parse(definition.match(/recovery_rules constant jsonb := '([^']+)'::jsonb/)[1]), require("./diagnostics-history").beforeRetentionRecovery(contract.recoveryEventSchema));
   checks += await checkDiagnosticsSamples(db, [
     { label: "pre-header failure", value: { version: 1, summary_response_failures: [{ attempt: 1, phase: "request", reason: "fetch_failed", error_type: "TypeError", elapsed_ms: 500 }] }, expected: true },
     { label: "copy shown and copied", value: report([shown, copied]), expected: true },

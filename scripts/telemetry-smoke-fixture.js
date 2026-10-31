@@ -149,7 +149,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled, summaryMod
       assert.equal(columns.length, 18);
       assert.ok(!columns.includes("file_size_failure_reason"));
       assert.ok(row.diagnostics, "Installed extension diagnostics must survive the actual relay, Edge and SQL path.");
-      assert.deepEqual(row.diagnostics, terminal.diagnostics);
+      assert.deepEqual(row.diagnostics, { ...terminal.diagnostics, location: { country: "unknown", region: "unknown", city: "unknown" } });
       assert.equal(row.diagnostics.version, 1);
       assert.equal(row.diagnostics.diagnostics_revision, 3);
       assert.equal(row.diagnostics.paste_populated, true);
@@ -196,7 +196,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled, summaryMod
       assert.equal(row.status, "text_box");
       assert.equal(row.failure_reason, null);
       assert.equal(row.summary_verified, Boolean(terminal.summary_proof));
-      assert.deepEqual(row.diagnostics, latest.diagnostics);
+      assert.deepEqual(row.diagnostics, { ...latest.diagnostics, location: { country: "unknown", region: "unknown", city: "unknown" } });
       for (const side of ["source", "destination"]) assert.ok(row.diagnostics.recovery_events.some(event => event.event === "box_shown" && event.side === side));
       assert.equal(row.diagnostics.error_code, "editor_has_draft");
       assert.equal(row.diagnostics.paste_attempts, 1);
@@ -212,7 +212,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled, summaryMod
       assert.equal(row.status, "failed");
       assert.equal(row.failure_reason, sizeLimit ? "conversation_too_large" : "capture_failed");
       assert.equal(row.summary_verified, false);
-      assert.deepEqual(row.diagnostics, terminal.diagnostics);
+      assert.deepEqual(row.diagnostics, { ...terminal.diagnostics, location: { country: "unknown", region: "unknown", city: "unknown" } });
       assert.equal(row.diagnostics.error_code, sizeLimit ? "conversation_too_large" : "capture_json_failed");
       assert.equal(row.diagnostics.diagnostics_revision, 3);
       assert.ok(row.diagnostics.capture_detail);

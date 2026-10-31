@@ -378,7 +378,8 @@ test("Vercel forwards valid telemetry with server-only Supabase credentials", as
     assert.equal(upstreamRequests[index].url, process.env.SUPABASE_TELEMETRY_FUNCTION_URL);
     assert.equal(upstreamRequests[index].options.headers.apikey, "server-only-key");
     assert.equal(upstreamRequests[index].options.headers["X-Cap-Context-Relay"], process.env.TELEMETRY_RELAY_SECRET);
-    assert.deepEqual(JSON.parse(upstreamRequests[index].options.body), payload);
+    assert.deepEqual(JSON.parse(upstreamRequests[index].options.body), { ...payload,
+      diagnostics: { version: 1, location: { country: "unknown", region: "unknown", city: "unknown" } } });
     assert.equal(edgeCalls.length, index + 1);
     assert.equal(edgeCalls[index].args.p_summary_verified, false);
   }

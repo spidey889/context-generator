@@ -16,7 +16,7 @@ async function checkPasteEditorDiagnostics(db, sql) {
   assert.equal(after.replace(pattern, "RULES"), before.replace(pattern, "RULES"));
   const oldRules = JSON.parse(before.match(pattern)[1]);
   const newRules = JSON.parse(after.match(pattern)[1]);
-  assert.deepEqual(newRules, require("../extension/transfer-diagnostics").schema);
+  assert.deepEqual(newRules, require("./diagnostics-history").beforePasteDiagnosis(require("../extension/transfer-diagnostics").schema));
   const samples = [{ label: "old report", value: { version: 1 }, expected: true }];
   for (const [key, rule] of Object.entries(newRules)) {
     if (key in oldRules) continue;

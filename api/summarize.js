@@ -7,7 +7,8 @@ const transferDiagnostics = require("../extension/transfer-diagnostics");
 const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const { getHeader } = require("./request-validation");
 const { readProviderStream } = require("./provider-stream");
-const { createProviderFailureLog } = require("./provider-failure-log");
+const { createProviderFailureLog, createProviderSkipReporter } = require("./provider-failure-log");
+const { retryAfterMs, readSafeProviderError, safeProviderError, providerRequestId, embeddedProviderError, providerParseError } = require("../lib/provider-error-diagnostics");
 const {
   SUMMARY_PROMPT_CACHE_VERSION,
   CONTEXT_CARRY_TITLE,
@@ -545,6 +546,22 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
   const fallbackMessages = getInitialSummaryMessages(conversation, profile, { messages, platform });
   const geminiMessages = getInitialSummaryMessages(conversation, profile, { messages, platform, plainHeader: true });
   const routes = getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled, largeInput });
+  const recordSkip = createProviderSkipReporter({ onProviderFailure: requestContext.onProviderFailure, inputChars: conversation.length });
+  const inventory = [
+    { provider: SUMMARY_PROVIDERS.openrouter, model: OPENROUTER_MODELS[0].model, disabled: !getEnabledOpenRouterModels().length },
+    { provider: SUMMARY_PROVIDERS.tokenharbor, model: TOKENHARBOR_BACKUP_MODEL, disabled: !tokenharborEnabled },
+    ...(!largeInput ? [{ provider: SUMMARY_PROVIDERS.gemini, model: GEMINI_PRIMARY_MODEL },
+      { provider: SUMMARY_PROVIDERS.mistral, model: MISTRAL_PRIMARY_MODEL, disabled: process.env.MISTRAL_ENABLED === "false" }] : [])
+  ];
+  // Visit unavailable providers only when fallback reaches their place. Keep
+  // the configured route indices and every existing time slice unchanged.
+  const plannedRoutes = inventory.flatMap(item => {
+    const configured = routes.flatMap((route, index) => route.provider.id === item.provider.id ? [{ ...route, index }] : []);
+    return configured.length ? configured : [{ ...item, skipReason: item.disabled ? "disabled" : "missing_key" }];
+  });
+  const skipRemaining = (start, reason) => {
+    for (const route of plannedRoutes.slice(start)) recordSkip(route.provider.id, route.model, route.skipReason || reason, (route.index ?? 0) + 1);
+  };
 
   const modelsTried = [];
   const tokenharborModelsTried = [];
@@ -571,16 +588,20 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
     : PROVIDER_ATTEMPT_TIMEOUT_MS;
   let lastProviderFailure = null;
 
-  for (const [index, route] of routes.entries()) {
+  for (const [plannedIndex, route] of plannedRoutes.entries()) {
     requestContext.signal?.throwIfAborted();
-    if (unavailableProviders.has(route.provider.id)) continue;
+    const index = route.index ?? 0;
+    if (route.skipReason || unavailableProviders.has(route.provider.id)) {
+      recordSkip(route.provider.id, route.model, route.skipReason || "account_unavailable", index + 1);
+      continue;
+    }
     const { provider, model, apiKey } = route;
     const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) break;
+    if (remainingMs <= 0) { skipRemaining(plannedIndex, "route_budget_exhausted"); break; }
     let routeBudgetMs = index === 0 ? PROVIDER_ATTEMPT_TIMEOUT_MS : fallbackBudgetMs;
     if (sharedFreeWindow && ["tokenharbor", "openrouter"].includes(provider.id)) {
       const freeRemainingMs = freeDeadline - Date.now();
-      if (freeRemainingMs <= 0) continue; // Funded fallbacks still have their own time.
+      if (freeRemainingMs <= 0) { recordSkip(provider.id, model, "route_budget_exhausted", index + 1); continue; }
       const remainingOpenRouterRoutes = routes.slice(index).filter(item => item.provider.id === "openrouter" && !unavailableProviders.has(item.provider.id)).length;
       if (provider.id === "tokenharbor") {
         tokenharborDeadline ??= Math.min(freeDeadline, Date.now() + (bothGatewaysConfigured
@@ -592,7 +613,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
       }
     }
     const requestBudgetMs = Math.min(routeBudgetMs, remainingMs);
-    if (requestBudgetMs <= 0) continue;
+    if (requestBudgetMs <= 0) { recordSkip(provider.id, model, "route_budget_exhausted", index + 1); continue; }
     const startedAt = Date.now();
     modelsTried.push(model);
     if (provider.id === "tokenharbor") tokenharborModelsTried.push(model);
@@ -635,7 +656,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
         unavailableProviders.add(provider.id);
       }
       console.error(`[Context Generator] ${model} failed:`, getProviderFailureLog(lastProviderFailure));
-      if (error?.code === "funded_budget_unavailable") break;
+      if (error?.code === "funded_budget_unavailable") { skipRemaining(plannedIndex, "funded_budget_refused"); break; }
     }
   }
   return createEmergencyDirectCarryResult({
@@ -718,18 +739,20 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
       502,
       initialResponse.status
     );
+    Object.assign(error, initialResponse.errorDiagnostics);
     throw error;
   }
 
   const data = await readResponseJson(initialResponse, provider);
   // Providers can report failure after sending HTTP 200 stream headers.
   // Never accept partial/error text as a successful summary in that case.
-  if (data?.error || data?.choices?.[0]?.error
-      || ["error", "content_filter"].includes(data?.choices?.[0]?.finish_reason)) {
+  const embeddedError = embeddedProviderError(data, provider.id);
+  if (embeddedError) {
     initialResponse.recordFailure?.("provider_generation_failed");
-    const reportedStatus = data?.error?.code ?? data?.choices?.[0]?.error?.code;
-    throw createProviderError(provider, `${provider.label} generation failed`, 502,
-      Number.isInteger(reportedStatus) ? reportedStatus : null, "provider_generation_failed");
+    const reportedStatus = Number(embeddedError.code);
+    throw Object.assign(createProviderError(provider, `${provider.label} generation failed`, 502,
+      Number.isInteger(reportedStatus) && reportedStatus >= 100 && reportedStatus <= 599 ? reportedStatus : null, "provider_generation_failed"),
+    initialResponse.errorDiagnostics, safeProviderError(embeddedError));
   }
   const finishReason = getProviderFinishReason(provider, data);
   const initialUsage = normalizeProviderUsage(provider, data);
@@ -737,9 +760,15 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
 
   const contentRejection = getSummaryContentRejectionReason(rawSummary, profile);
   if (contentRejection) {
-    initialResponse.recordFailure?.(rawSummary.trim() ? "provider_output_rejected" : "provider_empty");
+    const content = data?.choices?.[0]?.message?.content;
+    const unfinishedThinking = ["openrouter", "tokenharbor"].includes(provider.id) && typeof content === "string"
+      && /<think>/i.test(content.replace(/<think>[\s\S]*?<\/think>/gi, ""));
+    const detail = unfinishedThinking ? "unfinished_thinking" : !rawSummary.trim() ? "empty_answer"
+      : { "substantively empty output": "empty_content", "refusal-like output": "refusal_only", "self-reasoning response": "thinking_instead_of_summary" }[contentRejection];
+    initialResponse.recordFailure?.(rawSummary.trim() ? "provider_output_rejected" : "provider_empty", detail);
     const reason = rawSummary.trim() ? contentRejection : "an empty summary";
-    throw createProviderError(provider, `${provider.label} returned ${reason}`, 502, null, rawSummary.trim() ? "provider_output_rejected" : "provider_empty");
+    throw Object.assign(createProviderError(provider, `${provider.label} returned ${reason}`, 502, null,
+      rawSummary.trim() ? "provider_output_rejected" : "provider_empty"), { failure_detail: detail });
   }
 
   const validation = validateContextCarrySummary(rawSummary, profile);
@@ -762,7 +791,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   };
   const summaryWordCount = countWords(summary);
 
-  return {
+  const result = {
     summary,
     provider: provider.id,
     model,
@@ -777,6 +806,15 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
     validationReason: validation.ok ? null : validation.reason,
     usage: initialUsage
   };
+  // Large requests apply their existing stricter gate while the original
+  // attempt recorder still owns its headers, timing and one-record guard.
+  const rejection = requestContext?.rejectResult?.(result);
+  if (rejection) {
+    initialResponse.recordFailure?.("provider_output_rejected", rejection);
+    throw Object.assign(createProviderError(provider, "Incomplete large summary result", 502, null, "provider_output_rejected"),
+      { failure_detail: rejection });
+  }
+  return result;
 }
 
 function requestProviderSummary(provider, apiKey, messages, profile, model, options = {}) {
@@ -1034,20 +1072,21 @@ function getProviderFailureLog(error) {
     provider: error?.provider || null,
     message: getProviderFailureReason(error),
     statusCode: error?.statusCode || null,
-    providerStatus: error?.providerStatus || null
+    providerStatus: error?.providerStatus || null,
+    ...Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id", "failure_detail"]
+      .filter(key => error?.[key] !== undefined).map(key => [key, error[key]]))
   };
 }
 
 async function readResponseJson(response, provider) {
   try {
-    return await response.json();
-  } catch {
-    response.recordFailure?.("provider_invalid_json");
-    throw createProviderError(
-      provider,
-      `${provider.label} returned invalid JSON`,
-      502, null, "provider_invalid_json"
-    );
+    const data = await response.json();
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw providerParseError("response_shape_invalid");
+    return data;
+  } catch (error) {
+    response.recordFailure?.("provider_invalid_json", error.providerFailureDetail || "json_parse_failed");
+    throw Object.assign(createProviderError(provider, `${provider.label} returned invalid JSON`, 502, null, "provider_invalid_json"),
+      { failure_detail: error.providerFailureDetail || "json_parse_failed" });
   }
 }
 
@@ -1167,12 +1206,14 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       ...(firstAnswerDeadline !== null ? { first_answer_budget_ms: Math.max(1, firstAnswerDeadline - attemptStartedAt) } : {}),
       ...(context.keySlot ? { key_slot: context.keySlot } : {}) };
     let reported = false, payload;
-    const recordFailure = failureReason => {
+    const recordFailure = (failureReason, detail) => {
       if (reported || context.signal?.aborted || !context.onProviderFailure) return;
       reported = true;
+      if (detail) observed.failure_detail = detail;
       const usage = normalizeProviderUsage({ id: context.provider }, payload);
       const finishReason = getProviderFinishReason({ id: context.provider }, payload || {});
       if (payload) {
+        Object.assign(observed, safeProviderError(embeddedProviderError(payload, context.provider)));
         observed.answer_chars ??= getProviderSummaryText({ id: context.provider }, payload).length;
         const reasoning = payload.choices?.[0]?.message?.reasoning_content ?? payload.choices?.[0]?.message?.reasoning;
         if (typeof reasoning === "string") observed.reasoning_chars ??= reasoning.length;
@@ -1207,6 +1248,10 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       const response = await fetch(url, { ...options, signal });
       observed.headers_ms = Math.max(0, Date.now() - attemptStartedAt);
       observed.http_status = response.status;
+      const upstreamId = providerRequestId(response.headers);
+      if (upstreamId) observed.upstream_request_id = upstreamId;
+      const retryMs = retryAfterMs(response.headers);
+      if (retryMs !== undefined) observed.retry_after_ms = retryMs;
       observed.phase = !response.ok ? "http_error" : context.onDelta && response.headers.get("content-type")?.includes("text/event-stream")
         ? "waiting_answer" : "reading_body";
       checkAttemptDeadline();
@@ -1244,29 +1289,31 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
             observed.phase = "reading_body";
             const bytes = await response.arrayBuffer();
             observed.phase = "parsing_response";
-            payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+            let decoded;
+            try { decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw providerParseError("utf8_decode_failed"); }
+            try { payload = JSON.parse(decoded); } catch { throw providerParseError("json_parse_failed"); }
           }
           observed.phase = "validating_output";
         } catch (error) {
+          observed.failure_detail = error.providerFailureDetail || (observed.phase === "reading_body" ? "response_read_failed" : "stream_incomplete");
           if (signal.aborted || error?.name === "AbortError" || isRetryableProviderNetworkError(error)) throw error;
           observed.phase = "parsing_response";
           bodyError = error;
         }
       } else {
         observed.phase = "http_error";
-        // Error payloads are unused. Start owned-body cancellation without
-        // waiting for cleanup; a stalled/rejected cancel must not block routing.
-        try {
-          const cancellation = response.body?.cancel?.();
-          cancellation?.catch?.(() => {});
-        } catch { /* Retain the HTTP status even if cleanup fails. */ }
+        Object.assign(observed, await readSafeProviderError(response, Math.max(0, Math.min(150, attemptDeadline - Date.now()))));
       }
       checkAttemptDeadline();
+      const embedded = embeddedProviderError(payload, context.provider);
+      if (embedded && !payload.error) payload = { ...payload, error: embedded };
       lastResponse = {
         ok: response.ok,
         status: response.status,
         headers: response.headers,
         recordFailure,
+        errorDiagnostics: Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id"]
+          .filter(key => observed[key] !== undefined).map(key => [key, observed[key]])),
         async json() {
           if (bodyError) throw bodyError;
           return payload;
@@ -1277,7 +1324,8 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       const retryableStatus = isRetryableProviderResponse(response, payload);
       if (!response.ok) recordFailure("provider_http_error");
       else if (payload?.error || payload?.choices?.[0]?.error
-        || ["error", "content_filter"].includes(payload?.choices?.[0]?.finish_reason)) recordFailure("provider_generation_failed");
+        || ["error", "content_filter"].includes(payload?.choices?.[0]?.finish_reason)) recordFailure("provider_generation_failed",
+          ["safety", "content_filter"].includes(embedded?.type) ? "safety_filter" : "upstream_error");
       if (!retryableStatus || attempt === maxAttempts) {
         return lastResponse;
       }

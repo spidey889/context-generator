@@ -200,7 +200,8 @@ test("transient OpenRouter failures retry within the same route; useful length-l
   const retryScheduled = new Promise(resolve => { signalRetryScheduled = resolve; });
   global.setTimeout = (callback, ms, ...args) => {
     const timer = scheduleTimeout(callback, ms, ...args);
-    if (ms < 90000) signalRetryScheduled(ms);
+    // The bounded error-body reader also schedules its own shorter deadline.
+    if (ms === 450) signalRetryScheduled(ms);
     return timer;
   };
   let attempts = 0;

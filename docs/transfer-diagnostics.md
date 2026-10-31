@@ -19,6 +19,20 @@ Unused picker captures and numeric-only size probes never upload these records. 
 
 ## Editor discovery and paste progress
 
+Pending composer searches send up to eight throttled count snapshots before any
+ready editor is found. Insertion entry and blocked-write reasons are independent
+checkpoints; an insertion-returned report is still not proof of retained text.
+Destination checkpoints also carry native loading/error/challenge booleans,
+alongside the existing sign-in clue, without page content.
+
+Delayed retention outcomes append to the bounded recovery trail. Trusted user
+edits/Send are fine; unexplained loss is unknown. Only observed editor remounts
+or insertion exceptions are attributed to page/extension failure. These late
+observations preserve the original transfer outcome and counters. A failed
+destination reply keeps its failing operation and never emits `paste_complete`.
+Deploy the three additive paste-diagnostics migrations and compatible Edge/relay
+validators before distributing these client scripts.
+
 All five destinations report the final editor scan as counts, alongside the peak
 number of selector matches seen during that tab's paste attempt:
 

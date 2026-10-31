@@ -1,10 +1,32 @@
 // Historical migration checks must exclude fields introduced by later migrations.
 // Keep the old-schema comparisons complete rather than filtering to whatever SQL contains.
-function withoutPasteEditorFields(schema) {
+function beforePasteDiagnosis(schema) {
   const result = structuredClone(schema);
+  delete result.insertion_blocked_reason;
+  for (const key of ["destination_loading", "destination_error_prompt", "destination_challenge_prompt"]) delete result[key];
+  return result;
+}
+function withoutPasteEditorFields(schema) {
+  const result = beforePasteDiagnosis(schema);
   for (const key of ["editor_match_count", "editor_match_peak", "editor_unmatched_count", "editor_hidden_count", "editor_aria_hidden_count",
     "editor_modal_count", "editor_owned_count", "editor_disabled_count", "editor_readonly_count", "editor_not_editable_count", "editor_ready_count",
     "editor_retained", "editor_insert_attempted", "editor_document_focused"]) delete result[key];
   return result;
 }
-module.exports = { withoutPasteEditorFields };
+function beforeRetentionRecovery(schema) {
+  const result = structuredClone(schema);
+  result.event.values = result.event.values.filter(value => !value.startsWith("retention_"));
+  result.surface.values = result.surface.values.filter(value => value !== "retention");
+  delete result.reason; delete result.cause;
+  return result;
+}
+function beforeProviderLogging(schema) {
+  const result = structuredClone(schema);
+  for (const key of ["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id", "failure_detail",
+    "summary_phase", "part_index", "part_total", "skip_reason"]) delete result[key];
+  result.failure_reason.values = result.failure_reason.values.filter(value => value !== "provider_skipped");
+  result.phase.values = result.phase.values.filter(value => value !== "route_selection");
+  for (const key of ["request_attempt", "max_output_tokens", "budget_ms"]) result[key].min = 1;
+  return result;
+}
+module.exports = { withoutPasteEditorFields, beforePasteDiagnosis, beforeRetentionRecovery, beforeProviderLogging };

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-summary-label-lineup-v239";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-diagnostics-merge-v240";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1087,6 +1087,7 @@
       recordTransferFailureDiagnostics,
       recordJsonCaptureFailure,
       observeSourcePageState,
+      observeDestinationPageState,
       reportCaptureProgress,
       resetRunningFlag,
       markCaptureDone,
@@ -1660,13 +1661,14 @@
     }, Math.max(0, deadlineAt - Date.now()));
   }
 
-  function recordRecoveryCheckpoint(recovery, checkpoint, surface, method = null, stopConfirmed = undefined) {
+  function recordRecoveryCheckpoint(recovery, checkpoint, surface, method = null, stopConfirmed = undefined, details = {}) {
     if (!instanceActive || !recovery?.transferId || !getPlatform(recovery.destination)) return;
     // Recovery can happen after the transfer outcome is final. Send only fixed
     // observations under that original identity; clipboard contents stay local.
     try {
       Promise.resolve(extensionRuntime.sendMessage({ type: "RECORD_RECOVERY_CHECKPOINT",
         transferId: recovery.transferId, destination: recovery.destination, checkpoint, surface,
+        ...details,
         ...(method ? { method } : {}), ...(typeof stopConfirmed === "boolean" ? { stopConfirmed } : {}) })).catch(() => {});
     } catch {}
   }
@@ -3268,14 +3270,26 @@
       document_ready_state: document.readyState,
       visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown" };
     const sentCheckpoints = new Set();
+    let searchReports = 0, lastSearchAt = -Infinity, lastSearchKey = "";
     const reportCheckpoint = checkpoint => {
-      if (!transferId || !instanceActive || sentCheckpoints.has(checkpoint)) return;
+      if (!transferId || !instanceActive || (checkpoint !== "searching" && sentCheckpoints.has(checkpoint))) return;
       globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt });
-      const snapshot = globalThis.CapTransferDiagnostics?.snapshot(diagnostics);
+      let snapshot = globalThis.CapTransferDiagnostics?.snapshot(diagnostics);
+      if (!snapshot) return;
+      if (checkpoint === "searching") {
+        const key = JSON.stringify([snapshot.editor_match_count, snapshot.editor_ready_count, snapshot.editor_hidden_count,
+          snapshot.editor_disabled_count, snapshot.editor_readonly_count, snapshot.document_ready_state]);
+        // Existing discovery drives reporting: no extra scan, timer or await.
+        if (searchReports >= 8 || Date.now() - lastSearchAt < (key === lastSearchKey ? 5000 : 1000)) return;
+        searchReports++; lastSearchAt = Date.now(); lastSearchKey = key;
+      }
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { ...observeDestinationPageState(), document_ready_state: document.readyState,
+        visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown" });
+      snapshot = globalThis.CapTransferDiagnostics?.snapshot(diagnostics);
       if (!snapshot) return;
       sentCheckpoints.add(checkpoint);
       // A blocked insert or lost final reply must not erase earlier progress.
-      // Send only four metadata snapshots; optional telemetry never gates paste.
+      // Milestones and bounded search snapshots never gate paste.
       try {
         Promise.resolve(extensionRuntime.sendMessage({ type: "RECORD_PASTE_CHECKPOINT", transferId,
           destination: destinationId, checkpoint, diagnostics: snapshot })).catch(() => {});
@@ -3351,7 +3365,7 @@
       }
       return timing;
     } finally {
-      globalThis.CapTransferDiagnostics?.update(diagnostics, { destination_auth_prompt: observeDestinationAuthPrompt(),
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { ...observeDestinationPageState(),
         document_ready_state: document.readyState });
       if (!retainedGuard) guard.dispose();
     }
@@ -3362,6 +3376,7 @@
     let verified = false;
     let writing = false;
     let userHandled = false;
+    let retentionReported = false, pageRemounted = false;
     let cancelled = false;
     let rejectActiveCheck = null;
     const eventTypes = ["beforeinput", "input", "keydown", "click", "submit"];
@@ -3388,12 +3403,20 @@
       }
       if (!handled) return;
       userHandled = true;
+      guard.reportRetention("retention_user_handled", null, "user");
       if (pendingPasteRecheck?.guard === guard) cancelPendingPasteRecheck();
     };
     const guard = {
       ...routeGuard,
       recovery: { transferId, destination: destination.id },
       get userHandled() { return userHandled; },
+      get pageRemounted() { return pageRemounted || Boolean(verified && editor && !editor.isConnected); },
+      reportRetention(event, reason = null, cause = null) {
+        if (retentionReported) return;
+        retentionReported = true;
+        recordRecoveryCheckpoint(this.recovery, event, "retention", null, undefined,
+          { ...(reason ? { reason } : {}), ...(cause ? { cause } : {}) });
+      },
       check() {
         if (cancelled || !instanceActive) throw createTransferCancelledError();
         // Awaited source checks and synchronous native focus/input handlers can
@@ -3430,6 +3453,7 @@
         if (pendingPasteRecheck?.guard === guard) cancelPendingPasteRecheck();
       },
       observe(input) {
+        if (verified && editor && editor !== input && !editor.isConnected) pageRemounted = true;
         editor = input;
         if (editorContainsText(input, text)) verified = true;
       },
@@ -3495,6 +3519,7 @@
       if (destinationMessageCount > 0) throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
       const input = findReadyPlatformInput(destination, diagnostics);
       observe({ editor_seen: sawInput || Boolean(input) });
+      if (!input) guard?.reportCheckpoint?.("searching");
       if (input) {
         composerWaitMs ??= Date.now() - startedAt;
         guard?.pin();
@@ -3515,6 +3540,7 @@
           observe({ draft_present: false, last_operation: "editor_insert", ...(alreadyPasted ? { insertion_method: "already_present" } : {}) }, "editor_insert");
           if (!alreadyPasted) {
             observe({ editor_insert_attempted: true });
+            guard?.reportCheckpoint?.("insert_started");
             guard.insert(input);
           }
 
@@ -3661,7 +3687,10 @@
     const pending = { timer: null, expiryTimer: null, onVisible: null, deadlineAt, guard };
     pendingPasteRecheck = pending;
     pending.expiryTimer = setTimeout(() => {
-      if (pendingPasteRecheck === pending) cancelPendingPasteRecheck();
+      if (pendingPasteRecheck === pending) {
+        guard?.reportRetention("retention_unknown", "transfer_timeout", "unknown");
+        cancelPendingPasteRecheck();
+      }
     }, Math.max(0, (deadlineAt || Date.now() + RUNNING_AUTO_RESET_MS) - Date.now()));
     pending.onVisible = () => {
       if (deadlineAt && Date.now() >= deadlineAt) {
@@ -3687,6 +3716,7 @@
   async function recheckPastedContext(text, destination, pending) {
     let needsCopy = true;
     let draftPresent = false;
+    let reason = "editor_missing", cause = "unknown", recovered = false, writeEntered = false;
     const recoveryDeadlineAt = Math.min(pending.deadlineAt || Infinity,
       Date.now() + (destination.pasteRetryTimeoutMs || PASTE_RETRY_TIMEOUT_MS));
     const checkRecovery = async (beforeWrite = false) => {
@@ -3713,6 +3743,7 @@
         if (!await checkRecovery()) return;
         if (Date.now() >= recoveryDeadlineAt) break;
         const input = findReadyPlatformInput(destination);
+        if (pending.guard?.pageRemounted) { cause = "page"; reason = "editor_detached"; }
         if (input) {
           pending.guard.observe(input);
           if (editorContainsText(input, text)) {
@@ -3720,27 +3751,40 @@
             return;
           }
           // Preserve drafts restored on focus or typed while discovery waits.
-          if (getElementText(input).trim()) { draftPresent = true; return; }
+          if (getElementText(input).trim()) { draftPresent = true; reason = "editor_has_draft"; return; }
           if (!await checkRecovery(true)) return;
+          reason = "paste_not_retained";
+          writeEntered = true;
           if (pending.guard.insert(input) !== false) {
+            writeEntered = false;
             const verifyMs = Math.min(destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS,
               Math.max(0, recoveryDeadlineAt - Date.now()));
             if (await waitForEditorText(input, text, verifyMs)) {
               if (!await checkRecovery()) return;
               await delay(Math.min(PASTE_STABILITY_MS, Math.max(0, recoveryDeadlineAt - Date.now())));
               if (!await checkRecovery()) return;
-              if (input.isConnected && editorContainsText(input, text)) needsCopy = false;
+              if (input.isConnected && editorContainsText(input, text)) { needsCopy = false; recovered = true; }
             }
             return;
           }
+          writeEntered = false;
         }
         await delay(Math.min(PASTE_RETRY_INTERVAL_MS, Math.max(0, recoveryDeadlineAt - Date.now())));
       }
     } catch (error) {
-      if (["transfer_timeout", "conversation_changed", "user_cancelled"].includes(error?.code)) needsCopy = false;
+      reason = globalThis.CapTransferDiagnostics?.errorCode(error, "unknown_error") || "unknown_error";
+      if (["transfer_timeout", "conversation_changed", "user_cancelled"].includes(reason)) {
+        needsCopy = false;
+        pending.guard?.reportRetention("retention_unknown", reason, "unknown");
+      } else if (writeEntered) { cause = "extension"; reason = "insertion_exception"; }
       console.debug("[Context Generator] Delayed paste check failed:", error?.message || error);
     } finally {
       if (pendingPasteRecheck === pending) {
+        // Silent text loss has no reliable actor. Only a witnessed native
+        // remount or our write exception is classified as a retention failure.
+        pending.guard?.reportRetention(needsCopy ? (cause === "unknown" ? "retention_unknown" : "retention_failed")
+          : recovered ? "retention_recovered" : "retention_ok", needsCopy ? reason : null,
+          needsCopy ? cause : recovered && cause !== "unknown" ? cause : null);
         cancelPendingPasteRecheck();
         if (needsCopy) showFallbackModal(text, destination.name, false, false, draftPresent,
           { destinationCopy: true, recovery: pending.guard.recovery });
@@ -3776,9 +3820,22 @@
     return score;
   }
 
+  function insertionBlocked(guard, reason) {
+    globalThis.CapTransferDiagnostics?.update(guard?.diagnostics, { insertion_blocked_reason: reason });
+    guard?.reportCheckpoint?.("insert_blocked");
+    return false;
+  }
+
+  function canWriteEditor(element, guard) {
+    if (!element.isConnected) return insertionBlocked(guard, "detached");
+    if (!isEditorReady(element)) return insertionBlocked(guard, "not_ready");
+    if (!element.contains(document.activeElement)) return insertionBlocked(guard, "focus_changed");
+    return true;
+  }
+
   function setEditorText(element, text, destination = currentPlatform, guard = null) {
     const observe = changes => globalThis.CapTransferDiagnostics?.update(guard?.diagnostics, changes);
-    const remount = () => observe({ editor_connected: false, editor_remounts: (guard?.diagnostics?.editor_remounts || 0) + 1, editor_last_error_code: "editor_detached" });
+    const remount = () => { observe({ editor_connected: false, editor_remounts: (guard?.diagnostics?.editor_remounts || 0) + 1, editor_last_error_code: "editor_detached" }); insertionBlocked(guard, "detached"); };
     guard?.check();
     element.click();
     guard?.check();
@@ -3788,11 +3845,12 @@
     // Claude's startup composer can hydrate/remount on click or focus. Never
     // insert into the detached placeholder; pasteWithRetry finds its successor.
     if (!element.isConnected) { remount(); return false; }
-    if (!isEditorReady(element)) return false;
+    if (!isEditorReady(element)) return insertionBlocked(guard, "not_ready");
     // Focusing a native composer can restore its saved draft synchronously.
     if (getElementText(element).trim()) {
       if (editorContainsText(element, text)) return true;
       observe({ draft_present: true });
+      insertionBlocked(guard, "draft_present");
       throw createDiagnosticError(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`, "editor_has_draft");
     }
 
@@ -3823,10 +3881,11 @@
       return true;
     }
 
-    const canWrite = () => element.isConnected && isEditorReady(element) && element.contains(document.activeElement);
+    const canWrite = () => canWriteEditor(element, guard);
     const prepareRetry = () => {
       guard?.check();
-      if (!element.isConnected || !isEditorReady(element)) return false;
+      if (!element.isConnected) return insertionBlocked(guard, "detached");
+      if (!isEditorReady(element)) return insertionBlocked(guard, "not_ready");
       element.focus();
       guard?.check();
       if (!canWrite()) return false;
@@ -3835,6 +3894,7 @@
       if (getElementText(element).trim()) {
         if (editorContainsText(element, text)) return false;
         observe({ draft_present: true });
+        insertionBlocked(guard, "draft_present");
         throw createDiagnosticError(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`, "editor_has_draft");
       }
       selectEditorContents(element);
@@ -3877,10 +3937,11 @@
   }
 
   function setChatGptEditorText(element, text, guard = null) {
-    const canWrite = () => element.isConnected && isEditorReady(element) && element.contains(document.activeElement);
+    const canWrite = () => canWriteEditor(element, guard);
     const prepareRetry = () => {
       guard?.check();
-      if (!element.isConnected || !isEditorReady(element)) return false;
+      if (!element.isConnected) return insertionBlocked(guard, "detached");
+      if (!isEditorReady(element)) return insertionBlocked(guard, "not_ready");
       element.focus();
       guard?.check();
       if (!canWrite()) return false;
@@ -3890,6 +3951,7 @@
       if (getElementText(element).trim()) {
         if (editorContainsText(element, text)) return false;
         globalThis.CapTransferDiagnostics?.update(guard?.diagnostics, { draft_present: true });
+        insertionBlocked(guard, "draft_present");
         throw createDiagnosticError("ChatGPT editor already contains text. Use an empty chat or copy the context manually.", "editor_has_draft");
       }
       selectEditorContents(element);
@@ -8318,28 +8380,31 @@
     state.controller.abort();
   }
 
-  function observeSourcePageState() {
+  function observeSourcePageState() { return observePageState("source"); }
+  function observeDestinationPageState() { return observePageState("destination"); }
+
+  function observePageState(prefix) {
     try {
       const excluded = [...currentPlatform.conversationSelectors, ...GENERIC_CONVERSATION_SELECTORS,
         "pre", "code", "textarea", "input", "[contenteditable]"].join(",");
       const challenge = 'iframe[src^="https://challenges.cloudflare.com/"], iframe[title*="reCAPTCHA"]';
       const prompts = "h1, h2, [role='alert'], [role='alertdialog'], [role='status']";
-      const state = { source_loading: document.readyState === "loading" || document.readyState === "interactive",
-        source_error_prompt: false, source_challenge_prompt: false };
+      const state = { [`${prefix}_loading`]: document.readyState === "loading" || document.readyState === "interactive",
+        [`${prefix}_error_prompt`]: false, [`${prefix}_challenge_prompt`]: false };
       const auth = typeof observeDestinationAuthPrompt === "function" ? observeDestinationAuthPrompt() : undefined;
-      if (typeof auth === "boolean") state.source_auth_prompt = auth;
+      if (typeof auth === "boolean") state[`${prefix}_auth_prompt`] = auth;
       // Classify native UI only. Exclude both descendants and containers of chat,
       // code and editors before reading a label; keep only boolean observations.
       for (const node of document.querySelectorAll(`${prompts}, [role='progressbar'], [aria-busy='true'], ${challenge}`)) {
         if (!isVisible(node) || isContextGeneratorNode(node) || node.closest(excluded)
           || node.closest("[hidden], [aria-hidden='true']") || node.querySelector(excluded)) continue;
-        if (node.matches("[role='progressbar'], [aria-busy='true']")) state.source_loading = true;
-        if (node.matches(challenge)) state.source_challenge_prompt = true;
+        if (node.matches("[role='progressbar'], [aria-busy='true']")) state[`${prefix}_loading`] = true;
+        if (node.matches(challenge)) state[`${prefix}_challenge_prompt`] = true;
         if (!node.matches(prompts)) continue;
         const label = (node.getAttribute("aria-label") || node.innerText || node.textContent || "").trim().slice(0, 300);
-        if (/\b(?:something went wrong|an (?:unexpected )?error (?:has )?occurred|unable to load|failed to load|could(?:n['’]t| not) load|temporarily unavailable|service unavailable)\b/i.test(label)) state.source_error_prompt = true;
-        if (/\b(?:verif(?:y|ying) (?:that )?(?:you['’]re|you are) (?:a )?human|making sure (?:you['’]re|you are) human|checking your browser|checking (?:if )?(?:you['’]re|you are) human|complete the (?:security check|captcha)|security verification)\b/i.test(label)) state.source_challenge_prompt = true;
-        if (/^(?:loading|please wait)(?:\b|[.…])/i.test(label)) state.source_loading = true;
+        if (/\b(?:something went wrong|an (?:unexpected )?error (?:has )?occurred|unable to load|failed to load|could(?:n['’]t| not) load|temporarily unavailable|service unavailable)\b/i.test(label)) state[`${prefix}_error_prompt`] = true;
+        if (/\b(?:verif(?:y|ying) (?:that )?(?:you['’]re|you are) (?:a )?human|making sure (?:you['’]re|you are) human|checking your browser|checking (?:if )?(?:you['’]re|you are) human|complete the (?:security check|captcha)|security verification)\b/i.test(label)) state[`${prefix}_challenge_prompt`] = true;
+        if (/^(?:loading|please wait)(?:\b|[.…])/i.test(label)) state[`${prefix}_loading`] = true;
       }
       return state;
     } catch { return {}; } // Optional diagnosis must never affect capture/recovery.

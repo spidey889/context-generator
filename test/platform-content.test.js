@@ -535,6 +535,9 @@ test("source failure observations distinguish native loading, sign-in, error and
   assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeSourcePageState())), {
     source_loading: true, source_auth_prompt: true, source_error_prompt: true, source_challenge_prompt: true
   });
+  assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeDestinationPageState())), {
+    destination_loading: true, destination_auth_prompt: true, destination_error_prompt: true, destination_challenge_prompt: true
+  });
   nodes.pop();
   assert.equal(hooks.observeSourcePageState().source_loading, false);
   hooks.document.readyState = "interactive";
@@ -560,6 +563,9 @@ test("source failure flags never read chat, code, hidden prompts or containers h
   }
   assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeSourcePageState())), {
     source_loading: false, source_auth_prompt: false, source_error_prompt: false, source_challenge_prompt: false
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeDestinationPageState())), {
+    destination_loading: false, destination_auth_prompt: false, destination_error_prompt: false, destination_challenge_prompt: false
   });
 });
 
@@ -2627,8 +2633,9 @@ clockTest("paste checkpoints expose large insertion progress without waiting for
     }
   });
   await hooks.pasteIntoPlatform(text, "gemini", "checkpoint-transfer", Date.now() + 60000);
-  assert.deepEqual(checkpoints.map(({ message }) => message.checkpoint), ["received", "editor_found", "inserted", "verified"]);
-  assert.deepEqual(checkpoints.map(({ editorChars }) => editorChars), [0, 0, text.length, text.length]);
+  assert.deepEqual(checkpoints.map(({ message }) => message.checkpoint), ["received", "editor_found", "insert_started", "inserted", "verified"]);
+  assert.deepEqual(checkpoints.map(({ editorChars }) => editorChars), [0, 0, 0, text.length, text.length]);
+  assert.equal(checkpoints[2].message.diagnostics.editor_insert_attempted, true);
   assert.equal(checkpoints.at(-1).message.diagnostics.paste_populated, true);
   assert.equal(checkpoints.at(-1).message.diagnostics.editor_text_chars, text.length);
   assert.equal(editor.value, text);
@@ -4541,6 +4548,33 @@ clockTest("waiting paste recovery preserves drafts and stops for user actions, n
     assert.equal(editor.clicks, stop === "replace" ? 2 : 1, `${stop}: old recovery must not insert`);
     hooks.teardownContextGeneratorInstance();
   }
+});
+
+for (const [destination, hostname] of Object.entries({ claude: "claude.ai", gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }))
+for (const scenario of ["retained", "user", "unknown", "remounted", "exception"])
+clockTest(`${destination} retention diagnosis distinguishes ${scenario} without blaming user edits`, { tickMs: 100, maxElapsedMs: 45000 }, async () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const elements = [editor], messages = [];
+  const hooks = loadPlatformContent(elements, hostname, { visibilityState: "hidden", runtimeSendMessage: async message => {
+    messages.push(message); return { ok: true };
+  } });
+  const modal = new FakeElement(); hooks.registerElementId("context-generator-fallback-modal", modal);
+  await hooks.pasteIntoPlatform("PRIVATE complete carry", destination, "retention-diagnosis", Date.now() + 60000);
+  if (scenario === "user") hooks.dispatchDocumentEvent("beforeinput", { target: editor, isTrusted: true, inputType: "deleteContentBackward" });
+  if (scenario !== "retained") editor.value = "";
+  if (scenario === "remounted") { editor.isConnected = false; elements.length = 0; }
+  if (scenario === "unknown") editor.setAttribute("aria-disabled", "true");
+  if (scenario === "exception") editor.click = () => { throw new Error("PRIVATE native failure"); };
+  hooks.setVisibility("visible");
+  await new Promise(resolve => setTimeout(resolve, 30000));
+  const retention = messages.filter(message => message.type === "RECORD_RECOVERY_CHECKPOINT" && message.surface === "retention");
+  const expected = { retained: "retention_ok", user: "retention_user_handled", unknown: "retention_unknown", remounted: "retention_failed", exception: "retention_failed" };
+  assert.equal(retention.length, 1); assert.equal(retention[0].checkpoint, expected[scenario]);
+  if (scenario === "user") { assert.equal(retention[0].cause, "user"); assert.notEqual(modal.style.display, "flex"); assert.equal(editor.value, ""); }
+  if (scenario === "remounted") assert.equal(retention[0].cause, "page");
+  if (scenario === "exception") assert.equal(retention[0].cause, "extension");
+  assert.doesNotMatch(JSON.stringify(retention), /PRIVATE|complete carry/);
+  hooks.teardownContextGeneratorInstance();
 });
 
 clockTest("delayed paste recovery bounds a permanent editor gap and retains the complete carry", async () => {

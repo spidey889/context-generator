@@ -5,6 +5,8 @@ const {
 } = require("./request-security");
 const { validateTelemetryRequest } = require("./telemetry-validation");
 const { consumeTelemetryRateLimit } = require("./telemetry-rate-limit");
+const { getHeader } = require("./request-validation");
+const { fromHeaders } = require("../supabase/functions/_shared/request-location");
 const RELAY_TIMEOUT_MS = 5000;
 
 async function handler(req, res) {
@@ -59,7 +61,8 @@ async function handler(req, res) {
         apikey: upstreamKey,
         "X-Cap-Context-Relay": relaySecret
       },
-      body: JSON.stringify(validation.payload)
+      body: JSON.stringify({ ...validation.payload, diagnostics: { version: 1, ...validation.payload.diagnostics,
+        location: fromHeaders(name => getHeader(req, name)) } })
     }), new Promise((_, reject) => {
       timer = setTimeout(() => { controller.abort(); reject(new Error("telemetry_timeout")); }, RELAY_TIMEOUT_MS);
     })]);
