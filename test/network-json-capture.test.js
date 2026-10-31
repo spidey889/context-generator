@@ -10,6 +10,30 @@ const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtu
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
 const scripts = new Map(["transfer-diagnostics.js", "json-capture-metrics.js", ...files].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
+
+for (const platform of ["grok", "deepseek"]) test(`${platform}: incomplete history retains its metadata reason through MAIN and the bridge`, async () => {
+  const h = setup(platform);
+  (platform === "grok" ? h.fixture.nodes : h.fixture.data).has_more = "PRIVATE";
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.diagnostics.capture_detail, "incomplete_history");
+    assert.equal(error.jsonCapture.incomplete_reason, "metadata_has_more");
+    assert.doesNotMatch(JSON.stringify(error.jsonCapture), /PRIVATE/);
+    return true;
+  });
+});
+
+test("Gemini incomplete RPC frames retain distinct guard reasons", async () => {
+  const h = setup("gemini");
+  for (const [body, reason] of [["PRIVATE", "gemini_rpc_response_invalid"], [")]}'1\n", "gemini_frame_pairs_incomplete"],
+    [")]}'1\n[]\n", "gemini_frame_length_mismatch"]]) {
+    assert.throws(() => h.api.geminiPage(body), error => {
+      assert.equal(error.captureDetail, "incomplete_history");
+      assert.equal(error.jsonIncompleteReason, reason);
+      return true;
+    });
+  }
+});
 for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: independent count returns only numeric size and turn metadata from a new native read`, async () => {
   const h = setup(platform); await h.observe();
   const capture = await h.window.__capCaptureNetworkJson();

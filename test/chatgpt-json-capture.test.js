@@ -259,6 +259,27 @@ test("ChatGPT unexpected serializer errors retain their step and class without p
   assert.equal(h.navigationListeners(), 0);
 });
 
+test("ChatGPT incomplete history identifies the rejected guard and metadata flag", async () => {
+  for (const [reason, mutate] of [
+    ["conversation_mismatch", data => { data.conversation_id = "PRIVATE"; data.id = "PRIVATE"; }],
+    ["conversation_tree_missing", data => { delete data.mapping; }],
+    ["completeness_metadata_invalid", data => { data.pagination = []; }],
+    ["metadata_has_more", data => { data.has_more = true; }],
+    ["metadata_is_complete", data => { data.is_complete = false; }]
+  ]) {
+    const h = setup(fixture(), 200, { beforeMessage(reply) {
+      if (reply.type === "response" && reply.data) mutate(reply.data);
+    } });
+    await discover(h);
+    await assert.rejects(h.window.__capCaptureChatGptJson(), error => {
+      assert.equal(error.diagnostics.capture_detail, "incomplete_history");
+      assert.equal(error.jsonCapture.incomplete_reason, reason);
+      assert.doesNotMatch(JSON.stringify(error.jsonCapture), /PRIVATE/);
+      return true;
+    });
+  }
+});
+
 test("ChatGPT bridge exceptions retain hook stage instead of being mislabeled as serialization failures", async () => {
   const h = setup();
   h.window.postMessage = () => { throw Object.assign(new Error("PRIVATE chat https://PRIVATE filename.csv"), { name: "SecurityError" }); };

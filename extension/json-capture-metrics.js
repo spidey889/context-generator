@@ -37,13 +37,14 @@
       if (data.failure_check && !recoveredFileFailure) return;
       // A skipped file keeps its first closed cause separately. A later fatal
       // guard must own failure_* so its stage, size and type remain consistent.
-      if (recoveredFileFailure) for (const key of Object.keys(data)) if (key.startsWith("failure_")) delete data[key];
+      if (recoveredFileFailure) for (const key of Object.keys(data)) if (key.startsWith("failure_") || key === "incomplete_reason") delete data[key];
       recoveredFileFailure = false;
       set({ ...details, failure_check: check, failure_stage: stage, failure_value_source: source,
         failure_value: value, failure_limit: limit, http_status: status });
     };
     const recoverFile = (error, requestStage = "attachment_body") => {
       if (!data.failure_check) fail(error?.captureDetail || "attachment_failed", requestStage);
+      if (data.failure_check === "incomplete_history") set({ incomplete_reason: error?.jsonIncompleteReason });
       set({ skipped_file_check: data.skipped_file_check || data.failure_check, outcome: "partial" });
       add("files_skipped");
       recoveredFileFailure = true;
@@ -106,6 +107,8 @@
         fail(detail || "unknown", failedStage);
         // Do not derive categories from exception prose or fetch/parser snippets.
         if (!data.failure_check) fail("unknown", failedStage);
+        // Fixed guard labels only; never copy the exception message into telemetry.
+        if (data.failure_check === "incomplete_history") set({ incomplete_reason: error.jsonIncompleteReason });
         exception(error);
         set({ outcome: detail === "conversation_changed" || detail === "cancelled" ? "cancelled" : "failed" });
       }

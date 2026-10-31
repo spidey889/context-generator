@@ -12,8 +12,8 @@
   // Keep the MAIN download gate and serializer aligned for parameterized MIME labels.
   const isPlainTextPaste = file => file?.is_big_paste === true && typeof file.mime_type === "string"
     && file.mime_type.split(";", 1)[0].trim().toLowerCase() === "text/plain";
-  const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status) => Object.assign(new Error(message), {
-    captureFailureReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
+  const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status, incompleteReason) => Object.assign(new Error(message), {
+    captureFailureReason, jsonIncompleteReason: incompleteReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
       : detail === "conversation_changed" ? "conversation_changed" : captureFailureReason === "unavailable" ? "capture_json_unavailable" : "capture_json_failed",
     diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" && detail !== "attachment_size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
       ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
@@ -28,24 +28,24 @@
     return { text: "", messageTurnCount: messages.length, estimatedCharacterCount };
   }
   function serialize(data, chat, pastedTexts = {}, sourceTreeCounts, metrics, measureOnly = false) {
-    const blocked = (reason, detail = "incomplete_history") => captureError(`ChatGPT JSON capture blocked: ${reason}`, "incomplete", detail);
+    const blocked = (reason, detail = "incomplete_history", incompleteReason) => captureError(`ChatGPT JSON capture blocked: ${reason}`, "incomplete", detail, "serialize", undefined, incompleteReason);
     const excludedContentTypes = new Set();
     const skippedFiles = new Map();
     let pastedAttachmentIndex = 0;
     let captureWarning;
-    if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
+    if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.", undefined, "conversation_mismatch");
     const assertComplete = (scope, label) => {
       if (scope == null) return;
-      if (typeof scope !== "object" || Array.isArray(scope)) throw blocked(`${label} metadata is invalid.`);
+      if (typeof scope !== "object" || Array.isArray(scope)) throw blocked(`${label} metadata is invalid.`, undefined, "completeness_metadata_invalid");
       for (const key of ["has_previous_page", "has_next_page", "has_previous", "has_next", "has_more", "has_more_messages", "has_missing_messages", "has_missing_nodes", "is_partial", "is_incomplete", "is_truncated", "partial", "incomplete", "truncated", "missing_message_count", "missing_node_count", "missing_messages", "missing_nodes", "missing_message_ids", "missing_node_ids", "previous_cursor", "next_cursor", "previous_page", "next_page", "context_truncation_continuation"]) {
         const value = scope[key];
-        if (value != null && value !== false && value !== 0 && value !== "" && !(Array.isArray(value) && value.length === 0)) throw blocked(`${label}.${key} indicates incomplete history.`);
+        if (value != null && value !== false && value !== 0 && value !== "" && !(Array.isArray(value) && value.length === 0)) throw blocked(`${label}.${key} indicates incomplete history.`, undefined, `metadata_${key}`);
       }
       for (const key of ["is_complete", "complete"]) {
-        if (scope[key] != null && scope[key] !== true) throw blocked(`${label}.${key} does not confirm complete content.`);
+        if (scope[key] != null && scope[key] !== true) throw blocked(`${label}.${key} does not confirm complete content.`, undefined, `metadata_${key}`);
       }
     };
-    if (!data.mapping || typeof data.mapping !== "object" || Array.isArray(data.mapping)) throw blocked("The full conversation tree is missing; recent-message pages are not accepted.");
+    if (!data.mapping || typeof data.mapping !== "object" || Array.isArray(data.mapping)) throw blocked("The full conversation tree is missing; recent-message pages are not accepted.", undefined, "conversation_tree_missing");
     let nodeCount = Object.keys(data.mapping).length;
     let messageCount = Object.values(data.mapping).filter(node => node?.message).length;
     if (sourceTreeCounts != null) {

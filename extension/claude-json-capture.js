@@ -1,8 +1,8 @@
 (() => {
   const channel = "cap-context-claude-json-v2";
   const changedError = message => Object.assign(new Error(message), { diagnosticCode: "conversation_changed", diagnostics: { version: 1, capture_detail: "conversation_changed", failure_site: "capture_history" } });
-  const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status) => Object.assign(new Error(message), {
-    captureFailureReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
+  const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status, incompleteReason) => Object.assign(new Error(message), {
+    captureFailureReason, jsonIncompleteReason: incompleteReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
       : detail === "conversation_changed" ? "conversation_changed" : captureFailureReason === "unavailable" ? "capture_json_unavailable" : "capture_json_failed",
     diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
       ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
@@ -25,29 +25,29 @@
   function serialize(data, chat, metrics, measureOnly = false) {
     metrics?.set({ files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
     // Report structural metadata only, never message text, file names, or tool payloads.
-    const unsupported = (reason, detail = "incomplete_history") => captureError(`This conversation has incomplete or unsupported JSON content: ${reason}`, "incomplete", detail);
+    const unsupported = (reason, detail = "incomplete_history", incompleteReason) => captureError(`This conversation has incomplete or unsupported JSON content: ${reason}`, "incomplete", detail, "serialize", undefined, incompleteReason);
     const excludedContentTypes = new Set();
     const skippedFiles = new Map();
     let pastedAttachmentIndex = 0;
     const assertComplete = (value, label) => {
       if (value == null) return;
-      if (typeof value !== "object" || Array.isArray(value)) throw unsupported(`${label} completeness metadata is invalid.`);
+      if (typeof value !== "object" || Array.isArray(value)) throw unsupported(`${label} completeness metadata is invalid.`, undefined, "completeness_metadata_invalid");
       // Inspect structural metadata only; never search tool payloads or text.
       for (const field of ["truncated", "is_truncated", "partial", "is_partial", "incomplete", "is_incomplete", "has_more", "has_more_messages", "has_previous_page", "has_next_page", "has_missing_messages", "missing_message_count", "cut_off"]) {
-        if (value[field] != null && value[field] !== false && value[field] !== 0) throw unsupported(`${label}.${field} indicates incomplete content.`);
+        if (value[field] != null && value[field] !== false && value[field] !== 0) throw unsupported(`${label}.${field} indicates incomplete content.`, undefined, `metadata_${field}`);
       }
       for (const field of ["complete", "is_complete"]) {
-        if (value[field] != null && value[field] !== true) throw unsupported(`${label}.${field} does not confirm complete content.`);
+        if (value[field] != null && value[field] !== true) throw unsupported(`${label}.${field} does not confirm complete content.`, undefined, `metadata_${field}`);
       }
       for (const field of ["next_cursor", "previous_cursor", "next_page", "previous_page"]) {
-        if (value[field] != null && value[field] !== "" && value[field] !== false) throw unsupported(`${label}.${field} indicates another history page.`);
+        if (value[field] != null && value[field] !== "" && value[field] !== false) throw unsupported(`${label}.${field} indicates another history page.`, undefined, `metadata_${field}`);
       }
       for (const field of ["missing_messages", "missing_message_ids", "missing_message_uuids"]) {
-        if (value[field] != null && value[field] !== false && value[field] !== 0 && !(Array.isArray(value[field]) && value[field].length === 0)) throw unsupported(`${label}.${field} indicates missing history.`);
+        if (value[field] != null && value[field] !== false && value[field] !== 0 && !(Array.isArray(value[field]) && value[field].length === 0)) throw unsupported(`${label}.${field} indicates missing history.`, undefined, `metadata_${field}`);
       }
     };
-    if (data?.uuid !== chat) throw unsupported("The response belongs to a different conversation.");
-    if (!Array.isArray(data.chat_messages)) throw unsupported("The chat_messages array is missing or invalid.");
+    if (data?.uuid !== chat) throw unsupported("The response belongs to a different conversation.", undefined, "conversation_mismatch");
+    if (!Array.isArray(data.chat_messages)) throw unsupported("The chat_messages array is missing or invalid.", undefined, "messages_missing");
     for (const [value, label] of [[data, "conversation"], [data.page_info, "page_info"], [data.pagination, "pagination"]]) {
       assertComplete(value, label);
       for (const field of ["total_messages", "total_message_count"]) {
@@ -70,7 +70,7 @@
     while (id) {
       if (duplicateIds.has(id)) { metrics?.fail("duplicate_id", "serialize"); throw unsupported("The active branch contains duplicate message IDs.", "invalid_branch"); }
       const message = messages.get(id);
-      if (!message) throw unsupported(branch.length ? "A parent message is missing from the active branch (possibly an unrecognized root marker)." : "The active branch's last message is missing from the response.");
+      if (!message) throw unsupported(branch.length ? "A parent message is missing from the active branch (possibly an unrecognized root marker)." : "The active branch's last message is missing from the response.", undefined, branch.length ? "branch_parent_missing" : "branch_leaf_missing");
       if (seen.has(id)) throw unsupported("The active branch's parent links form a cycle.", "branch_cycle");
       if (!Object.hasOwn(message, "parent_message_uuid")) throw unsupported("A message in the active branch has no parent_message_uuid field.", "parent_missing");
       seen.add(id);
@@ -204,7 +204,7 @@
       if (!parts.length) return [];
       return [{ role: message.sender === "human" ? "user" : "assistant", text: parts.join("\n\n") }];
     });
-    if (!hasText) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts.", "incomplete");
+    if (!hasText) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts.", "incomplete", undefined, undefined, undefined, "no_usable_text");
     const text = `Claude conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     metrics?.set({ selected_turns: turns.length });
     if (metrics ? !metrics.transcript(text) : text.length > 4000000 || new TextEncoder().encode(text).length > 16000000) {

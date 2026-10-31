@@ -671,6 +671,27 @@ test("JSON attempt observations survive source-to-destination handoff and one re
     [["prefetch", "failed", 100], ["retry", "succeeded", 200]]);
 });
 
+test("a prefetched JSON failure retains its page flags from failure time through successful retry", async () => {
+  const { context, calls } = harness("deepseek", { mode: "success" });
+  const key = captureKeyFor("deepseek"), capture = context.window[key];
+  let state = { source_loading: true, source_auth_prompt: true, source_error_prompt: false, source_challenge_prompt: true };
+  context.observeSourcePageState = () => ({ ...state });
+  context.window[key] = async () => {
+    if (!calls.json) { calls.json++; throw transientError(); }
+    return capture();
+  };
+  context.startPickerJsonCapture();
+  await context.pickerJsonCapture.promise;
+  const failedState = state;
+  state = { source_loading: false, source_auth_prompt: false, source_error_prompt: true, source_challenge_prompt: false };
+  await context.start("claude");
+  const attempts = calls.flows[0].trace.diagnostics.json_attempts;
+  for (const [key, value] of Object.entries(failedState)) assert.equal(attempts[0][key], value);
+  assert.equal(attempts[0].mode, "prefetch");
+  assert.equal(attempts[1].outcome, "succeeded");
+  assert.equal(attempts[1].source_loading, undefined, "Successful retry must not inherit failed-read flags.");
+});
+
 test("size failures stop all five platforms without partial DOM transfer, including active replies and cached errors", async () => {
   const cases = [
     ["deepseek", true, transientError("size_limit", "size_limit")],
@@ -1333,6 +1354,52 @@ test("rough progress reaches the owning DOM handoff before the final count and n
   assert.equal(calls.errors.length, 0);
 });
 
+test("JSON milestones are reported while the read is pending, with bounded repeats and quiet unused prefetch", async () => {
+  for (const prefetched of [false, true]) {
+    const { context, calls } = harness("deepseek", { mode: "success" });
+    const snapshots = [];
+    context.startTransferTelemetry = trace => { trace.telemetryStarted = true; trace.telemetryLastStage = "capture_started"; };
+    context.sendTransferTelemetrySnapshot = trace => snapshots.push(JSON.parse(JSON.stringify(trace.diagnostics)));
+    let finish, progress, began;
+    const started = new Promise(resolve => { began = resolve; });
+    context.window.__capCaptureNetworkJson = (_path, _omit, onProgress) => {
+      calls.json++;
+      progress = onProgress;
+      onProgress({ outcome: "started", step: "request", step_stage: "history", history_request_sent: true });
+      onProgress({ outcome: "started", step: "read", step_stage: "history", history_request_sent: true });
+      began();
+      return new Promise(resolve => { finish = resolve; });
+    };
+    if (prefetched) {
+      context.startPickerJsonCapture();
+      await started;
+      assert.equal(snapshots.length, 0, "An unused picker read must not send telemetry.");
+    }
+    const running = context.start("claude");
+    await started;
+    for (let i = 0; i < 50 && !snapshots.some(value => value.json_attempts?.some(attempt => attempt.step === "read")); i++) await Promise.resolve();
+    assert.ok(snapshots.some(value => value.json_attempts?.some(attempt => attempt.step === "read")));
+    const atRead = snapshots.at(-1).json_attempts[0];
+    assert.equal(atRead.outcome, "started", "Checkpoint must be sent before the native read settles.");
+    assert.equal(atRead.history_request_sent, true);
+    progress({ outcome: "started", step: "request", step_stage: "attachment_body" });
+    progress({ outcome: "started", step: "read", step_stage: "attachment_body" });
+    const count = snapshots.length;
+    for (let i = 0; i < 50; i++) {
+      progress({ outcome: "started", step: "request", step_stage: "attachment_body" });
+      progress({ outcome: "started", step: "read", step_stage: "attachment_body" });
+    }
+    assert.equal(snapshots.length, count, "Repeated file milestones must not produce a telemetry burst.");
+    finish({ text: "JSON transcript", messageTurnCount: 2, jsonCapture: { outcome: "succeeded", step: "complete", step_stage: "serialize", history_checked: true } });
+    await running;
+    const trace = calls.flows[0].trace;
+    const beforeLate = snapshots.length;
+    progress({ outcome: "started", step: "parse", step_stage: "history" });
+    assert.equal(snapshots.length, beforeLate, "Late progress cannot replace the completed read.");
+    assert.equal(trace.diagnostics.json_attempts[0].outcome, "succeeded");
+  }
+});
+
 test("a failed JSON read is queued before retry can replace its diagnosis",async()=>{
   const {context,calls}=harness("deepseek");const snapshots=[];
   context.startTransferTelemetry=trace=>{trace.telemetryStarted=true;trace.telemetryLastStage="capture_started";};
@@ -1341,7 +1408,7 @@ test("a failed JSON read is queued before retry can replace its diagnosis",async
     calls.json++;
     if(calls.json===1)throw Object.assign(transientError(),{jsonCapture:{outcome:"failed",step:"route",step_stage:"history",hook_ready:true,route_found:false,
       route_reason:"no_matching_endpoint",failure_check:"routing_unavailable"}});
-    assert.equal(snapshots.find(d=>d.json_attempts?.length).json_attempts[0].failure_check,"routing_unavailable");
+    assert.equal(snapshots.find(d=>d.json_attempts?.some(attempt=>attempt.outcome==="failed")).json_attempts[0].failure_check,"routing_unavailable");
     return{text:"JSON transcript",messageTurnCount:2,jsonCapture:{outcome:"succeeded",step:"complete",history_checked:true}};
   };
   await context.start("claude");assert.equal(calls.json,2);assert.equal(calls.dom,0);

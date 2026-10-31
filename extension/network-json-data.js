@@ -1,22 +1,26 @@
 (() => {
   class CaptureError extends Error {
-    constructor(reason, captureFailureReason = "incomplete", captureDetail = "incomplete_history", jsonFailureCheck) {
+    constructor(reason, captureFailureReason = "incomplete", captureDetail = "incomplete_history", jsonFailureCheck, incompleteReason) {
       super(reason);
       this.captureFailureReason = reason === "size" ? "size_limit" : captureFailureReason;
       this.captureDetail = reason === "size" ? "size_limit" : captureFailureReason === "unsupported" ? "unsupported_content" : captureDetail;
       this.jsonFailureCheck = jsonFailureCheck;
+      this.jsonIncompleteReason = incompleteReason;
     }
   }
   const fail = (reason, captureFailureReason, detail, check) => { throw new CaptureError(reason, captureFailureReason, detail, check); };
+  const incomplete = (reason, check) => { throw new CaptureError(reason, undefined, undefined, undefined, check); };
   const complete = value => {
     if (!value || typeof value !== "object") return;
     for (const key of ["has_more", "has_next_page", "has_previous_page", "is_partial", "is_incomplete", "is_truncated", "partial", "truncated", "incomplete", "missing_messages", "next_cursor", "previous_cursor", "hasMore", "hasNextPage", "hasPreviousPage", "isPartial", "isIncomplete", "isTruncated", "missingMessages", "nextCursor", "previousCursor"]) {
       const flag = value[key];
-      if (flag != null && flag !== false && flag !== 0 && flag !== "" && !(Array.isArray(flag) && !flag.length)) fail("Incomplete history was returned.");
+      if (flag != null && flag !== false && flag !== 0 && flag !== "" && !(Array.isArray(flag) && !flag.length)) incomplete("Incomplete history was returned.", `metadata_${key}`);
     }
     // A textual false carries the same explicit warning as the boolean value.
-    if ([value.is_complete, value.complete, value.isComplete].some(flag => flag === false
-      || (typeof flag === "string" && flag.trim().toLowerCase() === "false"))) fail("Incomplete history was returned.");
+    for (const key of ["is_complete", "complete", "isComplete"]) {
+      const flag = value[key];
+      if (flag === false || (typeof flag === "string" && flag.trim().toLowerCase() === "false")) incomplete("Incomplete history was returned.", `metadata_${key}`);
+    }
   };
   const transcript = (name, turns, excludedContentTypes = new Set(), metrics) => {
     if (!turns.length) fail("No usable user or assistant text was found.", undefined, "missing_text");
@@ -28,7 +32,7 @@
   const turn = (role, parts) => parts.filter(text => typeof text === "string" && text.trim()).length
     ? [{ role: role === "User" ? "user" : "assistant", text: parts.filter(text => typeof text === "string" && text.trim()).join("\n\n") }] : [];
   const chain = (items, leaf, idKey, parentKey, { externalRoot = false, selectedOnly = false } = {}) => {
-    if (!Array.isArray(items) || !items.length) fail("The conversation history is missing.");
+    if (!Array.isArray(items) || !items.length) incomplete("The conversation history is missing.", "history_missing");
     const mapping = new Map();
     const duplicateIds = new Set();
     for (const item of items) {
@@ -92,27 +96,27 @@
     return branch.reverse();
   };
   const geminiPage = body => {
-    if (typeof body !== "string" || !body.startsWith(")]}'") || !body.endsWith("\n")) fail("Invalid or truncated Gemini RPC response.");
+    if (typeof body !== "string" || !body.startsWith(")]}'") || !body.endsWith("\n")) incomplete("Invalid or truncated Gemini RPC response.", "gemini_rpc_response_invalid");
     const lines = body.slice(4).split("\n").filter(line => line.length);
-    if (!lines.length || lines.length % 2) fail("A Gemini RPC frame is incomplete.");
+    if (!lines.length || lines.length % 2) incomplete("A Gemini RPC frame is incomplete.", "gemini_frame_pairs_incomplete");
     const rows = [];
     for (let i = 0; i < lines.length; i += 2) {
       // Native batchexecute lengths include the two terminating newlines and
       // count JavaScript characters, not UTF-8 bytes (verified with Unicode).
-      if (!/^\d+$/.test(lines[i]) || Number(lines[i]) !== lines[i + 1].length + 2) fail("A Gemini RPC frame is incomplete.");
+      if (!/^\d+$/.test(lines[i]) || Number(lines[i]) !== lines[i + 1].length + 2) incomplete("A Gemini RPC frame is incomplete.", "gemini_frame_length_mismatch");
       const frame = JSON.parse(lines[i + 1]);
-      if (!Array.isArray(frame)) fail("Invalid Gemini RPC frame.");
+      if (!Array.isArray(frame)) incomplete("Invalid Gemini RPC frame.", "gemini_frame_invalid");
       rows.push(...frame);
     }
     const responses = rows.filter(row => row?.[0] === "wrb.fr" && row[1] === "hNvQHb");
-    if (responses.length !== 1 || typeof responses[0][2] !== "string" || !rows.some(row => row?.[0] === "e")) fail("The Gemini history response is incomplete or failed.");
+    if (responses.length !== 1 || typeof responses[0][2] !== "string" || !rows.some(row => row?.[0] === "e")) incomplete("The Gemini history response is incomplete or failed.", "gemini_history_response_invalid");
     const page = JSON.parse(responses[0][2]);
-    if (!Array.isArray(page?.[0]) || (page[1] != null && (typeof page[1] !== "string" || !page[1]))) fail("Invalid Gemini history page.");
+    if (!Array.isArray(page?.[0]) || (page[1] != null && (typeof page[1] !== "string" || !page[1]))) incomplete("Invalid Gemini history page.", "gemini_history_page_invalid");
     return { turns: page[0], cursor: page[1] ?? null };
   };
   const gemini = (pages, chat, metrics, measureOnly = false) => {
     metrics?.set({ files_supported: 0, files_ignored: 0 });
-    if (!Array.isArray(pages) || !pages.length || pages.at(-1).cursor !== null) fail("Gemini still has previous history pages.");
+    if (!Array.isArray(pages) || !pages.length || pages.at(-1).cursor !== null) incomplete("Gemini still has previous history pages.", "gemini_history_pages_remaining");
     const turns = [], seen = new Set();
     const excludedContentTypes = new Set();
     let expected = null, selectedParentCandidate = null, hasText = false;
@@ -121,7 +125,7 @@
       const id = item[0][1];
       if (seen.size && id !== expected) fail("A Gemini history turn is missing or out of order.", undefined, "invalid_branch");
       seen.add(id);
-      if (item[1] !== null && (item[1]?.[0] !== `c_${chat}` || typeof item[1]?.[1] !== "string")) fail("Gemini returned an invalid parent turn.");
+      if (item[1] !== null && (item[1]?.[0] !== `c_${chat}` || typeof item[1]?.[1] !== "string")) incomplete("Gemini returned an invalid parent turn.", "gemini_parent_turn_invalid");
       const user = item[2]?.[0]?.[0];
       if (typeof user !== "string") fail("A Gemini user text field is missing or malformed.", undefined, "text_invalid");
       const userParts = [user];
@@ -156,11 +160,11 @@
       if (seen.size === 1 && (assistant == null || (Array.isArray(assistant?.[0]) && !assistant[0].length))) {
         expected = item[1]?.[1] ?? null;
         selectedParentCandidate = item[1]?.[2] ?? null;
-        if (selectedParentCandidate !== null && (typeof selectedParentCandidate !== "string" || !selectedParentCandidate)) fail("Gemini returned an invalid parent response.");
+        if (selectedParentCandidate !== null && (typeof selectedParentCandidate !== "string" || !selectedParentCandidate)) incomplete("Gemini returned an invalid parent response.", "gemini_parent_response_invalid");
         turns.unshift(...turn("User", userParts));
         continue;
       }
-      if (!Array.isArray(assistant?.[0]) || !assistant[0].length) fail("A Gemini response is missing or unfinished.");
+      if (!Array.isArray(assistant?.[0]) || !assistant[0].length) incomplete("A Gemini response is missing or unfinished.", "gemini_response_missing");
       // hNvQHb often omits assistant[3]. The next chronological turn's parent
       // triple identifies the older candidate actually continued, even across
       // pages. For the newest reply, native candidate order supplies the current
@@ -168,10 +172,10 @@
       const selected = selectedParentCandidate ?? (typeof assistant[3] === "string" ? assistant[3] : assistant[0][0]?.[0]);
       const matches = assistant[0].filter(candidate => candidate?.[0] === selected);
       const candidate = matches[0];
-      if (typeof selected !== "string" || !selected || matches.length !== 1 || !Array.isArray(candidate[1])) fail("The selected Gemini response is missing.");
+      if (typeof selected !== "string" || !selected || matches.length !== 1 || !Array.isArray(candidate[1])) incomplete("The selected Gemini response is missing.", "gemini_selected_response_missing");
       expected = item[1]?.[1] ?? null;
       selectedParentCandidate = item[1]?.[2] ?? null;
-      if (selectedParentCandidate !== null && (typeof selectedParentCandidate !== "string" || !selectedParentCandidate)) fail("Gemini returned an invalid parent response.");
+      if (selectedParentCandidate !== null && (typeof selectedParentCandidate !== "string" || !selectedParentCandidate)) incomplete("Gemini returned an invalid parent response.", "gemini_parent_response_invalid");
       if (candidate[1].some(part => part != null && typeof part !== "string")) excludedContentTypes.add("other");
       // Only the selected response's own text; render blocks duplicate that
       // text and can contain search/tool payloads, so never walk them recursively.
@@ -184,8 +188,8 @@
   };
   const grokBranch = (data, selected) => {
     complete(data);
-    if (!Array.isArray(data?.responseNodes) || !Array.isArray(data.inflightResponses)) fail("Grok history is missing.");
-    if ([data.total_count, data.totalCount, data.totalResponses].some(count => count != null && (!Number.isSafeInteger(count) || count > data.responseNodes.length))) fail("Grok history has missing responses.");
+    if (!Array.isArray(data?.responseNodes) || !Array.isArray(data.inflightResponses)) incomplete("Grok history is missing.", "grok_history_missing");
+    if ([data.total_count, data.totalCount, data.totalResponses].some(count => count != null && (!Number.isSafeInteger(count) || count > data.responseNodes.length))) incomplete("Grok history has missing responses.", "grok_response_count_mismatch");
     const parents = new Set(data.responseNodes.map(node => node.parentResponseId));
     const leaves = data.responseNodes.filter(node => !parents.has(node.responseId));
     const leaf = selected || (leaves.length === 1 ? leaves[0].responseId : null);
@@ -195,7 +199,7 @@
   const grok = (nodes, responses, selected, metrics, measureOnly = false) => {
     metrics?.set({ files_supported: 0, files_ignored: 0 });
     const branch = grokBranch(nodes, selected);
-    if (!Array.isArray(responses)) fail("Grok message bodies are missing.");
+    if (!Array.isArray(responses)) incomplete("Grok message bodies are missing.", "grok_message_bodies_missing");
     const mapping = new Map();
     const excludedContentTypes = new Set();
     for (const message of responses) {
@@ -206,7 +210,7 @@
     const turns = branch.flatMap(node => {
       const message = mapping.get(node.responseId);
       if (!message && node.sender === "assistant" && nodes.inflightResponses.some(reply => reply?.responseId === node.responseId)) return [];
-      if (!message || message.sender !== node.sender || message.parentResponseId !== node.parentResponseId) fail("A Grok message body is missing or mismatched.");
+      if (!message || message.sender !== node.sender || message.parentResponseId !== node.parentResponseId) incomplete("A Grok message body is missing or mismatched.", "grok_message_body_mismatch");
       // An assistant's generation state is not a missing-history marker. Keep
       // its current own text, including a stopped reply, without polling it.
       if (message.sender === "assistant") { const { partial, ...metadata } = message; complete(metadata); }
@@ -232,13 +236,13 @@
     return transcript("Grok", hasText ? turns : [], excludedContentTypes, metrics);
   };
   const deepseekBranch = (data, chat) => {
-    if (data?.code !== 0 || data.data?.biz_code !== 0) fail("DeepSeek could not load the conversation.");
+    if (data?.code !== 0 || data.data?.biz_code !== 0) incomplete("DeepSeek could not load the conversation.", "deepseek_conversation_unavailable");
     complete(data); complete(data.data);
     const history = data.data.biz_data;
     complete(history);
     complete(history?.pagination);
     complete(history?.chat_session);
-    if (history?.chat_session?.id !== chat || history.cache_control !== "REPLACE") fail("DeepSeek returned a cache update instead of the full history.");
+    if (history?.chat_session?.id !== chat || history.cache_control !== "REPLACE") incomplete("DeepSeek returned a cache update instead of the full history.", "deepseek_snapshot_mismatch");
     return chain(history.chat_messages, history.chat_session.current_message_id, "message_id", "parent_id", { selectedOnly: true });
   };
   // DeepSeek accepts ordinary source/config/data uploads as well as .txt.
@@ -261,7 +265,7 @@
       complete(message);
       // WIP/pending/continuing describe future generation, not missing parents.
       // The fresh REPLACE snapshot already contains the text available now.
-      if (!Array.isArray(message.fragments)) fail("DeepSeek turn fragments are missing.");
+      if (!Array.isArray(message.fragments)) incomplete("DeepSeek turn fragments are missing.", "deepseek_fragments_missing");
       const parts = [];
       const fileIds = new Set(), labelledFiles = new Set();
       for (const fragment of message.fragments) {
