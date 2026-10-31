@@ -27,11 +27,12 @@
     upstream_code: enumeration(["400", "401", "402", "403", "404", "408", "413", "422", "429", "500", "502", "503", "504", "529",
       "INVALID_ARGUMENT", "UNAUTHENTICATED", "PERMISSION_DENIED", "NOT_FOUND", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION", "INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED"]),
     upstream_type: enumeration(["rate_limit_error", "insufficient_quota", "invalid_api_key", "authentication_error", "insufficient_credits",
-      "permission_error", "invalid_request_error", "context_length_exceeded", "server_error", "overloaded_error", "content_filter", "safety",
+      "permission_error", "invalid_request_error", "context_length_exceeded", "server_error", "overloaded_error", "content_filter", "safety", "generation_error",
       "RESOURCE_EXHAUSTED", "UNAUTHENTICATED", "PERMISSION_DENIED", "INVALID_ARGUMENT", "INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED"]),
     upstream_message: enumeration(["Rate limit exceeded.", "Quota exhausted.", "Authentication failed.", "Insufficient credits.",
       "Request blocked by safety policy.", "Context length exceeded.", "Provider unavailable.", "Provider returned an error."]),
-    retry_after_ms: integer(0, 86400000)
+    retry_after_ms: integer(0, 86400000),
+    upstream_request_id: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }
   };
   const required = ["id", "request_id", "occurred_at", "environment", "provider", "model", "failure_reason", "phase", "route_index",
     "request_attempt", "input_chars", "request_bytes", "max_output_tokens", "elapsed_ms", "budget_ms"];
@@ -44,7 +45,8 @@
       if (rule.type === "uuid") { if (typeof value !== "string" || !uuid.test(value)) return null; }
       else if (rule.type === "timestamp") {
         if (typeof value !== "string" || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString() !== value) return null;
-      } else if (rule.values ? !rule.values.includes(value)
+      } else if (rule.pattern ? typeof value !== "string" || new RegExp(rule.pattern).exec(value)?.[0] !== value
+        : rule.values ? !rule.values.includes(value)
         : !Number.isInteger(value) || value < rule.min || value > rule.max) return null;
     }
     if (!models[input.provider]?.includes(input.model)) return null;

@@ -187,3 +187,18 @@ test("summary callers without transfer identity do not create unrelated diagnosi
   assert.equal(recorded, undefined);
   assert.equal(sent, true);
 });
+
+test("HTTP-200 upstream errors retain safe status, type and request identity", async t => {
+  const original = global.fetch; t.after(() => { global.fetch = original; });
+  global.fetch = async () => new Response(JSON.stringify({ error: { code: 429, type: "rate_limit_error", message: "PRIVATE prompt" } }),
+    { headers: { "x-request-id": "req_abcdefgh1234" } });
+  const observed = [];
+  const { createSummaryWithProvider, getSummaryProfile } = require("../api/summarize").__test;
+  await assert.rejects(createSummaryWithProvider({ provider: { id: "openrouter", label: "OpenRouter", url: "https://provider.invalid" },
+    apiKey: "TEST_ONLY", model: "dots-studio/dots-3-note-preview:free", profile: getSummaryProfile("x".repeat(10000)),
+    initialMessages: [{ role: "user", content: "PRIVATE" }], requestBudgetMs: 1000,
+    requestContext: { maxAttempts: 1, inputChars: 10000, onProviderFailure: value => observed.push(value) } }));
+  assert.equal(observed.length, 1); assert.equal(observed[0].http_status, 200);
+  assert.equal(observed[0].upstream_code, "429"); assert.equal(observed[0].upstream_request_id, "req_abcdefgh1234");
+  assert.doesNotMatch(JSON.stringify(observed), /PRIVATE|TEST_ONLY/);
+});

@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { safeProviderError, retryAfterMs, readSafeProviderError } = require("../api/provider-error-diagnostics");
+const { safeProviderError, retryAfterMs, readSafeProviderError, providerRequestId, embeddedProviderError } = require("../api/provider-error-diagnostics");
 
 test("provider errors retain fixed safe fields and never echoed text", async () => {
   const result = await readSafeProviderError(new Response(JSON.stringify({ error: { code: 429, type: "rate_limit_error",
@@ -23,4 +23,16 @@ test("a stalled error body and cleanup cannot hold the diagnostics reader open",
   }) } }, 10);
   assert.deepEqual(result, {});
   assert.equal(cancelled, true);
+});
+test("request IDs come only from named headers and embedded errors cover all providers", () => {
+  assert.equal(providerRequestId(new Headers({ "x-request-id": "req_abcdefgh1234" })), "req_abcdefgh1234");
+  assert.equal(providerRequestId(new Headers({ "x-request-id": "PRIVATE chat https://secret", "x-unknown-id": "req_12345678" })), undefined);
+  for (const provider of ["openrouter", "tokenharbor", "gemini", "mistral"]) {
+    const error = embeddedProviderError({ error: { code: 429, message: "PRIVATE echoed prompt" } }, provider);
+    assert.equal(safeProviderError(error).upstream_code, "429");
+    assert.doesNotMatch(JSON.stringify(safeProviderError(error)), /PRIVATE/);
+  }
+  assert.deepEqual(embeddedProviderError({ promptFeedback: { blockReason: "PRIVATE" } }, "gemini"), { type: "safety" });
+  assert.deepEqual(embeddedProviderError({ choices: [{ finish_reason: "content_filter" }] }, "openrouter"), { type: "content_filter" });
+  assert.equal(embeddedProviderError({ choices: "PRIVATE" }, "openrouter"), null);
 });

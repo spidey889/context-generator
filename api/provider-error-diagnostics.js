@@ -60,4 +60,22 @@ async function readSafeProviderError(response, budgetMs = 150) {
     try { reader?.releaseLock(); } catch {}
   }
 }
-module.exports = { safeProviderError, retryAfterMs, readSafeProviderError };
+function providerRequestId(headers) {
+  for (const name of ["x-request-id", "request-id", "x-goog-request-id", "x-google-request-id"]) {
+    const value = headers?.get?.(name);
+    if (typeof value === "string" && new RegExp(schema.upstream_request_id.pattern).exec(value)?.[0] === value) return value;
+  }
+}
+
+function embeddedProviderError(payload, provider) {
+  if (payload?.error) return payload.error;
+  const choices = provider === "gemini" ? payload?.candidates : payload?.choices;
+  const choice = Array.isArray(choices) ? choices.find(item => item && (item.index ?? 0) === 0) : null;
+  if (choice?.error) return choice.error;
+  if (provider === "gemini" && (payload?.promptFeedback?.blockReason
+    || ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"].includes(choice?.finishReason))) return { type: "safety" };
+  if (choice?.finish_reason === "content_filter") return { type: "content_filter" };
+  if (choice?.finish_reason === "error") return { type: "generation_error" };
+  return null;
+}
+module.exports = { safeProviderError, retryAfterMs, readSafeProviderError, providerRequestId, embeddedProviderError };

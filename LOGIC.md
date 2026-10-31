@@ -486,6 +486,8 @@ Before that local fallback, a summary response whose body read rejects with a ne
 
 Provider HTTP failures inspect at most 8 KiB of error JSON for at most 150 ms within the existing attempt deadline. Only allowlisted upstream code/type, a fixed canonical message (capped at 120 characters) and bounded retry-after milliseconds enter server diagnostics; raw/unknown message text is never saved. Error-body cleanup is not awaited. These additive fields need compatible database/Edge validators before backend rollout; local migrations alone do not deploy them.
 
+Named provider request-ID headers may supply one ASCII correlation token of 8–128 characters; controls, URLs and arbitrary body fields are rejected. HTTP-200 JSON/SSE errors, choice-level errors and Google safety feedback are identified before success validation and retain the same safe code/type/message metadata. HTTP status remains the actual transport status, separate from the upstream error code; a numeric error cannot fabricate an HTTP rejection.
+
 [Provider fallbacks](docs/provider-fallbacks.md) holds the detailed configuration/retry reference. Current order:
 
 ```text

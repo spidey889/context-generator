@@ -7,6 +7,7 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 ## 2026-10-31
 
 - **Close provider failure-logging gaps without retaining private error bodies.** Read bounded error JSON and retain only known code/type labels, a fixed short message and retry-after time. Unknown/echoed text never becomes a log excerpt. Prepare additive validators and regression coverage locally, with tests deferred until all five requested commits; no live database change.
+  - Retain only bounded named-header provider request IDs and recognize HTTP-200 JSON/SSE/choice errors plus Gemini safety blocks. Transport status stays separate from provider error code; raw message text and arbitrary body IDs remain excluded.
 
 - **Close destination paste-diagnosis gaps.** Composer searches now queue bounded match/rejection observations before a ready editor is found, preserving evidence when the final destination reply disappears. Existing scans and outbox are reused; no chat text, new polling or live database change is involved. Regression coverage is added with testing deferred until all five requested commits are complete.
   - Queue insertion entry before the native operation and record fixed blocked-write reasons for detachment, readiness, redirected focus and restored drafts. Add a local validator-only migration and update compatibility/replay coverage; no capture/paste policy or live schema is changed.

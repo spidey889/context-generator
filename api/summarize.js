@@ -8,7 +8,7 @@ const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const { getHeader } = require("./request-validation");
 const { readProviderStream } = require("./provider-stream");
 const { createProviderFailureLog } = require("./provider-failure-log");
-const { retryAfterMs, readSafeProviderError } = require("./provider-error-diagnostics");
+const { retryAfterMs, readSafeProviderError, safeProviderError, providerRequestId, embeddedProviderError } = require("./provider-error-diagnostics");
 const {
   SUMMARY_PROMPT_CACHE_VERSION,
   CONTEXT_CARRY_TITLE,
@@ -726,12 +726,13 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   const data = await readResponseJson(initialResponse, provider);
   // Providers can report failure after sending HTTP 200 stream headers.
   // Never accept partial/error text as a successful summary in that case.
-  if (data?.error || data?.choices?.[0]?.error
-      || ["error", "content_filter"].includes(data?.choices?.[0]?.finish_reason)) {
+  const embeddedError = embeddedProviderError(data, provider.id);
+  if (embeddedError) {
     initialResponse.recordFailure?.("provider_generation_failed");
-    const reportedStatus = data?.error?.code ?? data?.choices?.[0]?.error?.code;
-    throw createProviderError(provider, `${provider.label} generation failed`, 502,
-      Number.isInteger(reportedStatus) ? reportedStatus : null, "provider_generation_failed");
+    const reportedStatus = Number(embeddedError.code);
+    throw Object.assign(createProviderError(provider, `${provider.label} generation failed`, 502,
+      Number.isInteger(reportedStatus) && reportedStatus >= 100 && reportedStatus <= 599 ? reportedStatus : null, "provider_generation_failed"),
+    initialResponse.errorDiagnostics, safeProviderError(embeddedError));
   }
   const finishReason = getProviderFinishReason(provider, data);
   const initialUsage = normalizeProviderUsage(provider, data);
@@ -1037,7 +1038,7 @@ function getProviderFailureLog(error) {
     message: getProviderFailureReason(error),
     statusCode: error?.statusCode || null,
     providerStatus: error?.providerStatus || null,
-    ...Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms"]
+    ...Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id"]
       .filter(key => error?.[key] !== undefined).map(key => [key, error[key]]))
   };
 }
@@ -1177,6 +1178,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       const usage = normalizeProviderUsage({ id: context.provider }, payload);
       const finishReason = getProviderFinishReason({ id: context.provider }, payload || {});
       if (payload) {
+        Object.assign(observed, safeProviderError(embeddedProviderError(payload, context.provider)));
         observed.answer_chars ??= getProviderSummaryText({ id: context.provider }, payload).length;
         const reasoning = payload.choices?.[0]?.message?.reasoning_content ?? payload.choices?.[0]?.message?.reasoning;
         if (typeof reasoning === "string") observed.reasoning_chars ??= reasoning.length;
@@ -1211,6 +1213,8 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       const response = await fetch(url, { ...options, signal });
       observed.headers_ms = Math.max(0, Date.now() - attemptStartedAt);
       observed.http_status = response.status;
+      const upstreamId = providerRequestId(response.headers);
+      if (upstreamId) observed.upstream_request_id = upstreamId;
       const retryMs = retryAfterMs(response.headers);
       if (retryMs !== undefined) observed.retry_after_ms = retryMs;
       observed.phase = !response.ok ? "http_error" : context.onDelta && response.headers.get("content-type")?.includes("text/event-stream")
@@ -1263,12 +1267,14 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
         Object.assign(observed, await readSafeProviderError(response, Math.max(0, Math.min(150, attemptDeadline - Date.now()))));
       }
       checkAttemptDeadline();
+      const embedded = embeddedProviderError(payload, context.provider);
+      if (embedded && !payload.error) payload = { ...payload, error: embedded };
       lastResponse = {
         ok: response.ok,
         status: response.status,
         headers: response.headers,
         recordFailure,
-        errorDiagnostics: Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms"]
+        errorDiagnostics: Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id"]
           .filter(key => observed[key] !== undefined).map(key => [key, observed[key]])),
         async json() {
           if (bodyError) throw bodyError;
