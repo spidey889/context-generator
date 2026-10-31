@@ -316,6 +316,7 @@ async function createSmokeExtension(tempRoot, origin) {
   window.__capSmokeShowRecovery = (text = "Synthetic recovery context. Preserve the dialog palette.", draft = false, destinationCopy = false) => showFallbackModal(text, "Claude", !draft, false, draft, { destinationCopy });
   window.__capSmokeShowError = message => showErrorOverlay(message);
   window.__capSmokeHandoffStage = (stage, phase = "active") => { if (!isHandoffOverlayVisible()) showOverlay("claude"); setHandoffProgress(stage, phase, "Claude", 20000); };
+  window.__capSmokeSummaryWord = word => changeHandoffSummaryLabel(word, () => {});
   window.__capSmokeStartDomTransfer = () => { startDestinationTransfer("claude"); return true; };
   window.__capSmokeDomState = () => activeTransferTrace && ({ deadlineAt: activeTransferTrace.deadlineAt,
     startedAt: activeTransferTrace.domCaptureStartedAt, estimateMs: activeTransferTrace.domSizeCheck?.estimateMs,
@@ -2563,6 +2564,35 @@ async function verifyHandoffPalette(session) {
   await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Summarizing"'),
     "the primary summary headline returning", 8000);
   process.stdout.write("✓ AI headline briefly shows Polishing after 12 seconds, then returns to Summarizing with a stable stage label.\n");
+  // Seek the real CSS animations so a busy runner cannot skip the short fade.
+  const fadingOut = await session.evaluate(`(() => {
+    const headline = document.getElementById('context-generator-text');
+    headline.getAnimations().forEach(animation => animation.finish());
+    window.__capSmokeSummaryWord('Polishing');
+    const animation = headline.getAnimations().find(animation => animation.animationName === 'contextGeneratorSummaryWordOut');
+    if (!animation) throw new Error('Summary word fade-out is missing');
+    animation.pause(); animation.currentTime = 60;
+    return { word: document.getElementById('context-generator-text-label').textContent,
+      opacity: Number(getComputedStyle(headline).opacity) };
+  })()`, contextId);
+  assert.equal(fadingOut.word, "Summarizing");
+  assert.ok(fadingOut.opacity > 0 && fadingOut.opacity < 1, "The old word must visibly fade before replacement.");
+  await waitFor(() => session.evaluate('document.getElementById("context-generator-text-label").textContent === "Polishing"'),
+    "the word changing after its outgoing fade", 2000);
+  const fadingIn = await session.evaluate(`(() => {
+    const headline = document.getElementById('context-generator-text');
+    const animation = headline.getAnimations().find(animation => animation.animationName === 'contextGeneratorSummaryWordIn');
+    if (!animation) throw new Error('Summary word fade-in is missing');
+    animation.pause(); animation.currentTime = 100;
+    const opacity = Number(getComputedStyle(headline).opacity);
+    const shimmering = document.getElementById('context-generator-text-label').getAnimations()
+      .some(animation => animation.animationName === 'contextGeneratorSummaryShimmer');
+    animation.finish();
+    return { opacity, shimmering };
+  })()`, contextId);
+  assert.ok(fadingIn.opacity > 0 && fadingIn.opacity < 1, "The new word must visibly fade in.");
+  assert.equal(fadingIn.shimmering, true, "Word transitions must preserve the existing shimmer.");
+  process.stdout.write("✓ Summary words fade out/in through intermediate opacity while their shimmer stays active.\n");
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await session.evaluate(`window.__capHandoffPaletteSnapshot = () => {
     const root = document.getElementById("context-generator-overlay");

@@ -1125,11 +1125,17 @@ clockTest("AI summary labels rotate slowly with Summarizing occupying most of th
     t.mock.timers.tick(11999);
     assert.equal(label.textContent, "Summarizing");
     t.mock.timers.tick(1);
+    assert.equal(label.textContent, "Summarizing", "Keep the old word until its fade out ends.");
+    assert.match(hooks.document.getElementById("context-generator-text").style.animation, /SummaryWordOut/);
+    t.mock.timers.tick(120);
     assert.equal(label.textContent, alternate);
+    assert.match(hooks.document.getElementById("context-generator-text").style.animation, /SummaryWordIn/);
     assert.equal(stage.dataset.state, "active", "Cosmetic words cannot complete a stage.");
     t.mock.timers.tick(3999);
     assert.equal(label.textContent, alternate);
     t.mock.timers.tick(1);
+    assert.equal(label.textContent, alternate);
+    t.mock.timers.tick(120);
     assert.equal(label.textContent, "Summarizing");
   }
 });
@@ -1139,6 +1145,7 @@ clockTest("summary label rotation cannot affect local carries or replace real pa
   const label = hooks.document.getElementById("context-generator-text-label");
   hooks.setHandoffProgress("summary", "active", "Claude", 20000);
   t.mock.timers.tick(12000);
+  t.mock.timers.tick(120);
   assert.equal(label.textContent, "Polishing");
   hooks.setHandoffProgress("summary", "active");
   t.mock.timers.tick(60000);
@@ -1158,6 +1165,7 @@ clockTest("summary label rotation stops on completion, paste, cancellation and t
     const label = hooks.document.getElementById("context-generator-text-label");
     hooks.setHandoffProgress("summary", "active", "Claude", 20000);
     t.mock.timers.tick(12000);
+    t.mock.timers.tick(120);
     assert.equal(label.textContent, "Polishing");
     if (end === "complete") hooks.setHandoffProgress("summary", "done");
     else if (end === "paste") hooks.setHandoffProgress("paste", "active");
@@ -1167,6 +1175,38 @@ clockTest("summary label rotation stops on completion, paste, cancellation and t
     const finalLabel = label.textContent;
     t.mock.timers.tick(60000);
     assert.equal(label.textContent, finalLabel, end);
+  }
+});
+
+clockTest("a summary word fading out cannot overwrite a completed or cancelled transfer", (t) => {
+  for (const end of ["complete", "paste", "cancel", "teardown", "capture"]) {
+    const { hooks } = createHandoffCompletionFixture();
+    const label = hooks.document.getElementById("context-generator-text-label");
+    hooks.setHandoffProgress("summary", "active", "Claude", 20000);
+    t.mock.timers.tick(12000);
+    assert.equal(label.textContent, "Summarizing");
+    assert.match(hooks.document.getElementById("context-generator-text").style.animation, /SummaryWordOut/);
+    if (end === "complete") hooks.setHandoffProgress("summary", "done");
+    else if (end === "paste") hooks.setHandoffProgress("paste", "active");
+    else if (end === "capture") hooks.setHandoffProgress("capture", "active");
+    else if (end === "cancel") hooks.resetRunningFlag({ immediate: true });
+    else hooks.teardownContextGeneratorInstance();
+    const finalLabel = label.textContent;
+    t.mock.timers.tick(120);
+    t.mock.timers.tick(60000);
+    assert.equal(label.textContent, finalLabel, end);
+  }
+});
+
+clockTest("hidden and reduced-motion summary words change without a fading interval", (t) => {
+  for (const mode of ["hidden", "reduced"]) {
+    const { hooks } = createHandoffCompletionFixture();
+    if (mode === "hidden") hooks.document.visibilityState = "hidden";
+    else hooks.window.matchMedia = () => ({ matches: true });
+    hooks.setHandoffProgress("summary", "active", "Claude", 20000);
+    t.mock.timers.tick(12000);
+    assert.equal(hooks.document.getElementById("context-generator-text-label").textContent, "Polishing");
+    assert.equal(hooks.document.getElementById("context-generator-text").style.animation, "none");
   }
 });
 

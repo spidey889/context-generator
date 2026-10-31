@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-summary-labels-v237";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-summary-label-transitions-v238";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -217,6 +217,7 @@
   const HANDOFF_SUMMARY_LABELS = ["Polishing", "Refining", "Crafting"];
   const HANDOFF_SUMMARY_PRIMARY_LABEL_MS = 12000;
   const HANDOFF_SUMMARY_ALTERNATE_LABEL_MS = 4000;
+  const HANDOFF_SUMMARY_WORD_OUT_MS = 120;
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
   // native capture and summary creep below completion; DOM capture uses scroll diagnostics.
   const HANDOFF_STAGES = [
@@ -554,6 +555,7 @@
   let handoffCapturePresentation = null;
   let handoffStageAdvanceTimer = null;
   let handoffSummaryLabelTimer = null;
+  let handoffSummarySwapTimer = null;
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
   let claudeLimitNudgeDismissedUntilLimitClears = false;
@@ -9039,6 +9041,14 @@
             from{opacity:0.62;transform:translate3d(0,4px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
           }
+          @keyframes contextGeneratorSummaryWordOut{
+            from{opacity:1;transform:translate3d(0,0,0)}
+            to{opacity:0;transform:translate3d(0,-2px,0)}
+          }
+          @keyframes contextGeneratorSummaryWordIn{
+            from{opacity:0;transform:translate3d(0,2px,0)}
+            to{opacity:1;transform:translate3d(0,0,0)}
+          }
           @keyframes contextGeneratorHandoffContentIn{
             from{opacity:0.36;transform:translate3d(0,5px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
@@ -9661,6 +9671,37 @@
   function stopHandoffSummaryLabels() {
     clearTimeout(handoffSummaryLabelTimer);
     handoffSummaryLabelTimer = null;
+    clearTimeout(handoffSummarySwapTimer);
+    handoffSummarySwapTimer = null;
+    const headline = document.getElementById("context-generator-text");
+    if (headline?.style.animation?.includes("contextGeneratorSummaryWord")) headline.style.animation = "none";
+  }
+
+  function changeHandoffSummaryLabel(nextLabel, onChange) {
+    const label = document.getElementById("context-generator-text-label");
+    const headline = document.getElementById("context-generator-text");
+    const previousLabel = label?.textContent;
+    const skipMotion = document.visibilityState === "hidden"
+      || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const apply = () => {
+      handoffSummarySwapTimer = null;
+      const stage = document.getElementById("context-generator-handoff-progress")
+        ?.querySelector("[data-context-generator-stage='summary']");
+      if (!isHandoffOverlayVisible() || stage?.dataset.state !== "active"
+          || document.getElementById("context-generator-text-label") !== label || label?.textContent !== previousLabel) {
+        if (headline) headline.style.animation = "none";
+        return;
+      }
+      label.textContent = nextLabel;
+      headline.style.animation = skipMotion ? "none"
+        : "contextGeneratorSummaryWordIn 200ms cubic-bezier(0.16,1,0.3,1) both";
+      onChange();
+    };
+    if (skipMotion) return apply();
+    // Fade the word and its dots together so the dots' new position appears
+    // while transparent. The child text's existing shimmer keeps running.
+    headline.style.animation = `contextGeneratorSummaryWordOut ${HANDOFF_SUMMARY_WORD_OUT_MS}ms ease-in both`;
+    handoffSummarySwapTimer = setTimeout(apply, HANDOFF_SUMMARY_WORD_OUT_MS);
   }
 
   function startHandoffSummaryLabels(inputChars) {
@@ -9676,9 +9717,10 @@
       if (!isHandoffOverlayVisible() || stage?.dataset.state !== "active"
           || !["Summarizing", ...HANDOFF_SUMMARY_LABELS].includes(label?.textContent)) return;
       const primary = label.textContent !== "Summarizing";
-      label.textContent = primary ? "Summarizing" : HANDOFF_SUMMARY_LABELS[alternate++ % HANDOFF_SUMMARY_LABELS.length];
-      handoffSummaryLabelTimer = setTimeout(advance,
-        primary ? HANDOFF_SUMMARY_PRIMARY_LABEL_MS : HANDOFF_SUMMARY_ALTERNATE_LABEL_MS);
+      changeHandoffSummaryLabel(primary ? "Summarizing" : HANDOFF_SUMMARY_LABELS[alternate++ % HANDOFF_SUMMARY_LABELS.length], () => {
+        handoffSummaryLabelTimer = setTimeout(advance,
+          primary ? HANDOFF_SUMMARY_PRIMARY_LABEL_MS : HANDOFF_SUMMARY_ALTERNATE_LABEL_MS);
+      });
     };
     handoffSummaryLabelTimer = setTimeout(advance, HANDOFF_SUMMARY_PRIMARY_LABEL_MS);
   }
