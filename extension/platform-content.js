@@ -3256,14 +3256,22 @@
       document_ready_state: document.readyState,
       visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown" };
     const sentCheckpoints = new Set();
+    let searchReports = 0, lastSearchAt = -Infinity, lastSearchKey = "";
     const reportCheckpoint = checkpoint => {
-      if (!transferId || !instanceActive || sentCheckpoints.has(checkpoint)) return;
+      if (!transferId || !instanceActive || (checkpoint !== "searching" && sentCheckpoints.has(checkpoint))) return;
       globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt });
       const snapshot = globalThis.CapTransferDiagnostics?.snapshot(diagnostics);
       if (!snapshot) return;
+      if (checkpoint === "searching") {
+        const key = JSON.stringify([snapshot.editor_match_count, snapshot.editor_ready_count, snapshot.editor_hidden_count,
+          snapshot.editor_disabled_count, snapshot.editor_readonly_count, snapshot.document_ready_state]);
+        // Existing discovery drives reporting: no extra scan, timer or await.
+        if (searchReports >= 8 || Date.now() - lastSearchAt < (key === lastSearchKey ? 5000 : 1000)) return;
+        searchReports++; lastSearchAt = Date.now(); lastSearchKey = key;
+      }
       sentCheckpoints.add(checkpoint);
       // A blocked insert or lost final reply must not erase earlier progress.
-      // Send only four metadata snapshots; optional telemetry never gates paste.
+      // Milestones and bounded search snapshots never gate paste.
       try {
         Promise.resolve(extensionRuntime.sendMessage({ type: "RECORD_PASTE_CHECKPOINT", transferId,
           destination: destinationId, checkpoint, diagnostics: snapshot })).catch(() => {});
@@ -3483,6 +3491,7 @@
       if (destinationMessageCount > 0) throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
       const input = findReadyPlatformInput(destination, diagnostics);
       observe({ editor_seen: sawInput || Boolean(input) });
+      if (!input) guard?.reportCheckpoint?.("searching");
       if (input) {
         composerWaitMs ??= Date.now() - startedAt;
         guard?.pin();

@@ -789,6 +789,8 @@ For these three backups, score/cap composer candidates and reject page-sized/mis
 
 ### Paste verification and draft recovery
 
+Composer discovery queues up to eight metadata-only search observations while no ready editor exists, including match/rejection counts, through the existing paste checkpoint/outbox path. Repeated unchanged scans are limited to one per five seconds; changed scans to one per second. Existing discovery drives this without new timers, scans or capture/paste waits. Search reports cannot overwrite a later editor-found/insertion checkpoint.
+
 `pasteIntoPlatform` uses native setters/events and stability checks. Rank writable/enabled candidates so a disabled/read-only high-scoring node cannot mask an available editor. Retain an already verified composer through temporary disabled/`aria-hidden` state, but readiness must still pass before insertion.
 
 Check source ownership before writing, with a six-second reply bound clipped to the attempt deadline; cancellation immediately rejects that wait and late replies cannot resume insertion. After local content verification and the existing stability/focus checks, finish delivery without another page-to-worker source check. Focused destinations also return their worker acknowledgement without another source-tab API read. DeepSeek's existing final native activation retains its own source/cancellation guards. A recognised trusted user action after the carry was observed is delivered: Send-created route changes cannot turn it into a new-conversation failure. Emit the verified checkpoint at this local success boundary, without awaiting optional telemetry.

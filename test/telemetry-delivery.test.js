@@ -269,6 +269,23 @@ function pasteCheckpoint(background, checkpoint, diagnostics = {}, sender = {}, 
   { id: "fixture-extension", frameId: 0, tab: { id: 84, url: "https://gemini.google.com/app" }, ...sender }, resolve));
 }
 
+test("composer-search observations persist without a ready editor and reject bursts or late scans", async () => {
+  const background = worker(async () => { throw new Error("offline"); });
+  await background.settled();
+  await background.ack(event(1, { destinationPlatform: "gemini", lastStage: "paste_started" }));
+  const pending = startOwnedPaste(background, { stalled: true });
+  await new Promise(setImmediate);
+  const scan = { editor_seen: false, editor_match_count: 2, editor_ready_count: 0, editor_disabled_count: 2 };
+  assert.equal((await pasteCheckpoint(background, "searching", scan)).ok, true);
+  assert.equal((await pasteCheckpoint(background, "searching", scan)).ok, false);
+  await background.settled();
+  assert.equal(background.shared.local[OUTBOX][0].payload.diagnostics.editor_disabled_count, 2);
+  assert.equal(background.shared.local[OUTBOX][0].payload.diagnostics.last_operation, "editor_wait");
+  assert.equal((await pasteCheckpoint(background, "editor_found", { editor_seen: true })).ok, true);
+  assert.equal((await pasteCheckpoint(background, "searching", scan)).ok, false);
+  await assert.rejects(pending);
+});
+
 function blockStorage(background, area, method) {
   background.evaluate(`globalThis.originalStorageMethod = chrome.storage.${area}.${method};
     globalThis.storageBlock = new Promise(resolve => { globalThis.releaseStorage = resolve; });

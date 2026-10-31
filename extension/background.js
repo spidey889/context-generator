@@ -769,13 +769,14 @@ function recordDeliveryDiagnostics(attemptId, destinationId, sourceTab, diagnost
 }
 
 function recordPasteCheckpoint(message, sender) {
+  const searching = message.checkpoint === "searching";
   const steps = ["received", "editor_found", "inserted", "verified"];
   const index = steps.indexOf(message.checkpoint);
   const operation = transferOperations.get(message.transferId);
   const target = operation?.pasteCheckpoint;
   const active = activeTransferTelemetry.get(message.transferId);
   if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)
-      || index < 0 || !target || target.tabId !== sender.tab.id || sender.tab.id === operation.sourceTabId
+      || (index < 0 && !searching) || !target || target.tabId !== sender.tab.id || sender.tab.id === operation.sourceTabId
       || target.destinationId !== message.destination || getPlatformFromUrl(sender.url || sender.tab.url) !== message.destination
       || operation.controller.signal.aborted || operation.expiresAt <= Date.now()
       || active?.status !== "started" || active.destinationPlatform !== message.destination
@@ -785,9 +786,19 @@ function recordPasteCheckpoint(message, sender) {
   if (!safe || (index === 1 || index === 2) && safe.editor_seen !== true || index === 3 && safe.paste_populated !== true) return false;
   // Each dispatched paste has four fixed observations. Duplicates and delayed
   // earlier milestones cannot overwrite newer progress or flood the outbox.
-  if (target.seen.has(index) || index < target.lastIndex) return false;
-  target.seen.add(index);
-  target.lastIndex = index;
+  if (searching) {
+    const key = JSON.stringify([safe.editor_match_count, safe.editor_ready_count, safe.editor_hidden_count,
+      safe.editor_disabled_count, safe.editor_readonly_count, safe.document_ready_state]);
+    if (target.lastIndex > 0 || safe.editor_seen !== false || !Number.isInteger(safe.editor_match_count)
+      || (target.searchReports || 0) >= 8
+      || Date.now() - (target.lastSearchAt ?? -Infinity) < (key === target.lastSearchKey ? 5000 : 1000)) return false;
+    target.searchReports = (target.searchReports || 0) + 1;
+    target.lastSearchAt = Date.now(); target.lastSearchKey = key;
+  } else {
+    if (target.seen.has(index) || index < target.lastIndex) return false;
+    target.seen.add(index);
+    target.lastIndex = index;
+  }
   const snapshot = { version: 1, diagnostics_revision: 3, summary_chars: target.textChars };
   const keys = ["document_ready_state", "visibility", "editor_seen", "editor_connected", "editor_kind", "editor_text_chars",
     "composer_wait_ms", "paste_retry_limit_ms", "paste_verify_limit_ms", "paste_stability_ms", "paste_attempts", "editor_remounts",
@@ -796,7 +807,7 @@ function recordPasteCheckpoint(message, sender) {
     "editor_match_count", "editor_match_peak", "editor_unmatched_count", "editor_hidden_count", "editor_aria_hidden_count",
     "editor_modal_count", "editor_owned_count", "editor_disabled_count", "editor_readonly_count", "editor_not_editable_count", "editor_ready_count"];
   for (const key of keys) if (safe[key] !== undefined) snapshot[key] = safe[key];
-  snapshot.last_operation = ["paste_start", "editor_wait", "paste_verify", "paste_complete"][index];
+  snapshot.last_operation = searching ? "editor_wait" : ["paste_start", "editor_wait", "paste_verify", "paste_complete"][index];
   target.events.push({ event: snapshot.last_operation,
     at_ms: safe.paste_ms ?? Math.max(0, Date.now() - target.startedAt) });
   snapshot.paste_events = target.events.slice();
