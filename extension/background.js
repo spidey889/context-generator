@@ -2554,7 +2554,7 @@ async function pasteIntoDestinationWithActivation(
   const pasteDiagnostics = globalThis.CapTransferDiagnostics?.validate(pasteResult?.diagnostics);
   if (pasteDiagnostics) Object.assign(trace.diagnostics ||= { version: 1 }, pasteDiagnostics);
   globalThis.CapTransferDiagnostics?.update(trace?.diagnostics, { message_reply: pasteResult?.ok ? "ack_success" : "ack_failed" });
-  markBackgroundTrace(trace, "paste message done", { tabId, responseTiming: pasteResult?.timing || null });
+  markBackgroundTrace(trace, "paste message done", { tabId, ok: pasteResult?.ok === true, responseTiming: pasteResult?.timing || null });
   return pasteResult;
 }
 
@@ -3106,7 +3106,10 @@ function markBackgroundTrace(trace, label, detail = null) {
     "tab activation settle start": "destination_settle", "tab activation settle done": "destination_settle",
     "paste message start": "message_send", "paste message done": "paste_complete",
     "content script inject attempt": "script_inject", "tab ready/message response": "message_send", "tab ready/message response after inject": "message_send" };
-  const operation = operations[label];
+  const failedReply = label === "paste message done" && detail?.ok === false;
+  // A reply ended the wait, not necessarily the paste. Preserve the failing
+  // destination operation; a sparse negative reply is only a message result.
+  const operation = failedReply ? trace.diagnostics?.failure_site || trace.diagnostics?.last_operation || "message_send" : operations[label];
   if (!operation) return;
   trace.diagnostics ||= { version: 1 };
   globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { last_operation: operation,
@@ -3116,7 +3119,8 @@ function markBackgroundTrace(trace, label, detail = null) {
     ...(label === "content script inject attempt" ? { script_injections: (trace.diagnostics.script_injections || 0) + 1 } : {}),
     ...(label.includes("message response") ? { message_ms: detail?.readyMs, message_attempts: detail?.attempts } : {}),
     ...(label === "tab activation settle start" ? { activation_settle_ms: detail?.settleMs } : {}) });
-  globalThis.CapTransferDiagnostics?.event(trace.diagnostics, operation, mark.totalMs, "delivery_events");
+  globalThis.CapTransferDiagnostics?.event(trace.diagnostics, failedReply ? "failure" : operation, mark.totalMs, "delivery_events",
+    failedReply ? trace.diagnostics.error_code || "paste_failed" : null);
   if (label.endsWith("open start")) trace.diagnosticOpenAt = at;
   if (label.endsWith("open done")) globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { destination_open_ms: Math.round(at - trace.diagnosticOpenAt) });
   if (label.endsWith("activate before paste start") || label === "final tab activate start") trace.diagnosticActivateAt = at;

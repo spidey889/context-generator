@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-local-handoff-sequence-v236";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-paste-diagnostics-v237";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();

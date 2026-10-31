@@ -1326,9 +1326,9 @@ clockTest("fresh recovery retains the first editor failure alongside the final d
       editor_match_count: 4, editor_hidden_count: 2, editor_ready_count: 1, editor_insert_attempted: true,
       paste_events: [{ event: "failure", at_ms: 10, code: "paste_not_retained" }] };
     const last = outcome === "missing_editor"
-      ? { version: 1, error_code: "editor_missing", error_origin: "destination", editor_seen: false, paste_attempts: 3, editor_match_count: 0, editor_ready_count: 0 }
+      ? { version: 1, error_code: "editor_missing", failure_site: "editor_wait", last_operation: "editor_wait", error_origin: "destination", editor_seen: false, paste_attempts: 3, editor_match_count: 0, editor_ready_count: 0 }
       : { version: 1, paste_populated: finalOk, editor_seen: true, paste_attempts: 3, draft_present: false,
-        ...(finalOk ? {} : { error_code: "paste_not_retained", error_origin: "destination" }) };
+        ...(finalOk ? {} : { error_code: "paste_not_retained", failure_site: "paste_stability", last_operation: "paste_stability", error_origin: "destination" }) };
     const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url: "https://claude.ai/new" },
       sendMessageImpl: (tabId, message) => message.type !== "PASTE_CONTEXT" ? { ok: true } : tabId === 41
         ? { ok: false, error: "PRIVATE first error", diagnostics: first }
@@ -1349,6 +1349,9 @@ clockTest("fresh recovery retains the first editor failure alongside the final d
       assert.deepEqual(response.diagnostics[key], last[key], `${outcome}: ${key} must describe only the fresh destination`);
     }
     assert.equal(response.diagnostics.error_code, last.error_code);
+    assert.equal(response.diagnostics.last_operation, finalOk ? "paste_complete" : last.failure_site);
+    const replies = response.diagnostics.delivery_events.filter(entry => entry.event === "paste_complete");
+    assert.equal(replies.length, finalOk ? 1 : 0, "Failed acknowledgements must never look like completed pastes.");
     assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
     assert.equal(harness.operations.created.length, 1);
   }
