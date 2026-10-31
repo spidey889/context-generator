@@ -706,15 +706,36 @@ test("ChatGPT starts no file requests when history leaves less raw budget than t
 test("ChatGPT shares the raw allowance across repeated paste descriptors instead of granting each another budget", async () => {
   const { data, files } = pasteFixture(["First paste", "Second paste"]);
   const historyBytes = 26000000;
-  let last;
-  const harness = setup(data, 200, { fetchImpl: request => {
+  const started = captureGate();
+  const reading = captureGate();
+  let last, descriptorCount = 0, readerCount = 0;
+  const harness = setup(data, 200, { fetchImpl: async request => {
     const url = new URL(request.url, "https://chatgpt.com");
     if (url.pathname.startsWith("/backend-api/files/download/")) {
       const file = files.find(entry => url.pathname.endsWith(entry.id));
       const descriptor = { status: "success", file_size_bytes: file.size,
         download_url: `https://chatgpt.com/backend-api/estuary/content?id=${file.id}` };
-      const size = file === files[0] ? 3000000 : 3000001 - files[0].size;
+      if (++descriptorCount === 2) started.release();
+      await started.promise;
+      const size = file === files[0] ? 3000000 : 3000001;
       const streamed = streamJsonChunks([paddedJson(descriptor, size)]);
+      const getReader = streamed.response.body.getReader.bind(streamed.response.body);
+      streamed.response.body.getReader = () => {
+        const reader = getReader();
+        let first = true;
+        return {
+          async read() {
+            if (first) {
+              first = false;
+              if (++readerCount === 2) reading.release();
+              await reading.promise;
+            }
+            return reader.read();
+          },
+          cancel: () => reader.cancel(),
+          releaseLock: () => reader.releaseLock()
+        };
+      };
       if (file === files[1]) last = streamed;
       return streamed.response;
     }
@@ -723,8 +744,14 @@ test("ChatGPT shares the raw allowance across repeated paste descriptors instead
       ? new Response(paddedJson(data, historyBytes), { headers: { "content-type": "application/json" } }) : jsonResponse(data);
   } });
   await discover(harness);
-  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
-  assert.equal(harness.requests.filter(request => request.url.includes("/estuary/content")).length, 1);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.captureFailureReason, "incomplete");
+    assert.equal(error.jsonCapture.failure_check, "raw_total_stream_limit");
+    assert.equal(error.jsonCapture.failure_value, 32000001);
+    assert.equal(error.jsonCapture.failure_file_index, 2);
+    return true;
+  });
+  assert.equal(harness.requests.filter(request => request.url.includes("/estuary/content")).length, 0);
   assert.equal(last.stats.cancelled, 1);
   assert.equal(last.response.body.locked, false);
   assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
@@ -861,6 +888,193 @@ function pasteFixture(texts = ["Original pasted document"], authorization = "Bea
   };
   return { data, files, fetchImpl };
 }
+
+function captureGate() {
+  let release;
+  const promise = new Promise(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+async function flushParallelCaptureUntil(predicate) {
+  // Flush async fixture work, not wall time. Unreleased gates force the overlap.
+  for (let turn = 0; turn < 50 && !predicate(); turn++) await new Promise(setImmediate);
+  assert.ok(predicate(), "The expected concurrent capture checkpoint was not reached.");
+}
+
+test("ChatGPT overlaps four complete file pipelines, refills freed slots and preserves source order", async () => {
+  const { data, files, fetchImpl } = pasteFixture(Array.from({ length: 6 }, (_, i) => `Original ${i}: café🙂\r\n`));
+  data.mapping.question.message.metadata.attachments.push({ ...data.mapping.question.message.metadata.attachments[0] });
+  const gates = files.map(() => ({ descriptor: captureGate(), body: captureGate() }));
+  const descriptors = [], bodies = [], completed = [];
+  let active = 0, peak = 0;
+  const h = setup(data, 200, { fetchImpl: async request => {
+    const url = new URL(request.url, "https://chatgpt.com");
+    const index = files.findIndex(file => url.pathname.endsWith(`/${file.id}`) || url.searchParams.get("id") === file.id);
+    if (index >= 0 && url.pathname.startsWith("/backend-api/files/download/")) {
+      descriptors.push(index); peak = Math.max(peak, ++active);
+      await gates[index].descriptor.promise;
+    } else if (index >= 0 && url.pathname === "/backend-api/estuary/content") {
+      bodies.push(index);
+      await gates[index].body.promise;
+      completed.push(index); active--;
+    }
+    return fetchImpl(request);
+  } });
+  await discover(h);
+  const capture = h.window.__capCaptureChatGptJson();
+  try {
+    await flushParallelCaptureUntil(() => descriptors.length === 4);
+    assert.equal(peak, 4);
+    for (let i = 0; i < 4; i++) gates[i].descriptor.release();
+    await flushParallelCaptureUntil(() => bodies.length === 4);
+    assert.equal(descriptors.length, 4, "A pipeline retains its slot through the complete body read.");
+    gates[2].body.release();
+    await flushParallelCaptureUntil(() => descriptors.length === 5);
+    assert.deepEqual(completed, [2], "A free slot refills without waiting for the first file.");
+  } finally {
+    for (const gate of gates) { gate.descriptor.release(); gate.body.release(); }
+    await capture.catch(() => {});
+  }
+  const result = await capture;
+  assert.equal(result.text, `ChatGPT conversation:\n\nUser: ${files.map(file => file.text).join("\n\n")}\n\nAssistant: Selected answer`);
+  assert.equal(result.jsonCapture.files_supported, 6);
+  assert.equal(result.jsonCapture.files_downloaded_bytes, files.reduce((sum, file) => sum + file.size, 0));
+  assert.deepEqual([...descriptors].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5], "Duplicate IDs still share one download.");
+  assert.equal(peak, 4);
+  assert.equal(h.navigationListeners(), 0);
+});
+
+test("ChatGPT concurrent file failure retains its own status and index while healthy siblings continue", { timeout: 5000 }, async () => {
+  const { data, files, fetchImpl } = pasteFixture(Array.from({ length: 6 }, (_, i) => `Original document ${i}`));
+  const started = captureGate();
+  let descriptors = 0, cancelled = 0;
+  const h = setup(data, 200, { fetchImpl: async request => {
+    const url = new URL(request.url, "https://chatgpt.com");
+    if (url.pathname.startsWith("/backend-api/files/download/")) {
+      if (++descriptors === 4) started.release();
+      if (url.pathname.endsWith(`/${files[1].id}`)) {
+        await started.promise;
+        return new Response(new ReadableStream({ cancel() { cancelled++; } }, { highWaterMark: 0 }),
+          { status: 503, headers: { "content-type": "application/json" } });
+      }
+    }
+    return fetchImpl(request);
+  } });
+  await discover(h);
+  const result = await h.window.__capCaptureChatGptJson();
+  assert.equal(result.text, `ChatGPT conversation:\n\nUser: ${files.filter((_, i) => i !== 1).map(file => file.text).join("\n\n")}\n\nAssistant: Selected answer`);
+  assert.equal(result.jsonCapture.outcome, "partial");
+  assert.equal(result.jsonCapture.files_skipped, 1);
+  assert.equal(result.jsonCapture.failure_file_index, 2);
+  assert.equal(result.jsonCapture.failure_http_status, 503);
+  assert.equal(result.jsonCapture.failure_phase, "headers");
+  assert.equal(cancelled, 1);
+  assert.equal(descriptors, 6, "Unreadable files must not discard later healthy files.");
+  assert.doesNotMatch(JSON.stringify(result.jsonCapture), /SIGNED_URL|TEST_ONLY|file_test|https:/);
+});
+
+test("ChatGPT concurrent expired descriptors share one auth recovery and each retry only once", { timeout: 5000 }, async () => {
+  const { data, files, fetchImpl } = pasteFixture(["First paste", "Second paste", "Third paste", "Fourth paste"], "Bearer FRESH_TEST");
+  const firstWave = captureGate();
+  const attempts = new Map();
+  let stale = 0, sessions = 0, discarded = 0;
+  const h = setup(data, 200, { fetchImpl: async request => {
+    const url = new URL(request.url, "https://chatgpt.com");
+    if (url.pathname === "/api/auth/session") {
+      sessions++;
+      return jsonResponse({ accessToken: "FRESH_TEST", account: { id: "test-account" } });
+    }
+    if (url.pathname.startsWith("/backend-api/files/download/")) {
+      attempts.set(url.pathname, (attempts.get(url.pathname) || 0) + 1);
+      if (request.options.headers.get("authorization") === "Bearer TEST_ONLY") {
+        if (++stale === 4) firstWave.release();
+        await firstWave.promise;
+        return new Response(new ReadableStream({ cancel() { discarded++; } }, { highWaterMark: 0 }),
+          { status: 401, headers: { "content-type": "application/json" } });
+      }
+    }
+    return fetchImpl(request);
+  } });
+  await discover(h);
+  const result = await h.window.__capCaptureChatGptJson();
+  assert.equal(result.text, `ChatGPT conversation:\n\nUser: ${files.map(file => file.text).join("\n\n")}\n\nAssistant: Selected answer`);
+  assert.equal(sessions, 1);
+  assert.equal(discarded, 4);
+  assert.deepEqual([...attempts.values()], [2, 2, 2, 2]);
+  assert.equal(result.jsonCapture.auth_refreshes, 1);
+});
+
+clockTest("ChatGPT a progressing sibling cannot extend another file's 15-second idle deadline", { tickMs: 100 }, async () => {
+  const { data, files, fetchImpl } = pasteFixture(["Stalled original", "123456789"]);
+  let activeBodies = 0, aborted = 0;
+  const h = setup(data, 200, { fetchImpl: request => {
+    const url = new URL(request.url, "https://chatgpt.com");
+    if (url.pathname !== "/backend-api/estuary/content") return fetchImpl(request);
+    const progressing = url.searchParams.get("id") === files[1].id;
+    return new Response(new ReadableStream({ start(stream) {
+      activeBodies++;
+      let timer;
+      const pump = () => { stream.enqueue(new TextEncoder().encode("1")); timer = setTimeout(pump, 5000); };
+      if (progressing) timer = setTimeout(pump, 5000);
+      request.options.signal.addEventListener("abort", () => {
+        clearTimeout(timer); aborted++; stream.error(new DOMException("aborted", "AbortError"));
+      }, { once: true });
+    } }, { highWaterMark: 0 }), { headers: { "content-type": "text/plain" } });
+  } });
+  await discover(h);
+  await assert.rejects(h.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.captureFailureReason, "timeout");
+    assert.equal(error.jsonCapture.failure_file_index, 1);
+    assert.equal(error.jsonCapture.failure_stage, "attachment_body");
+    assert.equal(error.jsonCapture.failure_read_bytes, 0);
+    assert.ok(error.jsonCapture.failure_request_ms >= 15000 && error.jsonCapture.failure_request_ms < 16000);
+    return true;
+  });
+  assert.equal(activeBodies, 2);
+  assert.equal(aborted, 2);
+  assert.ok(h.replies.every(reply => !reply.data && !reply.pastedTexts));
+});
+
+test("ChatGPT cancellation awaits all parallel reader cleanup before releasing the next capture", async () => {
+  const { data, fetchImpl } = pasteFixture(Array.from({ length: 6 }, (_, i) => `Original ${i}`));
+  const cleanups = Array.from({ length: 4 }, captureGate);
+  let stalled = true, bodies = 0, cancelling = 0, released = 0, settled = false;
+  const h = setup(data, 200, { fetchImpl: request => {
+    if (!stalled || !request.url.includes("/estuary/content")) return fetchImpl(request);
+    const index = bodies++;
+    const response = new Response(null, { headers: { "content-type": "text/plain" } });
+    Object.defineProperty(response, "body", { value: { getReader: () => ({
+      read: () => new Promise((_, reject) => request.options.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true })),
+      cancel: async () => { cancelling++; await cleanups[index].promise; },
+      releaseLock: () => { released++; }
+    }) } });
+    return response;
+  } });
+  await discover(h);
+  const controller = new AbortController();
+  const capture = h.window.__capCaptureChatGptJson(undefined, controller.signal);
+  const stopped = assert.rejects(capture, error => error.diagnosticCode === "user_cancelled");
+  capture.then(() => { settled = true; }, () => { settled = true; });
+  try {
+    await flushParallelCaptureUntil(() => bodies === 4);
+    controller.abort();
+    await flushParallelCaptureUntil(() => cancelling === 4);
+    assert.equal(settled, false);
+    cleanups[0].release();
+    await flushParallelCaptureUntil(() => released === 1);
+    assert.equal(settled, false, "One completed cleanup must not release the shared capture queue.");
+  } finally {
+    controller.abort();
+    for (const cleanup of cleanups) cleanup.release();
+    await stopped;
+  }
+  assert.equal(released, 4);
+  assert.equal(h.requests.filter(request => request.url.includes("/files/download/")).length, 4);
+  assert.ok(h.replies.every(reply => !reply.data && !reply.pastedTexts));
+  stalled = false;
+  assert.equal((await h.window.__capCaptureChatGptJson()).jsonCapture.files_supported, 6);
+  assert.equal(h.navigationListeners(), 0);
+});
 
 clockTest("ChatGPT completes healthy original files after history consumes most of the old capture budget", { tickMs: 100 }, async () => {
   const { data, files, fetchImpl } = pasteFixture(["First complete original", "  Second complete original\r\n"]);
@@ -1154,10 +1368,10 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   const harness = setup(data, 200, { fetchImpl });
   await discover(harness);
   const old = harness.window.__capChatGptFetchState;
-  old.version = 29;
+  old.version = 30;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 30);
+  assert.equal(harness.window.__capChatGptFetchState.version, 31);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");

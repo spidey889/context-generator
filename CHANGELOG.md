@@ -6,6 +6,13 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-31
 
+- **Download ChatGPT pasted-text files in parallel.** The previous capture awaited each file's descriptor and complete body before starting the next file.
+  - Run at most four descriptor/body pipelines together and refill free slots immediately. Preserve selected-branch order, duplicate-ID reuse, exact text and the existing file/transcript/raw byte limits.
+  - Give every active request its own inactivity timer and failure metadata so a progressing sibling cannot hide a stalled file or overwrite its status/index. The capture keeps its existing 45-second absolute deadline.
+  - Coordinate simultaneous expired descriptors through one auth recovery operation; stale in-flight reads can each retry once with the same recovered headers. Signed file bodies still receive no bearer headers or redirects.
+  - Abort and settle all owned readers on capture-wide failure/cancellation before releasing MAIN; unreadable file-local bodies still leave healthy siblings eligible. Advance hook readiness to v31 so old page closures are replaced.
+  - Add regressions for four-way overlap/refill/order, shared raw-budget overflow, isolated failure details, concurrent auth recovery, independent stall deadlines and cancellation cleanup. Tests and browser verification are deliberately left to the owner; no speedup or production release is claimed.
+
 - **Keep diagnostic helpers within Vercel deployment limits.** Both `logs-provider` previews built successfully but failed while deploying their outputs.
   - Vercel reported `exceeded_serverless_functions_per_deployment`: the new helper in `api/` became a thirteenth function against this project's twelve-function limit.
   - Move that imported helper to `lib/`, updating both backend imports and its tests. Keep provider behavior, deadlines, privacy rules and all existing endpoints unchanged.

@@ -303,11 +303,11 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.type === "pong" && reply.id === id
-            && reply.version !== 30) metrics?.set({ hook_status: "version_mismatch" });
+            && reply.version !== 31) metrics?.set({ hook_status: "version_mismatch" });
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
           && reply.type === "pong" && reply.id === id) {
           debug("hook_reply", { observed_version: Number.isSafeInteger(reply.version) ? reply.version : 0 });
-          if (reply.version === 30) finish(true);
+          if (reply.version === 31) finish(true);
         }
       };
       const ping = () => {
@@ -359,7 +359,7 @@
         }
       }
       if (signal?.aborted) throw cancelledError();
-      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 30 });
+      metrics.set({ hook_ready: true, hook_status: "ready", hook_ms: Date.now() - hookStarted, adapter_version: 31 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       metrics.checkpoint("route", "history");
       return await new Promise((resolve, reject) => {
