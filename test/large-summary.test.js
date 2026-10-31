@@ -276,6 +276,84 @@ test("the first valid NVIDIA result wins; absent or disabled NVIDIA uses the con
   assert.equal(disabled.statusCode, 200); assert.equal(calls[3].body.model, "deepseek-v4.1-flash:free");
 });
 
+test("a rate-limited TokenHarbor primary uses its distinct backup once with the same input", async t => {
+  const calls = [];
+  setup(t, async (url, options) => {
+    calls.push({ url, auth: options.headers.Authorization, body: JSON.parse(options.body) });
+    if (url.includes("openrouter")) return new Response("", { status: 502 });
+    if (options.headers.Authorization === "Bearer limited-primary") return new Response("PRIVATE_QUOTA", { status: 429 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }));
+  });
+  process.env.TOKENHARBOR_API_KEY = "limited-primary";
+  process.env.TOKENHARBOR_BACKUP_API_KEY = "working-backup";
+  const res = response();
+  await handler(request({ conversation: "a".repeat(600000), large: metadata, telemetry }), res);
+  assert.equal(res.statusCode, 200);
+  const token = calls.filter(call => call.url.includes("tokenharbor"));
+  assert.deepEqual(token.map(call => call.auth), ["Bearer limited-primary", "Bearer working-backup"]);
+  assert.deepEqual(token[0].body, token[1].body);
+  assert.equal(calls.length, 3);
+  assert.equal(res.body.timing.keySlot, "backup");
+  assert.ok(res.body.receipt);
+  assert.doesNotMatch(JSON.stringify(res.body), /limited-primary|working-backup|PRIVATE_QUOTA/);
+});
+
+test("two rate-limited TokenHarbor keys are bounded and skipped on subsequent warm requests", async t => {
+  const calls = [];
+  setup(t, async (_url, options) => { calls.push(options.headers.Authorization); return new Response("", { status: 429 }); });
+  delete process.env.OPENROUTER_API_KEY;
+  process.env.TOKENHARBOR_API_KEY = "limited-primary";
+  process.env.TOKENHARBOR_BACKUP_API_KEY = "limited-backup";
+  const body = { conversation: "a".repeat(600000), large: metadata };
+  const first = response(); await handler(request(body), first);
+  assert.equal(first.statusCode, 502);
+  assert.deepEqual(calls, ["Bearer limited-primary", "Bearer limited-backup"]);
+  const second = response(); await handler(request(body), second);
+  assert.equal(second.statusCode, 503);
+  assert.equal(calls.length, 2, "Do not repeatedly hit known rate-limited keys while they cool down.");
+  assert.equal(second.body.receipt, undefined);
+});
+
+test("TokenHarbor does not rotate identical credentials or use a second key after non-quota errors", async t => {
+  let calls = 0;
+  setup(t, async () => { calls++; return new Response("", { status: 429 }); });
+  delete process.env.OPENROUTER_API_KEY;
+  process.env.TOKENHARBOR_API_KEY = process.env.TOKENHARBOR_BACKUP_API_KEY = "same-key";
+  const body = { conversation: "a".repeat(600000), large: metadata };
+  await handler(request(body), response());
+  assert.equal(calls, 1);
+  for (const status of [401, 403, 503]) {
+    handler.__test.resetRateLimit(); calls = 0;
+    process.env.TOKENHARBOR_API_KEY = "primary"; process.env.TOKENHARBOR_BACKUP_API_KEY = "backup";
+    global.fetch = async () => { calls++; return new Response("", { status }); };
+    await handler(request(body), response());
+    assert.equal(calls, 1, `HTTP ${status} must not consume a second key.`);
+  }
+});
+
+clockTest("the TokenHarbor backup shares the original deadline and a limited key recovers after cooldown", { tickMs: 1000, maxElapsedMs: 85000 }, async t => {
+  const calls = [];
+  setup(t, async (_url, options) => {
+    calls.push(options.headers.Authorization);
+    if (options.headers.Authorization === "Bearer primary") return new Response("", { status: 429 });
+    return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+  });
+  delete process.env.OPENROUTER_API_KEY;
+  process.env.TOKENHARBOR_API_KEY = "primary"; process.env.TOKENHARBOR_BACKUP_API_KEY = "backup";
+  const body = { conversation: "a".repeat(600000), large: metadata }, first = response(), start = Date.now();
+  await handler(request(body), first);
+  assert.equal(first.statusCode, 504);
+  assert.deepEqual(calls, ["Bearer primary", "Bearer backup"]);
+  assert.ok(Date.now() - start <= 75000);
+  global.fetch = async (_url, options) => {
+    calls.push(options.headers.Authorization);
+    return new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }));
+  };
+  const second = response(); await handler(request(body), second);
+  assert.equal(second.statusCode, 200);
+  assert.equal(calls[2], "Bearer primary", "A 429 is a temporary cooldown, not permanent disablement.");
+});
+
 test("rejected or truncated NVIDIA output falls back, while two failures produce no receipt or extra retry", async t => {
   let calls = 0;
   setup(t);

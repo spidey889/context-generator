@@ -6,6 +6,14 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-10-31
 
+- **Use the existing TokenHarbor backup after primary quota failure for large chats.** Real-browser diagnostics showed NVIDIA/OpenRouter HTTP 502 alongside TokenHarbor primary HTTP 429, leaving no serving route even though a separate backup credential was configured.
+  - The old `primary || backup` selection only used the backup when the primary environment variable was absent. A configured, quota-limited primary prevented the backup from being attempted; the owner explicitly authorized trying that existing key.
+  - Try the distinct backup once only after TokenHarbor HTTP 429, with identical model/input and the remaining shared 75-second budget. Preserve the concurrent NVIDIA race, cancellation, strict receipts, final proof and ordinary up-to-1M routing. No paid route or new model is introduced.
+  - Apply a 60-second warm-instance cooldown to each observed limited key, keyed by a one-way fingerprint, so subsequent parts do not repeatedly call a known-limited credential. Already concurrent requests and separate serverless instances are outside this best-effort local cooldown.
+  - Regressions reproduce the unreachable backup before the fix, and cover both keys limited, duplicate keys, non-quota errors, cooldown expiry and absolute deadline preservation. Provider failure diagnostics retain existing key-slot labels; successful timing identifies only the winning slot, never a key value.
+  - A no-router installed-Brave probe also completed the exact 1,022,786-character flow with a forced 35-second wait for one part's response headers. That rejects delayed headers alone as a sufficient reproduction of the earlier missing-worker-reply report; its precise cause remains unclassified.
+  - Live backup availability and real-chat completion remain verification steps; passing synthetic checks alone is not a production or Store claim.
+
 - **Recover large transfers after an interrupted response body.** The real 1,022,786-character Claude-to-ChatGPT transfer reproduced the owner's 3-of-4 failure: capture and three summaries completed, then the fourth HTTP-200 body disconnected with about 72 seconds still available.
   - Durable diagnostics identified `stream_read` / `body_read_failed` / `TypeError`, without EOF, a final result, caller cancellation or elapsed deadlines. OpenRouter received the model requests; this failure occurred while returning a response to the extension. The underlying network disconnect remains unclassified.
   - The large route immediately aborted sibling work on any failed response, whereas the ordinary route already retried interrupted bodies. Retry only the disconnected part/final request once, retaining accepted parts and the same verified receipt chain in memory.

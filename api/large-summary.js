@@ -2,6 +2,7 @@ const { applyCorsHeaders, isValidPreflightRequest, isTrustedExtensionRequest, ac
 const { getHeader } = require("./request-validation");
 const protocol = require("./large-summary-protocol");
 const { createProviderFailureLog } = require("./provider-failure-log");
+const { createHash } = require("node:crypto");
 const { createSummaryWithProvider, getInitialSummaryMessages, getProviderRequestBody,
   getSummaryProfile, createLongSummaryResponse } = require("./summarize").__test;
 
@@ -13,6 +14,16 @@ const BACKUP_PROVIDER = Object.freeze({ id: "tokenharbor", label: "TokenHarbor",
   url: "https://tokenharbor.ai/v1/chat/completions" });
 const REQUEST_TIMEOUT_MS = 75000;
 const LIMIT_KEY = Symbol.for("cap-context.large-summary-rate-limit.v1");
+const KEY_COOLDOWN = Symbol.for("cap-context.large-summary-key-cooldown.v1");
+const keyId = key => createHash("sha256").update(key).digest("hex");
+
+function tokenHarborCredentials() {
+  const cooldowns = globalThis[KEY_COOLDOWN] ||= new Map();
+  for (const [id, until] of cooldowns) if (Date.now() >= until) cooldowns.delete(id);
+  const keys = [process.env.TOKENHARBOR_API_KEY?.trim(), process.env.TOKENHARBOR_BACKUP_API_KEY?.trim()];
+  return keys.flatMap((apiKey, index) => apiKey && (index === 0 || apiKey !== keys[0]) && !cooldowns.has(keyId(apiKey))
+    ? [{ apiKey, keySlot: index === 0 ? "primary" : "backup" }] : []);
+}
 
 // Chunk requests must not consume the ordinary summary endpoint's 8/minute
 // allowance. The shared concurrency slot still bounds both endpoints together.
@@ -55,11 +66,10 @@ async function handler(req, res) {
   if (!validation.ok) return res.status(validation.status).json({ code: validation.code, error: validation.error });
   const secret = process.env.TELEMETRY_SIGNING_KEY;
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  const backupKey = process.env.TOKENHARBOR_API_KEY?.trim() || process.env.TOKENHARBOR_BACKUP_API_KEY?.trim();
+  const credentials = tokenHarborCredentials();
   const routes = [
     ...(process.env.OPENROUTER_ENABLED !== "false" && apiKey ? [{ provider: PROVIDER, model: MODEL, apiKey }] : []),
-    ...(process.env.TOKENHARBOR_ENABLED !== "false" && backupKey ? [{ provider: BACKUP_PROVIDER, model: BACKUP_MODEL,
-      apiKey: backupKey, keySlot: process.env.TOKENHARBOR_API_KEY?.trim() ? "primary" : "backup" }] : [])
+    ...(process.env.TOKENHARBOR_ENABLED !== "false" && credentials.length ? [{ provider: BACKUP_PROVIDER, model: BACKUP_MODEL, credentials }] : [])
   ];
   if (process.env.LARGE_SUMMARY_ENABLED === "false" || !routes.length || !protocol.validSecret(secret))
     return res.status(503).json({ code: "summary_unavailable", error: "Large summary service is unavailable" });
@@ -97,9 +107,6 @@ async function handler(req, res) {
       let onAbort;
       try {
         signal.throwIfAborted();
-        const budgetMs = REQUEST_TIMEOUT_MS - (Date.now() - startedAt);
-        if (budgetMs <= 0) { controller.abort(); controller.signal.throwIfAborted(); }
-        modelsTried.push(route.model);
         // Native abort should stop fetch/body reads, but an unresponsive adapter
         // must not hold the response open past expiry or a winning peer.
         const cancelled = new Promise((_resolve, reject) => {
@@ -107,15 +114,34 @@ async function handler(req, res) {
           signal.addEventListener("abort", onAbort, { once: true });
           if (signal.aborted) onAbort();
         });
-        const candidate = await Promise.race([createSummaryWithProvider({ ...route, profile,
-          initialMessages: getInitialSummaryMessages(conversation, profile), requestBudgetMs: budgetMs,
-          requestContext: { signal, maxAttempts: 1, firstAnswerTimeoutMs: budgetMs,
-            inputChars: conversation.length, routeIndex: index + 1, ...(route.keySlot ? { keySlot: route.keySlot } : {}),
-            // Acknowledge each model attempt immediately, as /summarize does.
-            // Waiting for the first timed heartbeat leaves an MV3 fetch pending
-            // on headers; runtime keepalive does not remove that fetch limit.
-            // Reset is control-only: intermediate summaries remain private.
-            onDelta() {}, onStart: channel.reset, onProviderFailure: observation => failures.record(observation) } }), cancelled]);
+        const run = async () => {
+          const keys = route.credentials || [route];
+          for (let keyIndex = 0; keyIndex < keys.length; keyIndex++) {
+            signal.throwIfAborted();
+            const budgetMs = REQUEST_TIMEOUT_MS - (Date.now() - startedAt), credential = keys[keyIndex];
+            if (budgetMs <= 0) { controller.abort(); controller.signal.throwIfAborted(); }
+            modelsTried.push(route.model);
+            try {
+              const result = await createSummaryWithProvider({ ...route, ...credential, profile,
+                initialMessages: getInitialSummaryMessages(conversation, profile), requestBudgetMs: budgetMs,
+                requestContext: { signal, maxAttempts: 1, firstAnswerTimeoutMs: budgetMs,
+                  inputChars: conversation.length, routeIndex: index + 1, ...(credential.keySlot ? { keySlot: credential.keySlot } : {}),
+                  // Control-only acknowledgement must precede any model wait.
+                  onDelta() {}, onStart: channel.reset, onProviderFailure: observation => failures.record(observation) } });
+              return { ...result, ...(credential.keySlot ? { keySlot: credential.keySlot } : {}) };
+            } catch (error) {
+              if (route.provider.id !== "tokenharbor" || error.providerStatus !== 429) throw error;
+              // Quota failure alone may advance to the owner's existing backup.
+              // Warm instances skip that key for a minute, without storing keys
+              // or adding a distributed database dependency. Cold peers may
+              // already have submitted their first concurrent request.
+              globalThis[KEY_COOLDOWN].set(keyId(credential.apiKey), Date.now() + 60000);
+              signal.throwIfAborted();
+              if (keyIndex === keys.length - 1) throw error;
+            }
+          }
+        };
+        const candidate = await Promise.race([run(), cancelled]);
         signal.throwIfAborted();
         if (candidate.model !== route.model || candidate.provider !== route.provider.id
           || /^(?:length|max_tokens|max_output_tokens)$/i.test(String(candidate.finishReason || ""))
@@ -171,4 +197,6 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports.__test = { consumeRateLimit, finalConversation, providerBodyBytes, resetRateLimit: () => { delete globalThis[LIMIT_KEY]; } };
+module.exports.__test = { consumeRateLimit, finalConversation, providerBodyBytes, resetRateLimit: () => {
+  delete globalThis[LIMIT_KEY]; delete globalThis[KEY_COOLDOWN];
+} };
