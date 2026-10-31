@@ -490,6 +490,8 @@ Named provider request-ID headers may supply one ASCII correlation token of 8–
 
 Provider failures retain their broad category plus a closed `failure_detail`: JSON parsing versus response shape, UTF-8 decoding, SSE event JSON/shape, missing stream completion, response read failure, empty answer/content, refusal-only output, self-reasoning or unfinished thinking, and explicit upstream/safety errors. Parser exceptions use fixed messages; no offending input is copied into diagnostics. Existing summary acceptance and fallback policy remain unchanged.
 
+Above 1M characters, each provider observation identifies `summary_phase`, zero-based `part_index` (the final combine uses `part_total`) and `part_total`. The existing strict large-result gate records model/provider mismatch, token-limit termination, empty result or output-size excess through the original attempt recorder before rejecting. This retains observed headers/timing and produces one record; cancelled race peers remain silent. Large response-side observations include these closed details as well.
+
 [Provider fallbacks](docs/provider-fallbacks.md) holds the detailed configuration/retry reference. Current order:
 
 ```text

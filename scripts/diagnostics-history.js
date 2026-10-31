@@ -22,7 +22,8 @@ function beforeRetentionRecovery(schema) {
 }
 function beforeProviderLogging(schema) {
   const result = structuredClone(schema);
-  for (const key of ["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id", "failure_detail"]) delete result[key];
+  for (const key of ["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id", "failure_detail",
+    "summary_phase", "part_index", "part_total"]) delete result[key];
   return result;
 }
 module.exports = { withoutPasteEditorFields, beforePasteDiagnosis, beforeRetentionRecovery, beforeProviderLogging };

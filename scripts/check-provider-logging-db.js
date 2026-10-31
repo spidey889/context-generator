@@ -27,6 +27,15 @@ async function checkProviderLogging(db, sql) {
       assert.equal(valid, contract.validate(sample) !== null, key); checks++;
     }
   }
+  if (rules.summary_phase) {
+    for (const context of [{ summary_phase: "part", part_index: 0, part_total: 2 },
+      { summary_phase: "final", part_index: 2, part_total: 2 }, { summary_phase: "part", part_index: 2, part_total: 2 },
+      { summary_phase: "final", part_index: 0, part_total: 2 }, { summary_phase: "part" }]) {
+      const sample = { ...base, ...context };
+      assert.equal((await db.query("select public.is_valid_provider_failure($1::jsonb) valid", [JSON.stringify(sample)])).rows[0].valid,
+        contract.validate(sample) !== null); checks++;
+    }
+  }
   return checks;
 }
 module.exports = { checkProviderLogging };

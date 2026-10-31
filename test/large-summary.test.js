@@ -311,7 +311,7 @@ test("two rate-limited TokenHarbor keys are bounded and skipped on subsequent wa
   assert.equal(first.body.providerFailures.length, 2);
   assert.deepEqual(first.body.providerFailures.map(entry => entry.key_slot), ["primary", "backup"]);
   assert.ok(first.body.providerFailures.every(entry => Object.keys(entry).every(key =>
-    ["provider", "key_slot", "failure_reason", "phase", "elapsed_ms", "http_status"].includes(key))));
+    ["provider", "key_slot", "failure_reason", "phase", "elapsed_ms", "http_status", "summary_phase", "part_index", "part_total"].includes(key))));
   assert.deepEqual(calls, ["Bearer limited-primary", "Bearer limited-backup"]);
   const second = response(); await handler(request(body), second);
   assert.equal(second.statusCode, 503);
@@ -479,13 +479,45 @@ clockTest("the large endpoint finishes at its deadline even when upstream adapte
   assert.ok(Date.now() - start <= 75000);
 });
 
-test("truncated provider output cannot certify complete coverage of a conversation part", async t => {
-  setup(t, async () => new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "length" }] }), { status: 200 }));
-  const res = response();
-  await handler(request({ conversation: "a".repeat(600000), large: metadata, telemetry }), res);
-  assert.equal(res.statusCode, 502);
-  assert.equal(res.body.receipt, undefined);
-  assert.equal(res.body.summaryProofV3, undefined);
+test("strict large result checks identify each rejection cause", () => {
+  const route = { model: "model", provider: { id: "openrouter" } };
+  const candidate = { model: "model", provider: "openrouter", summary: usefulSummary, finishReason: "stop" };
+  assert.equal(handler.__test.strictResultFailure(candidate, route), null);
+  for (const [changes, reason] of [[{ model: "other" }, "large_model_mismatch"], [{ provider: "other" }, "large_provider_mismatch"],
+    [{ finishReason: "length" }, "large_token_limit"], [{ summary: " " }, "large_empty_result"],
+    [{ summary: "x".repeat(protocol.MAX_SUMMARY_CHARS + 1) }, "large_output_limit"]])
+    assert.equal(handler.__test.strictResultFailure({ ...candidate, ...changes }, route), reason);
+});
+
+test("strict rejection durably logs the original part or final step exactly once", async t => {
+  const observations = [];
+  setup(t, async (url, options) => {
+    if (url === "https://edge.invalid/failures") {
+      observations.push(JSON.parse(options.body).event);
+      return new Response(null, { status: 204 });
+    }
+    return new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "length" }] }),
+      { headers: { "x-request-id": "req_large_12345678" } });
+  });
+  Object.assign(process.env, { SUPABASE_TELEMETRY_FUNCTION_URL: "https://edge.invalid/failures",
+    SUPABASE_TELEMETRY_PUBLISHABLE_KEY: "test-public", TELEMETRY_RELAY_SECRET: secret });
+  for (const body of [{ conversation: "a".repeat(600000), large: metadata, telemetry }, finalBody()]) {
+    const res = response();
+    await handler(request(body), res);
+    assert.equal(res.statusCode, 502);
+    assert.equal(res.body.receipt, undefined);
+    assert.equal(res.body.summaryProofV3, undefined);
+  }
+  assert.equal(observations.length, 2);
+  for (const [index, entry] of observations.entries()) {
+    assert.equal(entry.failure_detail, "large_token_limit");
+    assert.equal(entry.summary_phase, index ? "final" : "part");
+    assert.equal(entry.part_index, index ? 2 : 0);
+    assert.equal(entry.part_total, 2);
+    assert.equal(entry.upstream_request_id, "req_large_12345678");
+    assert.ok(require("../supabase/functions/_shared/provider-failure").validate(entry));
+  }
+  assert.ok(!JSON.stringify(observations).includes(usefulSummary));
 });
 
 clockTest("large summary total deadline aborts a silent provider without retry or receipt", { tickMs: 1000, maxElapsedMs: 80000 }, async t => {

@@ -55,6 +55,15 @@ function providerBodyBytes(conversation, profile, provider = PROVIDER, model = M
   return Buffer.byteLength(JSON.stringify({ ...body, stream: true }), "utf8");
 }
 
+function strictResultFailure(candidate, route) {
+  if (candidate.model !== route.model) return "large_model_mismatch";
+  if (candidate.provider !== route.provider.id) return "large_provider_mismatch";
+  if (/^(?:length|max_tokens|max_output_tokens)$/i.test(String(candidate.finishReason || ""))) return "large_token_limit";
+  if (!candidate.summary?.trim()) return "large_empty_result";
+  if (candidate.summary.length > protocol.MAX_SUMMARY_CHARS) return "large_output_limit";
+  return null;
+}
+
 async function handler(req, res) {
   const cors = applyCorsHeaders(req, res);
   if (req.method === "OPTIONS") {
@@ -97,13 +106,16 @@ async function handler(req, res) {
   const channel = createLongSummaryResponse(res, { stream: getHeader(req, "accept").includes("application/x-ndjson") });
   const failures = createProviderFailureLog({ attemptId: validation.telemetry?.attempt_id, telemetry: validation.telemetry });
   const providerFailures = [];
-  const recordFailure = observation => {
+  const recordFailure = raw => {
+    const observation = { ...raw, summary_phase: validation.large.phase,
+      part_index: part ? validation.large.index : validation.large.total, part_total: validation.large.total };
     failures.record(observation);
     // A small response-side diagnosis also works without optional telemetry.
     // Project only existing closed metadata; never return upstream error text.
     if (providerFailures.length >= 3) return;
     const record = {};
-    for (const key of ["provider", "key_slot", "failure_reason", "phase", "elapsed_ms", "http_status"]) {
+    for (const key of ["provider", "key_slot", "failure_reason", "failure_detail", "phase", "elapsed_ms", "http_status",
+      "summary_phase", "part_index", "part_total"]) {
       const value = observation[key], rule = providerFailureSchema[key];
       if (rule.values ? rule.values.includes(value) : Number.isInteger(value) && value >= rule.min && value <= rule.max) record[key] = value;
     }
@@ -141,7 +153,8 @@ async function handler(req, res) {
                 requestContext: { signal, maxAttempts: 1, firstAnswerTimeoutMs: budgetMs,
                   inputChars: conversation.length, routeIndex: index + 1, ...(credential.keySlot ? { keySlot: credential.keySlot } : {}),
                   // Control-only acknowledgement must precede any model wait.
-                  onDelta() {}, onStart: channel.reset, onProviderFailure: recordFailure } });
+                  onDelta() {}, onStart: channel.reset, onProviderFailure: recordFailure,
+                  rejectResult: candidate => strictResultFailure(candidate, route) } });
               return { ...result, ...(credential.keySlot ? { keySlot: credential.keySlot } : {}) };
             } catch (error) {
               if (route.provider.id !== "tokenharbor" || error.providerStatus !== 429) throw error;
@@ -157,10 +170,6 @@ async function handler(req, res) {
         };
         const candidate = await Promise.race([run(), cancelled]);
         signal.throwIfAborted();
-        if (candidate.model !== route.model || candidate.provider !== route.provider.id
-          || /^(?:length|max_tokens|max_output_tokens)$/i.test(String(candidate.finishReason || ""))
-          || !candidate.summary?.trim() || candidate.summary.length > protocol.MAX_SUMMARY_CHARS)
-          throw new Error("Incomplete large summary result");
         return candidate;
       } finally {
         signal.removeEventListener("abort", onAbort);
@@ -211,6 +220,6 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports.__test = { consumeRateLimit, finalConversation, providerBodyBytes, resetRateLimit: () => {
+module.exports.__test = { consumeRateLimit, finalConversation, providerBodyBytes, strictResultFailure, resetRateLimit: () => {
   delete globalThis[LIMIT_KEY]; delete globalThis[KEY_COOLDOWN];
 } };

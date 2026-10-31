@@ -35,7 +35,9 @@
     upstream_request_id: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" },
     failure_detail: enumeration(["json_parse_failed", "response_shape_invalid", "utf8_decode_failed", "stream_event_json_invalid",
       "stream_event_shape_invalid", "stream_incomplete", "response_read_failed", "empty_answer", "empty_content", "refusal_only",
-      "thinking_instead_of_summary", "unfinished_thinking", "upstream_error", "safety_filter"])
+      "thinking_instead_of_summary", "unfinished_thinking", "upstream_error", "safety_filter",
+      "large_model_mismatch", "large_provider_mismatch", "large_token_limit", "large_empty_result", "large_output_limit"]),
+    summary_phase: enumeration(["part", "final"]), part_index: integer(0, 16), part_total: integer(2, 16)
   };
   const required = ["id", "request_id", "occurred_at", "environment", "provider", "model", "failure_reason", "phase", "route_index",
     "request_attempt", "input_chars", "request_bytes", "max_output_tokens", "elapsed_ms", "budget_ms"];
@@ -54,6 +56,9 @@
     }
     if (!models[input.provider]?.includes(input.model)) return null;
     if (input.timeout_kind !== undefined && input.failure_reason !== "provider_timeout") return null;
+    if (["summary_phase", "part_index", "part_total"].some(key => input[key] !== undefined)
+      && (input.summary_phase === undefined || input.part_index === undefined || input.part_total === undefined
+        || (input.summary_phase === "part" ? input.part_index >= input.part_total : input.part_index !== input.part_total))) return null;
     return { ...input };
   }
   const api = { validate, schema, required, models };

@@ -771,7 +771,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   };
   const summaryWordCount = countWords(summary);
 
-  return {
+  const result = {
     summary,
     provider: provider.id,
     model,
@@ -786,6 +786,15 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
     validationReason: validation.ok ? null : validation.reason,
     usage: initialUsage
   };
+  // Large requests apply their existing stricter gate while the original
+  // attempt recorder still owns its headers, timing and one-record guard.
+  const rejection = requestContext?.rejectResult?.(result);
+  if (rejection) {
+    initialResponse.recordFailure?.("provider_output_rejected", rejection);
+    throw Object.assign(createProviderError(provider, "Incomplete large summary result", 502, null, "provider_output_rejected"),
+      { failure_detail: rejection });
+  }
+  return result;
 }
 
 function requestProviderSummary(provider, apiKey, messages, profile, model, options = {}) {
