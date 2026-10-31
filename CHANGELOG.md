@@ -4,6 +4,16 @@ Decisions, important regressions and replaced approaches worth remembering. [LOG
 
 Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spidey889/context-generator/blob/9b663fdfbe98204803ec5526f91be2c01c61d62e/CHANGELOG.md) remains in Git with detailed experiments, rollout evidence and superseded iterations.
 
+## 2026-10-31
+
+- **Recover large transfers after an interrupted response body.** The real 1,022,786-character Claude-to-ChatGPT transfer reproduced the owner's 3-of-4 failure: capture and three summaries completed, then the fourth HTTP-200 body disconnected with about 72 seconds still available.
+  - Durable diagnostics identified `stream_read` / `body_read_failed` / `TypeError`, without EOF, a final result, caller cancellation or elapsed deadlines. OpenRouter received the model requests; this failure occurred while returning a response to the extension. The underlying network disconnect remains unclassified.
+  - The large route immediately aborted sibling work on any failed response, whereas the ordinary route already retried interrupted bodies. Retry only the disconnected part/final request once, retaining accepted parts and the same verified receipt chain in memory.
+  - Share the original absolute request/phase/transfer deadlines across both attempts. Retain source and consent checks, complete-stream validation, strict receipts, bounded metadata and exact local recovery after exhausted retries. Provider errors, malformed content and cancellation still stop without this retry.
+  - Preserve recoverable read failures through the existing consent-aware telemetry outbox without freezing the part checkpoint in a failed state before recovery. No schema, provider policy, permissions, backend deployment or ordinary-route changes are needed.
+  - New regressions fail on the prior worker and pass after the fix; 203 focused checks pass. Installed Brave verifies 4M capture/paste, provider failure, pre-header transport failure, and forced part/final body disconnect recovery; completed parts are not resubmitted and Send is never clicked.
+  - A successful real-chat run with the updated unpacked extension remains required before claiming the owner's full flow is fixed. The branch is separate from master and the Web Store release.
+
 ## 2026-10-30
 
 - **Preserve Claude drafts and focus through rich-text paste retries.** The signed-in Claude page uses a no-form Tiptap/ProseMirror editor with persisted-draft support; its existing selectors and readiness checks already recognize it.

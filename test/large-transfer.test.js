@@ -124,7 +124,7 @@ function backgroundFixture(fetchImpl, consent = () => true) {
   };
   vm.createContext(sandbox); new vm.Script(code).runInContext(sandbox);
   return { run: (conversation = "x".repeat(1000001)) => sandbox.summarizeLargeWithBackend(conversation, transferId, null, operation),
-    queued, checkpoints, localDebug, proofs, progress, sandbox };
+    queued, checkpoints, localDebug, proofs, progress, sandbox, operation };
 }
 
 test("large requests use the verified input count when the optional telemetry snapshot predates capture", async () => {
@@ -256,6 +256,95 @@ test("large HTTP rejection and incomplete streams retain their actual failure bo
     assert.equal(state.checkpoints.filter(report => report.diagnostics.summary_response_failures).length, 1);
     assert.doesNotMatch(JSON.stringify(state.checkpoints), /PRIVATE|https:|stack|receipt/);
   }
+});
+
+function interruptedBody() {
+  let reads = 0;
+  return { ok: true, status: 200, headers: new Headers({ "content-type": "application/x-ndjson" }),
+    body: { getReader: () => ({
+      async read() {
+        if (!reads++) return { done: false, value: new TextEncoder().encode('{"type":"reset"}\n') };
+        throw new TypeError("PRIVATE_NETWORK_DISCONNECT");
+      }, cancel: async () => {}, releaseLock() {}
+    }) } };
+}
+
+for (const phase of ["part", "final"]) test(`large interrupted ${phase} response retries only that request and retains completed work`, async () => {
+  const requests = [], tries = new Map();
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body), key = `${payload.large.phase}:${payload.large.index ?? "final"}`;
+    requests.push(payload); tries.set(key, (tries.get(key) || 0) + 1);
+    if (payload.large.phase === phase && (phase === "final" || payload.large.index === 3) && tries.get(key) === 1)
+      return interruptedBody();
+    if (payload.large.phase === "final") {
+      assert.equal(payload.parts.length, 4);
+      assert.deepEqual(payload.parts.map(part => part.receipt), ["proof-0", "proof-1", "proof-2", "proof-3"]);
+    }
+    return new Response(JSON.stringify({ summary: "Complete accepted result", receipt: `proof-${payload.large.index}`,
+      summaryProofV3: "a".repeat(64), summaryConfirmedAt: "2026-10-31T00:00:00Z", summaryModel: "nvidia/nemotron-3.5-super-vl:free" }));
+  });
+  assert.equal((await state.run()).summary, "Complete accepted result");
+  assert.equal(requests.length, 6, "Do not repeat completed parts or restart the whole transfer.");
+  assert.ok([...tries.values()].every(count => count <= 2));
+  const repeated = requests.filter(payload => payload.large.phase === phase && (phase === "final" || payload.large.index === 3));
+  assert.deepEqual(repeated[0], repeated[1], "The retry preserves the exact request and receipt chain.");
+  assert.equal(state.queued.length, 1);
+  assert.ok(state.checkpoints.at(-1).diagnostics.large_summary_requests.every(entry => entry.stage === "completed"));
+  const failures = state.checkpoints.filter(report => report.diagnostics.summary_response_failures);
+  assert.equal(failures.at(-1).diagnostics.summary_response_failures[0].reason, "body_read_failed");
+  assert.doesNotMatch(JSON.stringify(state.checkpoints), /PRIVATE|Complete accepted result|proof-|https:/);
+});
+
+test("large repeated body disconnects stop after one retry without finalizing partial results", async () => {
+  const calls = [];
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body); calls.push(payload.large);
+    if (payload.large.index === 3) return interruptedBody();
+    return new Response(JSON.stringify({ summary: "Completed part", receipt: `proof-${payload.large.index}` }));
+  });
+  await assert.rejects(state.run());
+  assert.equal(calls.filter(call => call.index === 3).length, 2);
+  assert.equal(calls.some(call => call.phase === "final"), false);
+  assert.equal(state.proofs.size, 0);
+  const failures = state.checkpoints.filter(report => report.diagnostics.summary_response_failures).at(-1).diagnostics.summary_response_failures;
+  assert.equal(failures.length, 2);
+  assert.deepEqual(Array.from(failures, entry => entry.attempt), [1, 2]);
+});
+
+test("large cancellation during an interrupted body never starts a retry", async () => {
+  let calls = 0;
+  const state = backgroundFixture(async () => {
+    calls++;
+    const response = interruptedBody();
+    const getReader = response.body.getReader;
+    response.body.getReader = () => {
+      const reader = getReader();
+      reader.read = async () => { state.operation.controller.abort(Object.assign(new Error("cancelled"), { code: "user_cancelled" }));
+        throw new TypeError("PRIVATE_CANCELLED_BODY"); };
+      return reader;
+    };
+    return response;
+  });
+  await assert.rejects(state.run());
+  assert.ok(calls <= 3, "Already concurrent requests may exist, but no retry is submitted.");
+});
+
+clockTest("large body retries share the original absolute request budget", { tickMs: 1000, maxElapsedMs: 116000 }, async () => {
+  let tries = 0;
+  const state = backgroundFixture(async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    if (payload.large.index !== 3) return new Response(JSON.stringify({ summary: "Part", receipt: "proof" }));
+    if (++tries === 1) {
+      await new Promise(resolve => setTimeout(resolve, 60000));
+      return interruptedBody();
+    }
+    return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+  });
+  await assert.rejects(state.run());
+  assert.equal(tries, 2);
+  const failure = state.checkpoints.filter(report => report.diagnostics.summary_response_failures).at(-1).diagnostics.summary_response_failures.at(-1);
+  assert.equal(failure.deadline_elapsed, true);
+  assert.equal(failure.aborted, true);
 });
 
 clockTest("large requests record an elapsed timeout before response headers", { tickMs: 1000, maxElapsedMs: 115000 }, async () => {

@@ -19,7 +19,7 @@ const finalSummary = 'Verified final handoff: preserve the accepted implementati
   + 'Continue the latest request by testing the complete transfer before any release.\n\nNext step:\n\n'
   + 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
 
-async function scenario(failPart, failTransport = false) {
+async function scenario(failPart, failTransport = false, interruptedPhase = null) {
   const fixture = fixtures("deepseek", "smoke", 1);
   const prefix = "DeepSeek conversation:\n\nUser: ", tail = "\n\nAssistant: Keep the complete conversation and test recovery.  \r\n";
   const pattern = "  Decision: preserve source text and Unicode 世界 🕷️.\r\n";
@@ -31,6 +31,7 @@ async function scenario(failPart, failTransport = false) {
   fixture.data.data.biz_data.chat_messages[0].fragments = [{ type: "REQUEST", content: text }];
   fixture.data.data.biz_data.chat_messages[1].fragments = [{ type: "RESPONSE", content: tail.slice("\n\nAssistant: ".length) }];
   const requests = [], reports = [], upstreamPartIndices = new Map();
+  let bodyInterrupted = false;
   let providerCalls = 0;
   const env = { ...process.env }, nativeFetch = global.fetch;
   process.env.OPENROUTER_API_KEY = "synthetic-smoke-key";
@@ -75,6 +76,17 @@ async function scenario(failPart, failTransport = false) {
         }
         // Reproduce a connection ending before the backend calls any model.
         if (failTransport) { res.destroy(); return; }
+        if (!bodyInterrupted && req.body.large.phase === interruptedPhase
+            && (interruptedPhase === "final" || req.body.large.index === 3)) {
+          bodyInterrupted = true;
+          // Send valid headers/control, then cut the actual browser body read.
+          // Even a received result is untrusted until the NDJSON stream ends.
+          res.writeHead(200, { "Content-Type": "application/x-ndjson" });
+          res.flushHeaders();
+          res.write('{"type":"reset"}\n{"type":"result","data":{"summary":"PRIVATE_INCOMPLETE_RESULT","receipt":"invalid"}}\n',
+            () => setTimeout(() => res.destroy(), 100));
+          return;
+        }
         res.status = code => { res.statusCode = code; return res; };
         res.json = body => { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(body)); return res; };
         return await largeHandler(req, res);
@@ -153,18 +165,30 @@ async function scenario(failPart, failTransport = false) {
       assert.equal(copied, recovery);
       if (destination) assert.equal(await destination.evaluate("document.getElementById('prompt-textarea').value"), "", "Never auto-paste the full 4M fallback.");
     } else {
-      assert.equal(finals.length, 1);
-      const parts = requests.filter(r => r.large.phase === "part").sort((a, b) => a.large.index - b.large.index);
+      assert.equal(finals.length, interruptedPhase === "final" ? 2 : 1);
+      const partRequests = requests.filter(r => r.large.phase === "part");
+      const parts = [...new Map(partRequests.map(r => [r.large.index, r])).values()].sort((a, b) => a.large.index - b.large.index);
       assert.equal(parts.length, finals[0].large.total);
+      assert.equal(partRequests.length, parts.length + (interruptedPhase === "part" ? 1 : 0));
       assert.equal(parts.map(r => r.conversation).join(""), transcript, "All source text must appear once, in order.");
       let offset = 0; for (const part of parts) { assert.equal(part.large.offset, offset); offset += part.conversation.length; }
       assert.equal(providerCalls, parts.length + 1);
       assert.ok(destination, "Successful summary opens the destination.");
       assert.equal(await destination.evaluate("document.getElementById('prompt-textarea').value"), finalSummary);
+      if (interruptedPhase) {
+        const failedRequests = requests.filter(r => r.large.phase === interruptedPhase && (interruptedPhase === "final" || r.large.index === 3));
+        assert.equal(failedRequests.length, 2, "Retry exactly the disconnected request.");
+        assert.deepEqual(failedRequests[0], failedRequests[1], "Keep text, identity and verified parts unchanged on retry.");
+        const failure = terminal.diagnostics.summary_response_failures?.[0];
+        assert.equal(failure?.reason, "body_read_failed");
+        assert.equal(failure.final_result, true);
+        assert.equal(failure.eof, false);
+        assert.ok(terminal.diagnostics.large_summary_requests.every(entry => entry.stage === "completed"));
+      }
     }
     if (destination) assert.equal(await destination.evaluate("window.sendClicks"), 0);
-    assert.doesNotMatch(JSON.stringify(reports), /SYNTHETIC_TOKEN|Decision: preserve source text|Verified final handoff|receipt/);
-    console.log(`PASS ${transcriptChars} chars ${lateTimeoutSmoke ? "3/12 then provider-timeout recovery" : failTransport ? "zero-provider connection failure diagnosis" : failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
+    assert.doesNotMatch(JSON.stringify(reports), /SYNTHETIC_TOKEN|Decision: preserve source text|Verified final handoff|PRIVATE_INCOMPLETE_RESULT|receipt/);
+    console.log(`PASS ${transcriptChars} chars ${interruptedPhase ? `interrupted ${interruptedPhase} recovery and final paste` : lateTimeoutSmoke ? "3/12 then provider-timeout recovery" : failTransport ? "zero-provider connection failure diagnosis" : failPart ? "failed-part recovery" : "native capture and final paste"}: ${requests.length} bounded requests, ${providerCalls} synthetic provider calls, no Send or external telemetry.`);
   } catch (error) {
     console.error(JSON.stringify({ requestPhases: requests.map(r => r.large.phase), providerCalls,
       reports: reports.map(r => ({ status: r.status, stage: r.last_stage, reason: r.failure_reason, diagnostics: r.diagnostics })),
@@ -186,6 +210,6 @@ async function scenario(failPart, failTransport = false) {
 async function run() {
   if (lateTimeoutSmoke) { await scenario(true); return; }
   await scenario(false);
-  if (!slowProviderMs) { await scenario(true); await scenario(true, true); }
+  if (!slowProviderMs) { await scenario(true); await scenario(true, true); await scenario(false, false, "part"); await scenario(false, false, "final"); }
 }
 if (require.main === module) run().catch(error => { console.error(error); process.exitCode = 1; });
