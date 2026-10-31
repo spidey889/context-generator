@@ -8,7 +8,8 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 - **Overlap picker entrance and native capture on all five platforms.** Saved-chat capture no longer waits for the 160 ms picker animation to finish. Keep the frame/task yield that lets opening styles paint, then start preconnect and the existing JSON read during the entrance.
   - Preserve dismissal/navigation/selection guards, capture reuse, source validation and the boundary that prevents summary/destination work before selection. Advance the content-script instance marker so reinjection replaces the old scheduler.
-  - Replace the old wait-for-animation regression with frozen-animation coverage for Claude, ChatGPT, Gemini, Grok and DeepSeek, including reduced motion. Tests and native verification are left to the owner; no measured speedup is claimed.
+  - Replace the old wait-for-animation regression with frozen-animation coverage for Claude, ChatGPT, Gemini, Grok and DeepSeek, including reduced motion. Native verification remains with the owner; no measured speedup is claimed.
+  - Landing CI also found the existing local-handoff motion sampler failing on unchanged master: it can miss every intermediate frame of its 100 ms sweep while large captures run beside it. Give that fixture an isolated CI slot, retain every rendered-width assertion and add a real-queue overlap regression. Capture/presentation code is unchanged by this CI follow-up; the candidate still requires a passing Offline checks result before landing.
 
 - **Download ChatGPT pasted-text files in parallel.** The previous capture awaited each file's descriptor and complete body before starting the next file.
   - Run at most four descriptor/body pipelines together and refill free slots immediately. Preserve selected-branch order, duplicate-ID reuse, exact text and the existing file/transcript/raw byte limits.

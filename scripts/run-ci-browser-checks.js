@@ -25,7 +25,9 @@ function getBrowserChecks(extended = false) {
     { ...check("large-transfer", "4M capture, complete part summaries and full local recovery", 120), script: "scripts/run-large-transfer-smoke.js" },
     check("deepseek-files", "DeepSeek rate-limit retry, cached-session and concurrent original-file capture", 180, { CAP_CONTEXT_JSON_SMOKE: "deepseek", CAP_CONTEXT_REPLY_SNAPSHOT_SMOKE: "1", CAP_CONTEXT_DEEPSEEK_SESSION_SMOKE: "1", CAP_CONTEXT_RATE_LIMIT_RETRY_SMOKE: "1" }),
     { ...check("big-file-note", "DeepSeek to ChatGPT: oversized file note without a download", 90), script: "scripts/run-big-file-note-smoke.js" },
-    { ...check("local-transfer", "Local transfer: quick handoff and no backend request", 90, { CAP_CONTEXT_LOCAL_TRANSFER_SMOKE: "1" }), script: "scripts/run-big-file-note-smoke.js" },
+    // This fixture samples a 100ms rendered sweep. Do not run large captures
+    // beside it: a starved compositor can skip every intermediate sample.
+    { ...check("local-transfer", "Local transfer: quick handoff and no backend request", 90, { CAP_CONTEXT_LOCAL_TRANSFER_SMOKE: "1" }), script: "scripts/run-big-file-note-smoke.js", exclusive: true },
     { ...check("handoff-copy", "Handoff copy, cancellation and timeout recovery", 90), script: "scripts/run-handoff-copy-smoke.js" }
   ];
   if (!extended) return regular;

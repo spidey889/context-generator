@@ -3,7 +3,31 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { childEnvironment, runCheck, runChecks } = require("../scripts/run-ci-browser-checks");
+const { getBrowserChecks, childEnvironment, runCheck, runChecks } = require("../scripts/run-ci-browser-checks");
+
+test("the real CI queue isolates local handoff motion from every other browser fixture", async () => {
+  for (const extended of [false, true]) {
+    const active = new Set();
+    let observed = false;
+    const results = await runChecks(getBrowserChecks(extended), async item => {
+      active.add(item.id);
+      try {
+        await new Promise(setImmediate);
+        if (item.id === "local-transfer") {
+          observed = true;
+          assert.equal(active.size, 1, "Short rendered sweeps must get an isolated CI slot.");
+        } else {
+          assert.equal(active.has("local-transfer"), false, "Other work cannot overlap the local handoff sampler.");
+        }
+        return { ...item, passed: true };
+      } finally {
+        active.delete(item.id);
+      }
+    });
+    assert.equal(observed, true);
+    assert.equal(results.every(result => result.passed), true);
+  }
+});
 
 test("CI browser queue bounds parallelism and still runs every case after failure", async () => {
   let active = 0;
