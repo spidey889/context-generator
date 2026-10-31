@@ -671,6 +671,27 @@ test("JSON attempt observations survive source-to-destination handoff and one re
     [["prefetch", "failed", 100], ["retry", "succeeded", 200]]);
 });
 
+test("a prefetched JSON failure retains its page flags from failure time through successful retry", async () => {
+  const { context, calls } = harness("deepseek", { mode: "success" });
+  const key = captureKeyFor("deepseek"), capture = context.window[key];
+  let state = { source_loading: true, source_auth_prompt: true, source_error_prompt: false, source_challenge_prompt: true };
+  context.observeSourcePageState = () => ({ ...state });
+  context.window[key] = async () => {
+    if (!calls.json) { calls.json++; throw transientError(); }
+    return capture();
+  };
+  context.startPickerJsonCapture();
+  await context.pickerJsonCapture.promise;
+  const failedState = state;
+  state = { source_loading: false, source_auth_prompt: false, source_error_prompt: true, source_challenge_prompt: false };
+  await context.start("claude");
+  const attempts = calls.flows[0].trace.diagnostics.json_attempts;
+  for (const [key, value] of Object.entries(failedState)) assert.equal(attempts[0][key], value);
+  assert.equal(attempts[0].mode, "prefetch");
+  assert.equal(attempts[1].outcome, "succeeded");
+  assert.equal(attempts[1].source_loading, undefined, "Successful retry must not inherit failed-read flags.");
+});
+
 test("size failures stop all five platforms without partial DOM transfer, including active replies and cached errors", async () => {
   const cases = [
     ["deepseek", true, transientError("size_limit", "size_limit")],

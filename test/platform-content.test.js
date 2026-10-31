@@ -525,6 +525,44 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   return hooks;
 }
 
+test("source failure observations distinguish native loading, sign-in, error and challenge clues", () => {
+  const nodes = [new FakeElement({ tag: "button", text: "Sign in" }),
+    new FakeElement({ tag: "h1", text: "Verifying you are human" }),
+    new FakeElement({ attrs: { role: "alert" }, text: "Something went wrong. PRIVATE native detail" }),
+    new FakeElement({ attrs: { role: "progressbar" } })];
+  const hooks = loadPlatformContent(nodes);
+  hooks.document.querySelectorAll = selector => nodes.filter(node => node.matches(selector));
+  assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeSourcePageState())), {
+    source_loading: true, source_auth_prompt: true, source_error_prompt: true, source_challenge_prompt: true
+  });
+  nodes.pop();
+  assert.equal(hooks.observeSourcePageState().source_loading, false);
+  hooks.document.readyState = "interactive";
+  assert.equal(hooks.observeSourcePageState().source_loading, true);
+  assert.doesNotMatch(JSON.stringify(hooks.observeSourcePageState()), /PRIVATE|Sign in|Something went wrong|human/);
+});
+
+test("source failure flags never read chat, code, hidden prompts or containers holding chat", () => {
+  const message = new FakeElement({ attrs: { "data-message-author-role": "assistant" } });
+  const chatHeading = new FakeElement({ tag: "h1", text: "Verify you're human" });
+  message.appendChild(chatHeading);
+  const container = new FakeElement({ attrs: { role: "alert" } });
+  container.appendChild(message);
+  const code = new FakeElement({ tag: "pre" });
+  const codeHeading = new FakeElement({ tag: "h2", text: "Something went wrong" });
+  code.appendChild(codeHeading);
+  const hidden = new FakeElement({ attrs: { role: "alert", "aria-hidden": "true" }, text: "Something went wrong" });
+  const nodes = [container, message, chatHeading, code, codeHeading, hidden];
+  const hooks = loadPlatformContent(nodes);
+  hooks.document.querySelectorAll = selector => nodes.filter(node => node.matches(selector));
+  for (const node of [container, chatHeading, codeHeading, hidden]) {
+    Object.defineProperty(node, "innerText", { get() { throw new Error("PRIVATE chat must not be read"); } });
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(hooks.observeSourcePageState())), {
+    source_loading: false, source_auth_prompt: false, source_error_prompt: false, source_challenge_prompt: false
+  });
+});
+
 test("ChatGPT startup excludes ordinary OpenAI pages", () => {
   const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
   const platformContent = manifest.content_scripts.find((entry) => entry.js.includes("platform-content.js"));

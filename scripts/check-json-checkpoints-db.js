@@ -2,8 +2,13 @@ const assert = require("node:assert/strict");
 const contract = require("../extension/transfer-diagnostics");
 const { checkDiagnosticsSamples } = require("./check-diagnostics-samples");
 const checkpointKeys = ["skipped_file_check","files_skipped","step","step_stage","hook_status","route_reason","saved_chat","hook_ready","route_found","history_request_sent","history_response_read","history_parsed","history_checked","route_candidates","route_resources","progress_seq"];
-function beforeIncompleteReasons(schema = contract.jsonAttemptSchema) {
+function beforeSourcePageState(schema = contract.jsonAttemptSchema) {
   const previous = structuredClone(schema);
+  for (const key of ["source_loading", "source_auth_prompt", "source_error_prompt", "source_challenge_prompt"]) delete previous[key];
+  return previous;
+}
+function beforeIncompleteReasons(schema = contract.jsonAttemptSchema) {
+  const previous = beforeSourcePageState(schema);
   delete previous.incomplete_reason;
   return previous;
 }
@@ -66,4 +71,4 @@ async function checkJsonCheckpoints(db, sql) {
   equal(await snapshot(), before);
   return checks;
 }
-module.exports = { beforeCheckpoints, checkpointKeys, checkJsonCheckpoints };
+module.exports = { beforeCheckpoints, beforeSourcePageState, checkpointKeys, checkJsonCheckpoints };

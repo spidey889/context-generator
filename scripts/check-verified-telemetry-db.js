@@ -424,7 +424,7 @@ async function main() {
         const after = await definition(), pattern = /attempt_rules constant jsonb := '([^']+)'::jsonb/;
         equal(after.replace(pattern, "RULES"), before.replace(pattern, "RULES"));
         const contract = require("../extension/transfer-diagnostics.js");
-        equal(JSON.parse(after.match(pattern)[1]), contract.jsonAttemptSchema);
+        equal(JSON.parse(after.match(pattern)[1]), require("./check-json-checkpoints-db").beforeSourcePageState());
         const report = reason => ({ version: 1, json_attempts: [{ outcome: "failed", mode: "fresh",
           failure_check: "incomplete_history", ...(reason === undefined ? {} : { incomplete_reason: reason }) }] });
         checks += await require("./check-diagnostics-samples").checkDiagnosticsSamples(db, [
@@ -432,6 +432,17 @@ async function main() {
           ...contract.jsonAttemptSchema.incomplete_reason.values.map(reason => ({ label: reason, value: report(reason), expected: true })),
           { label: "private reason", value: report("PRIVATE chat title"), expected: false }
         ]);
+      } else if (name.endsWith("_json_source_page_state.sql")) {
+        const definition = async () => (await db.query("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) value")).rows[0].value;
+        const before = await definition();
+        await db.exec(sql);
+        const after = await definition(), pattern = /attempt_rules constant jsonb := '([^']+)'::jsonb/;
+        equal(after.replace(pattern, "RULES"), before.replace(pattern, "RULES"));
+        equal(JSON.parse(after.match(pattern)[1]), require("../extension/transfer-diagnostics").jsonAttemptSchema);
+        checks += await require("./check-diagnostics-samples").checkDiagnosticsSamples(db,
+          ["source_loading", "source_auth_prompt", "source_error_prompt", "source_challenge_prompt"].flatMap(key =>
+            [true, false, "PRIVATE", null].map(value => ({ label: key, expected: typeof value === "boolean",
+              value: { version: 1, json_attempts: [{ mode: "fresh", outcome: "failed", [key]: value }] } }))));
       } else if (name.endsWith("_transfer_flow_diagnostics.sql")) {
         checks += await require("./check-transfer-flow-diagnostics-db.js").checkTransferFlowDiagnostics(db, sql);
       } else if (name.endsWith("_nvidia_large_summary_model.sql")) {

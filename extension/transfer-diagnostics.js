@@ -100,7 +100,8 @@
     "transcript_chars", "transcript_bytes", "transcript_char_limit", "transcript_byte_limit", "hook_ms", "auth_ms", "download_ms",
     "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms", "route_candidates", "route_resources", "progress_seq", "files_skipped"];
   const jsonAttemptSchema = {
-    ...Object.fromEntries(["saved_chat", "hook_ready", "route_found", "history_request_sent", "history_response_read", "history_parsed", "history_checked"]
+    ...Object.fromEntries(["saved_chat", "hook_ready", "route_found", "history_request_sent", "history_response_read", "history_parsed", "history_checked",
+      "source_loading", "source_auth_prompt", "source_error_prompt", "source_challenge_prompt"]
       .map(key => [key, { type: "boolean" }])),
     ...Object.fromEntries(Object.entries(jsonAttemptEnums).map(([key, values]) => [key, { type: "string", values }])),
     ...Object.fromEntries(jsonAttemptNumbers.map(key => [key, { type: "number", max: 2147483647 }])),
