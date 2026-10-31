@@ -78,4 +78,7 @@ function embeddedProviderError(payload, provider) {
   if (choice?.finish_reason === "error") return { type: "generation_error" };
   return null;
 }
-module.exports = { safeProviderError, retryAfterMs, readSafeProviderError, providerRequestId, embeddedProviderError };
+function providerParseError(detail) {
+  return Object.assign(new SyntaxError("Provider response could not be decoded completely"), { providerFailureDetail: detail });
+}
+module.exports = { safeProviderError, retryAfterMs, readSafeProviderError, providerRequestId, embeddedProviderError, providerParseError };

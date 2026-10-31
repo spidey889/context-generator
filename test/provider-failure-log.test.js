@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { createProviderFailureLog } = require("../api/provider-failure-log");
 const schema = require("../supabase/functions/_shared/provider-failure");
 const { createSummaryWithFallback, getSummaryProfile } = require("../api/summarize").__test;
+const { createSummaryWithProvider, getInitialSummaryMessages } = require("../api/summarize").__test;
 const event = changes => ({ id: "11111111-1111-4111-8111-111111111111", request_id: "22222222-2222-4222-8222-222222222222",
   occurred_at: "2026-10-23T00:00:00.000Z", environment: "development", provider: "tokenharbor", model: "deepseek-v4.1-flash:free",
   failure_reason: "provider_timeout", phase: "waiting_answer", timeout_kind: "first_answer", route_index: 2,
@@ -15,6 +16,27 @@ function configure(t) {
     t.after(() => previous === undefined ? delete process.env[key] : process.env[key] = previous);
   }
 }
+
+test("provider rejection logs keep the specific cause without rejected output", async t => {
+  const previous = global.fetch;
+  t.after(() => { global.fetch = previous; });
+  const conversation = "User: Prepare the library review.\n".repeat(400), profile = getSummaryProfile(conversation);
+  for (const [payload, detail] of [[null, "response_shape_invalid"],
+    [{ choices: [{ message: { content: "" } }] }, "empty_answer"],
+    [{ choices: [{ message: { content: "..." } }] }, "empty_content"],
+    [{ choices: [{ message: { content: "I cannot help summarize this conversation." } }] }, "refusal_only"],
+    [{ choices: [{ message: { content: "<think>PRIVATE" } }] }, "unfinished_thinking"]]) {
+    const observations = [];
+    global.fetch = async () => new Response(JSON.stringify(payload));
+    await assert.rejects(createSummaryWithProvider({ provider: { id: "openrouter", label: "OpenRouter", url: "https://provider.invalid" },
+      model: "dots-studio/dots-3-note-preview:free", apiKey: "PRIVATE", profile,
+      initialMessages: getInitialSummaryMessages(conversation, profile), requestBudgetMs: 1000,
+      requestContext: { onProviderFailure: observation => observations.push(observation) } }));
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0].failure_detail, detail);
+    assert.doesNotMatch(JSON.stringify(observations), /PRIVATE/);
+  }
+});
 
 test("provider failure schema rejects private content, invalid limits and mismatched models", () => {
   assert.ok(schema.validate(event()));

@@ -8,7 +8,7 @@ const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const { getHeader } = require("./request-validation");
 const { readProviderStream } = require("./provider-stream");
 const { createProviderFailureLog } = require("./provider-failure-log");
-const { retryAfterMs, readSafeProviderError, safeProviderError, providerRequestId, embeddedProviderError } = require("./provider-error-diagnostics");
+const { retryAfterMs, readSafeProviderError, safeProviderError, providerRequestId, embeddedProviderError, providerParseError } = require("./provider-error-diagnostics");
 const {
   SUMMARY_PROMPT_CACHE_VERSION,
   CONTEXT_CARRY_TITLE,
@@ -740,9 +740,15 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
 
   const contentRejection = getSummaryContentRejectionReason(rawSummary, profile);
   if (contentRejection) {
-    initialResponse.recordFailure?.(rawSummary.trim() ? "provider_output_rejected" : "provider_empty");
+    const content = data?.choices?.[0]?.message?.content;
+    const unfinishedThinking = ["openrouter", "tokenharbor"].includes(provider.id) && typeof content === "string"
+      && /<think>/i.test(content.replace(/<think>[\s\S]*?<\/think>/gi, ""));
+    const detail = unfinishedThinking ? "unfinished_thinking" : !rawSummary.trim() ? "empty_answer"
+      : { "substantively empty output": "empty_content", "refusal-like output": "refusal_only", "self-reasoning response": "thinking_instead_of_summary" }[contentRejection];
+    initialResponse.recordFailure?.(rawSummary.trim() ? "provider_output_rejected" : "provider_empty", detail);
     const reason = rawSummary.trim() ? contentRejection : "an empty summary";
-    throw createProviderError(provider, `${provider.label} returned ${reason}`, 502, null, rawSummary.trim() ? "provider_output_rejected" : "provider_empty");
+    throw Object.assign(createProviderError(provider, `${provider.label} returned ${reason}`, 502, null,
+      rawSummary.trim() ? "provider_output_rejected" : "provider_empty"), { failure_detail: detail });
   }
 
   const validation = validateContextCarrySummary(rawSummary, profile);
@@ -1038,21 +1044,20 @@ function getProviderFailureLog(error) {
     message: getProviderFailureReason(error),
     statusCode: error?.statusCode || null,
     providerStatus: error?.providerStatus || null,
-    ...Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id"]
+    ...Object.fromEntries(["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id", "failure_detail"]
       .filter(key => error?.[key] !== undefined).map(key => [key, error[key]]))
   };
 }
 
 async function readResponseJson(response, provider) {
   try {
-    return await response.json();
-  } catch {
-    response.recordFailure?.("provider_invalid_json");
-    throw createProviderError(
-      provider,
-      `${provider.label} returned invalid JSON`,
-      502, null, "provider_invalid_json"
-    );
+    const data = await response.json();
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw providerParseError("response_shape_invalid");
+    return data;
+  } catch (error) {
+    response.recordFailure?.("provider_invalid_json", error.providerFailureDetail || "json_parse_failed");
+    throw Object.assign(createProviderError(provider, `${provider.label} returned invalid JSON`, 502, null, "provider_invalid_json"),
+      { failure_detail: error.providerFailureDetail || "json_parse_failed" });
   }
 }
 
@@ -1172,9 +1177,10 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       ...(firstAnswerDeadline !== null ? { first_answer_budget_ms: Math.max(1, firstAnswerDeadline - attemptStartedAt) } : {}),
       ...(context.keySlot ? { key_slot: context.keySlot } : {}) };
     let reported = false, payload;
-    const recordFailure = failureReason => {
+    const recordFailure = (failureReason, detail) => {
       if (reported || context.signal?.aborted || !context.onProviderFailure) return;
       reported = true;
+      if (detail) observed.failure_detail = detail;
       const usage = normalizeProviderUsage({ id: context.provider }, payload);
       const finishReason = getProviderFinishReason({ id: context.provider }, payload || {});
       if (payload) {
@@ -1254,10 +1260,13 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
             observed.phase = "reading_body";
             const bytes = await response.arrayBuffer();
             observed.phase = "parsing_response";
-            payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+            let decoded;
+            try { decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw providerParseError("utf8_decode_failed"); }
+            try { payload = JSON.parse(decoded); } catch { throw providerParseError("json_parse_failed"); }
           }
           observed.phase = "validating_output";
         } catch (error) {
+          observed.failure_detail = error.providerFailureDetail || (observed.phase === "reading_body" ? "response_read_failed" : "stream_incomplete");
           if (signal.aborted || error?.name === "AbortError" || isRetryableProviderNetworkError(error)) throw error;
           observed.phase = "parsing_response";
           bodyError = error;
@@ -1286,7 +1295,8 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       const retryableStatus = isRetryableProviderResponse(response, payload);
       if (!response.ok) recordFailure("provider_http_error");
       else if (payload?.error || payload?.choices?.[0]?.error
-        || ["error", "content_filter"].includes(payload?.choices?.[0]?.finish_reason)) recordFailure("provider_generation_failed");
+        || ["error", "content_filter"].includes(payload?.choices?.[0]?.finish_reason)) recordFailure("provider_generation_failed",
+          ["safety", "content_filter"].includes(embedded?.type) ? "safety_filter" : "upstream_error");
       if (!retryableStatus || attempt === maxAttempts) {
         return lastResponse;
       }

@@ -488,6 +488,8 @@ Provider HTTP failures inspect at most 8 KiB of error JSON for at most 150 ms wi
 
 Named provider request-ID headers may supply one ASCII correlation token of 8–128 characters; controls, URLs and arbitrary body fields are rejected. HTTP-200 JSON/SSE errors, choice-level errors and Google safety feedback are identified before success validation and retain the same safe code/type/message metadata. HTTP status remains the actual transport status, separate from the upstream error code; a numeric error cannot fabricate an HTTP rejection.
 
+Provider failures retain their broad category plus a closed `failure_detail`: JSON parsing versus response shape, UTF-8 decoding, SSE event JSON/shape, missing stream completion, response read failure, empty answer/content, refusal-only output, self-reasoning or unfinished thinking, and explicit upstream/safety errors. Parser exceptions use fixed messages; no offending input is copied into diagnostics. Existing summary acceptance and fallback policy remain unchanged.
+
 [Provider fallbacks](docs/provider-fallbacks.md) holds the detailed configuration/retry reference. Current order:
 
 ```text

@@ -36,3 +36,12 @@ test("request IDs come only from named headers and embedded errors cover all pro
   assert.deepEqual(embeddedProviderError({ choices: [{ finish_reason: "content_filter" }] }, "openrouter"), { type: "content_filter" });
   assert.equal(embeddedProviderError({ choices: "PRIVATE" }, "openrouter"), null);
 });
+test("stream parser identifies bad JSON, invalid UTF-8 and incomplete completion separately", async () => {
+  const { readProviderStream } = require("../api/provider-stream");
+  for (const [body, detail] of [["data: PRIVATE\n\n", "stream_event_json_invalid"], ["data: null\n\n", "stream_event_shape_invalid"],
+    ['data: {"choices":"PRIVATE"}\n\n', "stream_event_shape_invalid"],
+    ['data: {"choices":[{"delta":{"content":"answer"}}]}\n\n', "stream_incomplete"], [new Uint8Array([255]), "utf8_decode_failed"]]) {
+    await assert.rejects(readProviderStream(new Response(body), "openrouter", { onDelta() {}, checkDeadline() {} }),
+      error => error.providerFailureDetail === detail && !error.message.includes("PRIVATE"));
+  }
+});

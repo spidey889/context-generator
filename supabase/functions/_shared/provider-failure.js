@@ -32,7 +32,10 @@
     upstream_message: enumeration(["Rate limit exceeded.", "Quota exhausted.", "Authentication failed.", "Insufficient credits.",
       "Request blocked by safety policy.", "Context length exceeded.", "Provider unavailable.", "Provider returned an error."]),
     retry_after_ms: integer(0, 86400000),
-    upstream_request_id: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" }
+    upstream_request_id: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$" },
+    failure_detail: enumeration(["json_parse_failed", "response_shape_invalid", "utf8_decode_failed", "stream_event_json_invalid",
+      "stream_event_shape_invalid", "stream_incomplete", "response_read_failed", "empty_answer", "empty_content", "refusal_only",
+      "thinking_instead_of_summary", "unfinished_thinking", "upstream_error", "safety_filter"])
   };
   const required = ["id", "request_id", "occurred_at", "environment", "provider", "model", "failure_reason", "phase", "route_index",
     "request_attempt", "input_chars", "request_bytes", "max_output_tokens", "elapsed_ms", "budget_ms"];
