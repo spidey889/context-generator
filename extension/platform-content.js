@@ -9808,11 +9808,17 @@
     // line before activating summary so their visible motion cannot overlap.
     await waitForHandoffPaint();
     checkTransferDeadline(trace);
+    // A delayed compositor can retain a little motion after the timer. Settle
+    // the finished line before changing stage identity; never overlap sweeps.
+    await completeHandoffStageLine("capture", 0);
+    checkTransferDeadline(trace);
     setHandoffProgress("summary", "active");
     await destinationPreparation;
     checkTransferDeadline(trace);
     stopHandoffActivityProgress();
     await completeHandoffStageLine("summary", 160);
+    checkTransferDeadline(trace);
+    await completeHandoffStageLine("summary", 0);
     checkTransferDeadline(trace);
     setHandoffProgress("summary", "done");
     await waitForHandoffPaint();

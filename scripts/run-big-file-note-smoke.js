@@ -126,7 +126,7 @@ async function run() {
       assert.ok(frames.some(([capture, summary]) => capture.progress > 0.05 && capture.progress < 0.999
         && summary.state === 'upcoming'), `Capture must have its own visible completion sweep: ${JSON.stringify(frames.slice(0, 12))}`);
       assert.ok(frames.every(([capture, summary]) => summary.state === 'upcoming' || capture.progress >= 0.999),
-        "Summary must wait until capture has visibly finished.");
+        `Summary must wait until capture has visibly finished: ${JSON.stringify(frames.filter(([capture, summary]) => summary.state !== 'upcoming' && capture.progress < 0.999).slice(0, 6))}`);
       assert.ok(frames.some(([capture, summary]) => capture.progress >= 0.999
         && summary.progress > 0.05 && summary.progress < 0.999), "Summary must have its own visible completion sweep.");
       assert.ok(frames.some(([, , paste]) => paste.state === 'active'), "Paint the paste stage after both lines finish.");
