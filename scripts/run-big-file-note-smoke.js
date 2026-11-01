@@ -1,6 +1,6 @@
 // Synthetic source + installed extension + real Brave messaging/paste. No model,
 // live telemetry, user profile or automatic upload is used. The unreadable-file
-// scenario serves one deliberately invalid synthetic byte.
+// scenarios serve invalid UTF-8 or exhaust the retry with synthetic HTTP 429s.
 process.env.CAP_CONTEXT_JSON_SMOKE = "deepseek";
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
@@ -14,15 +14,20 @@ const { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtensio
 const greeting = 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
 const localTransfer = process.env.CAP_CONTEXT_LOCAL_TRANSFER_SMOKE === "1";
 const unreadableFile = process.env.CAP_CONTEXT_UNREADABLE_FILE_NOTE_SMOKE === "1";
+const failedFile = process.env.CAP_CONTEXT_FAILED_FILE_NOTE_SMOKE === "1";
 
 async function run() {
   const fixture = fixtures("deepseek", "smoke", 1);
-  fixture.file.file_name = unreadableFile ? "unreadable-source.txt" : "original-13mb.txt";
-  fixture.file.file_size = unreadableFile ? 1 : 13099028;
-  if (unreadableFile) fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push({ ...fixture.file, id: "file-pdf", file_name: "ignored.PDF" });
+  fixture.file.file_name = failedFile ? "retry-failed-source.txt" : unreadableFile ? "unreadable-source.txt" : "original-13mb.txt";
+  fixture.file.file_size = unreadableFile || failedFile ? 1 : 13099028;
+  const healthyText = "Verified healthy attachment contents.";
+  if (unreadableFile || failedFile) fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push({ ...fixture.file, id: "file-pdf", file_name: "ignored.PDF" });
+  if (failedFile) fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push({ ...fixture.file,
+    id: "file-healthy", file_name: "healthy.txt", file_size: Buffer.byteLength(healthyText), signed_path: "/file?file_id=healthy&sig=SIGNED_SENTINEL" });
   if (localTransfer) fixture.data.data.biz_data.chat_messages[1].fragments[0].content = "Continue with the attached original file.";
   const reports = [], summaries = [];
-  let fileReads = 0, destinations = 0;
+  let fileReads = 0, historyReads = 0, destinations = 0;
+  const fileAttempts = new Map();
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "POST") {
@@ -35,10 +40,17 @@ async function run() {
       res.end(JSON.stringify({ summary: `Verified chat context.\n\nNext step:\n\n${greeting}` })); return;
     }
     if (url.pathname.includes("history_messages")) {
+      historyReads++;
       res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(fixture.data)); return;
     }
     if (url.pathname.startsWith("/api/file")) {
       fileReads++;
+      const id = url.searchParams.get("file_id");
+      fileAttempts.set(id, (fileAttempts.get(id) || 0) + 1);
+      if (failedFile) {
+        res.writeHead(id === "healthy" ? 200 : 429, { "Content-Type": "text/plain" });
+        res.end(id === "healthy" ? healthyText : undefined); return;
+      }
       res.writeHead(unreadableFile ? 200 : 404, { "Content-Type": "application/octet-stream" });
       res.end(unreadableFile ? Buffer.from([0xff]) : undefined); return;
     }
@@ -114,10 +126,19 @@ async function run() {
     assert.ok(pasted.lastIndexOf(fixture.file.file_name) > pasted.indexOf("Next step:"));
     assert.doesNotMatch(pasted.slice(pasted.lastIndexOf("Next step:")), /ignored.PDF/);
     assert.doesNotMatch(pasted, /Reply only:/);
-    assert.equal(fileReads, unreadableFile ? 1 : 0, "Only the supported unreadable file may be downloaded; PDFs stay excluded.");
+    assert.equal(fileReads, failedFile ? 3 : unreadableFile ? 2 : 0, "Failed files retry once; PDFs stay excluded.");
+    if (failedFile) {
+      assert.equal(historyReads, 1, "Exhausting one file's retry must not restart capture.");
+      assert.equal(fileAttempts.get("test-paste"), 2);
+      assert.equal(fileAttempts.get("healthy"), 1, "A successful file must not be downloaded again.");
+      assert.doesNotMatch(pasted.slice(pasted.lastIndexOf("Next step:")), /healthy.txt/);
+      assert.ok(localTransfer ? pasted.includes(healthyText) : JSON.stringify(summaries).includes(healthyText));
+    }
     const pasteMs = Date.now() - clickedAt;
     assert.equal(summaries.length, localTransfer ? 0 : 1);
-    if (localTransfer) {
+    // The dedicated local-transfer fixture owns frame-by-frame motion checks;
+    // the retry-exhaustion variant checks direct carry contents and delivery.
+    if (localTransfer && !failedFile) {
       assert.equal(await source.evaluate("window.__localHandoffShown"), true, "Local transfer retains its handoff card.");
       assert.equal(await source.evaluate("window.__localHandoffCompleted"), true, "Both bars finish before delivery.");
       // Check rendered widths, not just completed state/100% CSS targets:
@@ -136,12 +157,12 @@ async function run() {
     assert.equal(destinations, 1);
     assert.equal(await destination.evaluate("window.sendClicks"), 0);
     await waitFor(() => reports.some(r => r.status === "succeeded"), "terminal report");
-    assert.doesNotMatch(JSON.stringify(reports), /original-13mb.txt|unreadable-source.txt|SYNTHETIC_TOKEN/);
+    assert.doesNotMatch(JSON.stringify(reports), /original-13mb.txt|unreadable-source.txt|retry-failed-source.txt|healthy.txt|SYNTHETIC_TOKEN/);
     if (process.env.CAP_CONTEXT_NOTE_SCREENSHOT) {
       const shot = await destination.call("Page.captureScreenshot", { format: "png" });
       await fs.writeFile(path.resolve(process.env.CAP_CONTEXT_NOTE_SCREENSHOT), Buffer.from(shot.data, "base64"));
     }
-    console.log(`PASS ${unreadableFile ? "unreadable-file note" : localTransfer ? "local transfer" : "big-file note"}: click to paste ${pasteMs} ms, ${summaries.length} summary requests, preserved greeting, named upload request, ${fileReads} file reads, no uploads or Send.`);
+    console.log(`PASS ${failedFile ? "retry-exhausted file note" : unreadableFile ? "unreadable-file note" : localTransfer ? "local transfer" : "big-file note"}: click to paste ${pasteMs} ms, ${summaries.length} summary requests, preserved greeting, named upload request, ${fileReads} file reads, no uploads or Send.`);
   } finally {
     if (source) { try { await source.call("Browser.close", {}, 5000); } catch {} }
     source?.close(); destination?.close(); child?.kill(); if (child) await waitForProcessExit(child, 5000);

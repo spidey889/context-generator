@@ -139,6 +139,14 @@ verifies the final note after a fixture summarizer drops it; combine with
 serve one invalid synthetic UTF-8 byte, verify PDF exclusion and never upload or
 press Send.
 
+`CAP_CONTEXT_FAILED_FILE_NOTE_SMOKE=1 node scripts/run-big-file-note-smoke.js`
+checks two HTTP 429 failures followed by the existing named re-upload request in
+the pasted carry, while a healthy file and history are fetched once. The regular
+browser CI includes this case; add `CAP_CONTEXT_LOCAL_TRANSFER_SMOKE=1` to verify
+the direct carry without a summary request. The dedicated local-transfer case
+retains its separate animation assertions. These fixtures do not call a real AI
+or prove it will obey the upload instruction.
+
 ### Paste and activation order
 
 While the source handoff is at `paste_started`, its header offers **Copy instead** for the complete prepared carry, including short local transfers. Clipboard access starts in the click; automatic delivery is cancelled without closing the destination. Confirmation waits for the destination's cancellation acknowledgement (up to three seconds), and clipboard/worker waits are each bounded to four seconds. A missing worker inventory, unknown/lost acknowledgement or clipboard failure keeps the original copy dialog available; uncertain delivery uses its existing check-the-destination warning. A paste may already have landed before the click, so even confirmed copying asks the user to check the destination before pasting. The action releases its text/handler on completion or dismissal; late replies cannot restart delivery or replace a newer attempt. Manual takeover retains the existing `user_cancelled` outcome, not successful paste. No permission, schema, storage or normal-delivery round trip is added.

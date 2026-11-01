@@ -607,6 +607,26 @@ test("only DeepSeek -> ChatGPT retries an oversized picker file as a separate-up
   }
 });
 
+test("DeepSeek keeps retry-exhausted file names through fresh and picker captures for every destination", async () => {
+  for (const cached of [false, true]) for (const destination of ["claude", "chatgpt", "gemini", "grok"]) {
+    const { context, calls } = harness("deepseek", { mode: "success" });
+    const skippedFiles = [{ name: "retry-failed-source.txt" }];
+    context.window.__capCaptureNetworkJson = async () => {
+      calls.json++;
+      return { text: "Verified chat and healthy file text", messageTurnCount: 2, skippedFiles,
+        jsonCapture: { outcome: "partial", files_supported: 2, files_skipped: 1, failure_http_status: 429 } };
+    };
+    if (cached) { context.startPickerJsonCapture(); await context.pickerJsonCapture.promise; }
+    await context.start(destination);
+    assert.equal(calls.json, 1, "A missing file must not restart successful capture work.");
+    assert.equal(calls.dom, 0);
+    assert.equal(calls.flows.length, 1);
+    assert.equal(calls.flows[0].trace.skippedFiles, skippedFiles);
+    assert.equal(calls.flows[0].destination, destination);
+    assert.equal(calls.flows[0].text, "Verified chat and healthy file text");
+  }
+});
+
 test("a failed separate-file capture cannot silently deliver a smaller DOM subset", async () => {
   const { context, calls } = harness("deepseek");
   context.window.__capCaptureNetworkJson = async () => {
