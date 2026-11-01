@@ -5,7 +5,8 @@ const test = require("node:test");
 const vm = require("node:vm");
 const { clockTest } = require("./helpers/clock");
 
-const source = fs.readFileSync(path.join(__dirname, "..", "extension", "transfer-diagnostics.js"), "utf8") + "\n"
+const source = fs.readFileSync(path.join(__dirname, "..", "extension", "user-notices.js"), "utf8") + "\n"
+  + fs.readFileSync(path.join(__dirname, "..", "extension", "transfer-diagnostics.js"), "utf8") + "\n"
   + fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension", "manifest.json"), "utf8"));
 const compiledBackground = new vm.Script(source, { filename: "extension/background.js" });
@@ -110,57 +111,15 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
   return sendSummary;
 }
 
-test("targeted retry notice is acknowledged once across competing tabs and worker restarts", async () => {
-  const installKey = "context-generator-install-id-v1", seenKey = "context-generator-deepseek-retry-notice-seen-v1";
-  const storage = { [installKey]: "11111111-1111-4111-8111-111111111111" };
-  const target = source.match(/const TRANSFER_RETRY_NOTICE_TARGET = "([a-f0-9]+)"/)[1];
-  const cryptoImpl = { subtle: { digest: async (algorithm, bytes) => {
-    assert.equal(algorithm, "SHA-256");
-    assert.equal(new TextDecoder().decode(bytes), storage[installKey]);
-    return Uint8Array.from(Buffer.from(target, "hex")).buffer;
-  } } };
-  let canDisplay = false;
-  const shown = [];
-  const worker = loadBackgroundForTransferTest({ noticeStorage: storage, cryptoImpl, sendMessageImpl: async (tabId, message, options) => {
-    assert.equal(message.type, "SHOW_TRANSFER_RETRY_NOTICE");
-    assert.ok(options.documentId);
-    if (canDisplay) shown.push(tabId);
-    return { shown: canDisplay };
-  } });
-  const sender = id => ({ id: "cap-context-test", frameId: 0, documentId: `document-${id}`,
-    tab: { id, url: "https://gemini.google.com/app" } });
-  const check = id => worker.request({ type: "CHECK_TRANSFER_RETRY_NOTICE" }, sender(id));
-  assert.equal((await check(1)).shown, false);
-  assert.equal(storage[seenKey], undefined, "A page that cannot display it must not consume the notice.");
-  canDisplay = true;
-  const results = await Promise.all([check(1), check(2)]);
-  assert.equal(results.filter(result => result.shown).length, 1);
-  assert.equal(shown.length, 1);
-  assert.equal(storage[seenKey], true);
-  const restarted = loadBackgroundForTransferTest({ noticeStorage: storage });
-  assert.equal((await restarted.request({ type: "CHECK_TRANSFER_RETRY_NOTICE" }, sender(3))).shown, false);
-  assert.equal(restarted.operations.sent.length, 0);
-  assert.equal(worker.operations.fetched.length, 0, "Notice delivery must not contact a service.");
-});
-
-test("retry notice ignores other installations and untrusted senders without creating identities", async () => {
+test("remote notice requests accept only supported top-frame content scripts", async () => {
   const sender = { id: "cap-context-test", frameId: 0, tab: { id: 1, url: "https://chatgpt.com/" } };
-  for (const storage of [{}, { "context-generator-install-id-v1": "22222222-2222-4222-8222-222222222222" }]) {
-    const hadIdentity = Object.hasOwn(storage, "context-generator-install-id-v1");
-    const worker = loadBackgroundForTransferTest({ noticeStorage: storage });
-    // Existing worker startup initializes telemetry separately. Isolate the
-    // notice request to prove it never allocates an absent installation ID.
-    await new Promise(setImmediate);
-    if (!hadIdentity) delete storage["context-generator-install-id-v1"];
-    const before = JSON.stringify(storage);
-    assert.equal((await worker.request({ type: "CHECK_TRANSFER_RETRY_NOTICE" }, sender)).shown, false);
-    assert.equal(JSON.stringify(storage), before);
-    assert.equal(worker.operations.sent.length, 0);
-    assert.equal(worker.operations.fetched.length, 0);
-    for (const invalid of [{ ...sender, frameId: 1 }, { ...sender, id: "other-extension" },
-      { ...sender, tab: { id: 1, url: "https://example.com/" } }])
-      assert.equal(worker.message({ type: "CHECK_TRANSFER_RETRY_NOTICE" }, invalid).ok, false);
-  }
+  const worker = loadBackgroundForTransferTest({ noticeStorage: {} });
+  for (const invalid of [{ ...sender, frameId: 1 }, { ...sender, id: "other-extension" },
+    { ...sender, tab: { id: 1, url: "https://example.com/" } }])
+    assert.equal(worker.message({ type: "CHECK_USER_NOTICES" }, invalid).ok, false);
+  const reply = await worker.request({ type: "CHECK_USER_NOTICES" }, sender);
+  assert.equal(reply.ok, true);
+  assert.equal(reply.shown, false);
 });
 
 test("production worker never imports the absent local preview dependency", () => {

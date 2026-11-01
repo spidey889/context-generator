@@ -1,11 +1,13 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-transfer-retry-notice-v244";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-user-notices-v245";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let activeCopyNotice = null;
-  let transferRetryNoticeRequested = false;
-  let transferRetryNoticeDisplayed = false;
+  let userNoticeRequested = false;
+  let userNoticeTimer = null;
+  let userNoticeCheckedAt = 0;
+  const displayedUserNotices = new Set();
   let handoffUserCss = "";
   let handoffUserCssRequest = null;
   let handoffScrimPalette = "";
@@ -799,9 +801,9 @@
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
-    if (message?.type === "SHOW_TRANSFER_RETRY_NOTICE") {
+    if (message?.type === "SHOW_USER_NOTICE") {
       let shown = false;
-      try { if (_sender?.id === extensionRuntime.id) shown = showTransferRetryNotice(); } catch {}
+      try { if (_sender?.id === extensionRuntime.id) shown = showUserNotice(message.notice); } catch {}
       sendResponse({ shown });
       return false;
     }
@@ -1110,7 +1112,7 @@
       delay,
       getHandoffProgressState,
       getHandoffProgressStatusText,
-      showTransferRetryNotice,
+      showUserNotice,
       startHandoffActivityProgress,
       stopHandoffActivityProgress,
       reportHandoffCaptureProgress,
@@ -6419,7 +6421,7 @@
       releaseComposerSurface();
       return existingBubble;
     }
-    maybeRequestTransferRetryNotice(input);
+    maybeRequestUserNotice(input);
     const bubble = existingBubble || createFloatingButton();
     if (currentPlatform.id === "claude") {
       // Claude stays inline through send/docking; unmatched owners hide until remount.
@@ -10190,30 +10192,37 @@
     hideHandoffReassurance();
   }
 
-  function canShowTransferRetryNotice(input = findPlatformInput()) {
+  function canShowUserNotice(input = findPlatformInput()) {
     const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
     const chatRoute = hasSavedSourceConversation() || DESTINATION_LANDING_PATHS[currentPlatform.id]?.includes(pathname);
     const notice = document.getElementById("context-generator-error-overlay");
+    const copyBox = document.getElementById("context-generator-fallback-modal");
     return instanceActive && chatRoute && document.visibilityState === "visible" && isEditorReady(input)
       && !isRunning && !isDestinationSheetOpen() && !isHandoffOverlayVisible()
+      && (!copyBox || copyBox.style.display === "none")
       && (!notice || notice.style.display === "none");
   }
 
-  function maybeRequestTransferRetryNotice(input) {
-    if (transferRetryNoticeRequested || transferRetryNoticeDisplayed || !canShowTransferRetryNotice(input)) return;
-    transferRetryNoticeRequested = true;
-    // Use existing composer/visibility updates, with no new polling or network.
-    notifyBackground({ type: "CHECK_TRANSFER_RETRY_NOTICE" }).then(reply => {
-      if (reply?.eligible && !reply.shown) transferRetryNoticeRequested = false;
-    }).catch(() => {});
+  function maybeRequestUserNotice(input) {
+    if (!userNoticeTimer) userNoticeTimer = setInterval(() => maybeRequestUserNotice(), 60000);
+    const elapsed = Date.now() - userNoticeCheckedAt;
+    if (userNoticeRequested || (userNoticeCheckedAt && elapsed >= 0 && elapsed < 60000) || !canShowUserNotice(input)) return;
+    userNoticeRequested = true;
+    userNoticeCheckedAt = Date.now();
+    // The worker shares its five-minute backend cache across tabs/restarts.
+    notifyBackground({ type: "CHECK_USER_NOTICES" }).catch(() => {}).finally(() => {
+      userNoticeRequested = false;
+    });
   }
 
-  function showTransferRetryNotice() {
-    if (transferRetryNoticeDisplayed || !canShowTransferRetryNotice()) return false;
-    showErrorOverlay("Hey, saw your last DeepSeek transfer failed. We found an issue and fixed it. Your transfer should work now. Give it another try :)",
-      { transferRetryNotice: true });
-    transferRetryNoticeDisplayed = document.getElementById("context-generator-error-overlay")?.style.display === "flex";
-    return transferRetryNoticeDisplayed;
+  function showUserNotice(notice) {
+    if (!notice || typeof notice.id !== "string" || !/^[a-f0-9]{64}$/.test(notice.id)
+        || typeof notice.message !== "string" || !notice.message.trim() || notice.message.length > 1000
+        || displayedUserNotices.has(notice.id) || !canShowUserNotice()) return false;
+    showErrorOverlay(notice.message, { userNotice: true });
+    const shown = document.getElementById("context-generator-error-overlay")?.style.display === "flex";
+    if (shown) displayedUserNotices.add(notice.id);
+    return shown;
   }
 
   function showSignInRecoveryNotice(text, destinationName, recovery) {
@@ -10222,11 +10231,11 @@
   }
 
   function showErrorOverlay(error, copiedContext = null) {
-    const message = getUserFacingTransferErrorMessage(error);
-    const transferRetryNotice = copiedContext?.transferRetryNotice === true;
+    const userNotice = copiedContext?.userNotice === true;
+    const message = userNotice ? String(error) : getUserFacingTransferErrorMessage(error);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     // Keep recovery until copying succeeds; allow a short read before its exit.
-    const noticeDurationMs = transferRetryNotice ? 10000 : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
+    const noticeDurationMs = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
     const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
@@ -10345,7 +10354,7 @@
 
     const title = document.getElementById("context-generator-error-title");
     if (title) {
-      title.textContent = transferRetryNotice ? "Cap Context" : copiedContext?.pasteBackup ? "In case paste did not work" : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? `Sign in to ${copiedContext.destinationName}` : "Summary copied to your clipboard") : copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
+      title.textContent = userNotice ? "Cap Context" : copiedContext?.pasteBackup ? "In case paste did not work" : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? `Sign in to ${copiedContext.destinationName}` : "Summary copied to your clipboard") : copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
         ? CHATGPT_LOGGED_OUT_ERROR_TITLE
         : isNoConversationError
           ? NO_CONVERSATION_ERROR_TITLE
@@ -10356,19 +10365,19 @@
 
     const mark = document.getElementById("context-generator-error-mark");
     if (mark) {
-      mark.textContent = transferRetryNotice || copiedContext?.pendingCopy ? "i" : copiedContext ? "✓" : isNoConversationError || isSummaryRetryError || isToolbarSignInNotice ? "i" : "!";
+      mark.textContent = userNotice || copiedContext?.pendingCopy ? "i" : copiedContext ? "✓" : isNoConversationError || isSummaryRetryError || isToolbarSignInNotice ? "i" : "!";
     }
 
     const textSpan = document.getElementById("context-generator-error-text");
     if (textSpan) {
-      textSpan.textContent = isChatGptLoggedOutError ? CHATGPT_LOGGED_OUT_ERROR_MESSAGE : message;
+      textSpan.textContent = userNotice ? message : isChatGptLoggedOutError ? CHATGPT_LOGGED_OUT_ERROR_MESSAGE : message;
     }
 
     hideErrorOverlay(errorDiv, { immediate: true });
     errorDiv.contextGeneratorPasteBackup = Boolean(copiedContext?.pasteBackup);
     errorDiv.setAttribute("role", copiedContext ? "status" : "alert");
     let copyAgain = document.getElementById("context-generator-error-copy-again");
-    if (copiedContext && !transferRetryNotice && !copyAgain) {
+    if (copiedContext && !userNotice && !copyAgain) {
       const dismiss = document.getElementById("context-generator-error-dismiss");
       const actions = document.createElement("div");
       actions.style.cssText = "position:relative;z-index:1;display:flex;justify-content:flex-end;gap:8px";
@@ -10382,12 +10391,13 @@
       protectOverlayPalette(copyAgain);
     }
     if (copyAgain) {
-      copyAgain.style.display = copiedContext && !transferRetryNotice ? "block" : "none";
+      copyAgain.style.display = copiedContext && !userNotice ? "block" : "none";
       copyAgain.textContent = copiedContext?.pendingCopy ? (copiedContext.pasteBackup ? "Copy Summary" : "Copy summary") : "Copy again";
       // Keep the actions steady when the copy label changes to its confirmation.
       copyAgain.style.minWidth = copiedContext?.pasteBackup ? "112px" : "";
       copyAgain.disabled = false;
-      if (copiedContext && !transferRetryNotice) {
+      if (copyAgain.parentElement) copyAgain.parentElement.style.display = userNotice ? "none" : "flex";
+      if (copiedContext && !userNotice) {
         const owner = errorDiv.contextGeneratorCopyNoticeOwner = {};
         activeCopyNotice = errorDiv;
         const ownsNotice = () => ensureLiveExtensionInstance() && errorDiv.isConnected && errorDiv.contextGeneratorCopyNoticeOwner === owner;
@@ -10479,6 +10489,7 @@
       }
       const dismiss = document.getElementById("context-generator-error-dismiss");
       if (dismiss) {
+        dismiss.style.display = userNotice ? "none" : "block";
         dismiss.style.setProperty("background", glass ? "rgba(255,237,210,0.045)" : "rgba(255,255,255,0.07)", "important");
         dismiss.style.setProperty("border-color", glass ? "rgba(255,237,210,0.10)" : "rgba(255,255,255,0.12)", "important");
         dismiss.style.setProperty("color", glass ? "rgba(243,231,213,0.76)" : "rgba(255,255,255,0.86)", "important");

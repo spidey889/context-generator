@@ -1,0 +1,74 @@
+const { createHash } = require("node:crypto");
+const messages = require("./user-notices.json");
+const { applyCorsHeaders, isValidPreflightRequest, isTrustedExtensionRequest } = require("../api/request-security");
+const { getHeader, parseBoundedJsonBody } = require("../api/request-validation");
+const { consumeTelemetryRateLimit } = require("../api/telemetry-rate-limit");
+
+// The file is server data, never executable client code. Keeping one current
+// message per number makes sending a notice a backend-only text edit.
+function noticeForUser(userNumber, entries = messages) {
+  if (!Number.isSafeInteger(userNumber) || userNumber < 1) return null;
+  const message = entries[String(userNumber)];
+  if (typeof message !== "string" || !message.trim() || message.length > 1000) return null;
+  return { id: createHash("sha256").update(`${userNumber}\n${message}`).digest("hex"), message };
+}
+
+function createHandler({ fetchImpl = (...args) => fetch(...args), entries = messages, timeoutMs = 5000,
+  rateLimit = consumeTelemetryRateLimit, env = process.env } = {}) {
+  return async (req, res) => {
+    const cors = applyCorsHeaders(req, res);
+    if (req.method === "OPTIONS") return cors.allowedOrigin && isValidPreflightRequest(req)
+      ? res.status(204).end() : res.status(403).json({ code: "client_not_allowed" });
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST, OPTIONS");
+      return res.status(405).json({ code: "method_not_allowed" });
+    }
+    if (!isTrustedExtensionRequest(req)) return res.status(403).json({ code: "client_not_allowed" });
+    if (getHeader(req, "content-type").split(";", 1)[0].toLowerCase() !== "application/json")
+      return res.status(415).json({ code: "unsupported_content_type" });
+    const parsed = parseBoundedJsonBody(req, 256, "Notice request");
+    if (!parsed.ok) return res.status(parsed.status).json({ code: parsed.code });
+    const input = parsed.body;
+    if (!input || Object.keys(input).length !== 1 || typeof input.install_id !== "string"
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.install_id))
+      return res.status(400).json({ code: "invalid_payload" });
+    if (!Object.keys(entries).length) return res.status(200).json({ notice: null });
+    const upstream = env.SUPABASE_TELEMETRY_FUNCTION_URL, key = env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
+    const secret = env.TELEMETRY_RELAY_SECRET;
+    if (!upstream || !key || !secret || Buffer.byteLength(secret) < 32)
+      return res.status(503).json({ code: "notices_unavailable" });
+    const limit = await rateLimit(req, input);
+    if (!limit.allowed) {
+      res.setHeader("Retry-After", String(limit.retryAfterSeconds));
+      return res.status(429).json({ code: "rate_limited" });
+    }
+    const controller = new AbortController();
+    let timer;
+    try {
+      // Reuse the authenticated relay's existing read access to users. The
+      // extension never supplies a user number or receives the users directory.
+      const result = await Promise.race([(async () => {
+        const response = await fetchImpl(upstream, {
+          method: "POST", redirect: "error", signal: controller.signal,
+          headers: { "Content-Type": "application/json", apikey: key, "X-Cap-Context-Relay": secret },
+          body: JSON.stringify({ kind: "user_notice_lookup", install_id: input.install_id })
+        });
+        if (!response.ok) throw new Error("lookup_failed");
+        const body = await response.text();
+        if (body.length > 128) throw new Error("lookup_invalid");
+        const { userNumber } = JSON.parse(body);
+        if (userNumber !== null && (!Number.isSafeInteger(userNumber) || userNumber < 1)) throw new Error("lookup_invalid");
+        return noticeForUser(userNumber, entries);
+      })(), new Promise((_, reject) => {
+        timer = setTimeout(() => { controller.abort(); reject(new Error("lookup_timeout")); }, timeoutMs);
+      })]);
+      return res.status(200).json({ notice: result });
+    } catch {
+      return res.status(503).json({ code: "notices_unavailable" });
+    } finally { clearTimeout(timer); }
+  };
+}
+
+module.exports = createHandler();
+module.exports.createHandler = createHandler;
+module.exports.noticeForUser = noticeForUser;

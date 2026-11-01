@@ -1,5 +1,8 @@
 {
   "version": 2,
+  "rewrites": [
+    { "source": "/api/user-notices", "destination": "/api/telemetry?cap_user_notices=1" }
+  ],
   "redirects": [
     { "source": "/", "destination": "https://spreadz.in/", "permanent": true },
     { "source": "/index.html", "destination": "https://spreadz.in/", "permanent": true },

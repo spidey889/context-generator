@@ -1,4 +1,5 @@
 import { validateTelemetryPayload } from "./validation.mjs";
+import { lookupNoticeUser } from "./user-notices.mjs";
 import { verifySummaryReceipt } from "../_shared/summary-proof.mjs";
 import "../_shared/provider-failure.js";
 import "../_shared/request-location.js";
@@ -29,6 +30,8 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
     catch (error) { return failure(error.status || 400, error.code || "invalid_payload"); }
     let input;
     try { input = JSON.parse(rawBody); } catch { return failure(400, "invalid_payload"); }
+    if (input?.kind === "user_notice_lookup")
+      return lookupNoticeUser(input, { createClient, getEnv, timeoutMs: rpcTimeoutMs }, headers);
     // This branch is reachable only after private relay authentication. Public
     // extension telemetry cannot submit server-observed provider failures.
     const providerEvent = input?.kind === "provider_failure" && Object.keys(input).every(key => ["kind", "event", "context"].includes(key))

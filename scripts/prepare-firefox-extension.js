@@ -9,7 +9,7 @@ function prepareFirefoxExtension(root = path.resolve(__dirname, "..")) {
   const manifest = JSON.parse(fs.readFileSync(path.join(source, "manifest.json"), "utf8"));
   // A combined manifest loads, but Chromium reports the Firefox scripts as an
   // MV2 warning. Keep the unpacked/Store source Chromium-only and derive Firefox.
-  manifest.background = { scripts: ["transfer-diagnostics.js", "large-transfer.js", manifest.background.service_worker] };
+  manifest.background = { scripts: ["transfer-diagnostics.js", "large-transfer.js", "user-notices.js", manifest.background.service_worker] };
   // Latest Run retains chat text locally, so private-window operation is not supported.
   manifest.incognito = "not_allowed";
   manifest.browser_specific_settings = {

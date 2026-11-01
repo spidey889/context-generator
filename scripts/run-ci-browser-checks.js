@@ -18,6 +18,7 @@ function getBrowserChecks(extended = false) {
     check("deepseek-paste", "DeepSeek verified Send and deferred activation", 90, { CAP_CONTEXT_DEEPSEEK_PASTE_SMOKE: "1" }),
     check("draft-transfer", "First draft opens both copy dialogs", 120, { CAP_CONTEXT_DRAFT_TRANSFER_SMOKE: "1", CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),
     { ...check("sign-in-recovery", "Login redirect, full copy recovery and sign-in reminder", 90), script: "scripts/run-sign-in-recovery-smoke.js" },
+    { ...check("user-notices", "Backend-targeted notices reuse the copy UI and appear once", 90), script: "scripts/run-user-notices-smoke.js" },
     check("chatgpt-reload", "ChatGPT reload, expired-token cancellation and Gemini delivery", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_CHATGPT_RELOAD_SMOKE: "1", CAP_CONTEXT_TOOLBAR_SMOKE: "1", CAP_CONTEXT_CHATGPT_AUTH_SMOKE: "paste401", CAP_CONTEXT_GEMINI_DESTINATION_SMOKE: "1" }),
     check("json-retry", "JSON retry after offline picker capture", 120, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_JSON_RETRY_SMOKE: "1" }),
     check("source-reload", "Source reload and tab closure retain their database reports", 120, { CAP_CONTEXT_SOURCE_RELOAD_SMOKE: "1", CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),

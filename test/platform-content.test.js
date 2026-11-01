@@ -3827,7 +3827,7 @@ clockTest("source draft recovery keeps its original copy dialog and prepared car
   }
 });
 
-clockTest("transfer retry notice keeps the owner's exact text, expires after ten seconds and cannot repeat", t => {
+clockTest("user notice preserves exact plain text, has no buttons, expires with the copy UI and cannot repeat", t => {
   const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message DeepSeek" } });
   const hooks = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice" });
   const notice = {};
@@ -3837,32 +3837,44 @@ clockTest("transfer retry notice keeps the owner's exact text, expires after ten
     hooks.registerElementId(`context-generator-error-${id}`, notice[id]);
   }
   notice.overlay.style.display = "none";
-  assert.equal(hooks.showTransferRetryNotice(), true);
-  assert.equal(notice.text.textContent, "Hey, saw your last DeepSeek transfer failed. We found an issue and fixed it. Your transfer should work now. Give it another try :)");
+  assert.equal(hooks.showUserNotice({ id: "a".repeat(64), message: "A plain notice <b>with literal markup</b>." }), true);
+  assert.equal(notice.text.textContent, "A plain notice <b>with literal markup</b>.");
   assert.equal(notice.title.textContent, "Cap Context");
   assert.equal(notice["copy-again"].style.display, "none");
+  assert.equal(notice.dismiss.style.display, "none");
+  assert.equal(notice.overlay.style.top, "80px");
   assert.equal(notice.overlay.style.right, "20px");
   assert.equal(notice.overlay.getAttribute("role"), "status");
-  t.mock.timers.tick(9999);
+  t.mock.timers.tick(15999);
   assert.equal(notice.overlay.getAttribute("aria-hidden"), "false");
   t.mock.timers.tick(1);
   assert.equal(notice.overlay.getAttribute("aria-hidden"), "true");
   t.mock.timers.tick(280);
   assert.equal(notice.overlay.style.display, "none");
-  assert.equal(hooks.showTransferRetryNotice(), false);
+  assert.equal(hooks.showUserNotice({ id: "a".repeat(64), message: "A plain notice <b>with literal markup</b>." }), false);
 });
 
-test("transfer retry notice waits for a visible chat and preserves an existing notice", () => {
+test("user notice waits for a visible chat and preserves an existing notice", () => {
   const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message DeepSeek" } });
   const hidden = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice", visibilityState: "hidden" });
-  assert.equal(hidden.showTransferRetryNotice(), false);
+  assert.equal(hidden.showUserNotice({ id: "a".repeat(64), message: "A plain notice <b>with literal markup</b>." }), false);
   const login = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/sign_in" });
-  assert.equal(login.showTransferRetryNotice(), false);
+  assert.equal(login.showUserNotice({ id: "a".repeat(64), message: "A plain notice <b>with literal markup</b>." }), false);
   const hooks = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice" });
   const existing = new FakeElement(); existing.style.display = "flex";
   hooks.registerElementId("context-generator-error-overlay", existing);
-  assert.equal(hooks.showTransferRetryNotice(), false);
+  assert.equal(hooks.showUserNotice({ id: "a".repeat(64), message: "A plain notice <b>with literal markup</b>." }), false);
   assert.equal(existing.style.display, "flex");
+});
+
+test("user notices reject malformed payloads and wait behind a manual copy dialog", () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message DeepSeek" } });
+  const hooks = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice" });
+  for (const invalid of [null, { id: "bad", message: "Message" }, { id: "a".repeat(64), message: " " },
+    { id: "a".repeat(64), message: "x".repeat(1001) }]) assert.equal(hooks.showUserNotice(invalid), false);
+  const copyBox = new FakeElement(); copyBox.style.display = "flex";
+  hooks.registerElementId("context-generator-fallback-modal", copyBox);
+  assert.equal(hooks.showUserNotice({ id: "a".repeat(64), message: "Wait for the copy dialog." }), false);
 });
 
 clockTest("sign-in recovery retains the complete transfer and uses the existing copy-notice flow", async () => {

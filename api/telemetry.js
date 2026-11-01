@@ -8,8 +8,12 @@ const { consumeTelemetryRateLimit } = require("./telemetry-rate-limit");
 const { getHeader } = require("./request-validation");
 const { fromHeaders } = require("../supabase/functions/_shared/request-location");
 const RELAY_TIMEOUT_MS = 5000;
+const userNoticeHandler = require("../backend/user-notices");
 
 async function handler(req, res) {
+  // The exact Vercel rewrite shares this entry to stay within the function
+  // limit. Notice validation/lookup remain separate from transfer telemetry.
+  if (req.query?.cap_user_notices === "1") return userNoticeHandler(req, res);
   const cors = applyCorsHeaders(req, res);
 
   if (req.method === "OPTIONS") {
