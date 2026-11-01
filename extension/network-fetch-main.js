@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 37 : platform === "grok" ? 24 : 21, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 38 : platform === "grok" ? 24 : 21, channel = "cap-context-network-json-v1";
   // Keep the bridge's reply timeout two seconds beyond this download budget.
   const captureTimeoutMs = platform === "deepseek" ? 60000 : 25000;
   // Bound the whole download, including unused branches, separately from text.
@@ -460,6 +460,16 @@
         // branch/fragment order. Validate all descriptors before any download.
         const pending = [...uploads.values()].filter(upload => !upload.omitted)
           .map((upload, index) => ({ ...upload, fileIndex: index + 1, retried: false }));
+        const totalFiles = pending.length, totalBytes = pending.reduce((sum, upload) => sum + upload.file.file_size, 0);
+        let completedFiles = 0, completedBytes = 0;
+        // Presentation only: a retry resolves the same file once. Exhausted
+        // files count as processed and retain the existing re-upload request.
+        const reportFileProgress = () => {
+          if (!measureOnly && totalFiles) window.postMessage({ ...reply, type: "file_progress",
+            fileProgress: { completed: completedFiles, total: totalFiles, completedBytes, totalBytes } }, location.origin);
+        };
+        const completeFile = file => { completedFiles++; completedBytes += file.file_size; reportFileProgress(); };
+        reportFileProgress();
         let failure;
         const download = async (upload) => {
           try {
@@ -470,6 +480,7 @@
               const content = await read(url.href, { credentials: "omit" }, "file", file.file_size, fileIndex, extension);
               if (content.size !== file.file_size) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", content.size, file.file_size); throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed"); }
               files[file.id] = content.text;
+              if (!measureOnly) completeFile(file);
               if (measureOnly) {
                 measureDeepseek();
                 if (reply.characterCount > 4000000) { controller.abort("size_limit"); return; }
@@ -484,6 +495,7 @@
                 return { ...upload, retried: true };
               }
               metrics.recoverFile(error, "attachment_body");
+              if (!measureOnly) completeFile(file);
             }
           } catch (error) {
             if (!failure) { failure = error; if (!measureOnly) controller.abort("attachment_failed"); }

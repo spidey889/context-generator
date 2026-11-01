@@ -1031,8 +1031,8 @@ test("a hidden local handoff skips motion and cancelled preparation cannot finis
   assert.ok(!cancelled.marks.some(mark => mark.label === "local handoff done"));
 });
 
-function createHandoffMotionFixture(stageId = "capture") {
-  const hooks = loadPlatformContent([]);
+function createHandoffMotionFixture(stageId = "capture", hostname = "chatgpt.com") {
+  const hooks = loadPlatformContent([], hostname);
   const properties = new Map();
   const stage = new FakeElement();
   stage.dataset.state = "active";
@@ -1074,6 +1074,26 @@ test("native handoff activity advances gently without completing and cancel clea
   hooks.resetRunningFlag({ immediate: true });
   assert.equal(paint(60000), false);
   assert.equal(Number(stage.dataset.contextGeneratorLineProgress), previous);
+});
+
+test("DeepSeek file progress replaces elapsed activity, weights file bytes and never completes capture early", () => {
+  const { hooks, stage, properties, paint } = createHandoffMotionFixture("capture", "chat.deepseek.com");
+  const trace = hooks.createTransferTrace("gemini", "test");
+  hooks.startHandoffActivityProgress("capture");
+  paint(1000);
+  const start = Number(stage.dataset.contextGeneratorLineProgress);
+  hooks.reportHandoffFileProgress(trace, { completed: 0, total: 4, completedBytes: 0, totalBytes: 100 });
+  assert.equal(paint(60000), false, "Elapsed time cannot advance measured file progress.");
+  hooks.reportHandoffFileProgress(trace, { completed: 1, total: 4, completedBytes: 50, totalBytes: 100 });
+  const half = Number(stage.dataset.contextGeneratorLineProgress);
+  assert.ok(Math.abs(half - (start + (0.94 - start) / 2)) < 0.0002);
+  hooks.reportHandoffFileProgress(trace, { completed: 0, total: 4, completedBytes: 0, totalBytes: 100 });
+  assert.equal(Number(stage.dataset.contextGeneratorLineProgress), half, "A retry cannot move the line backwards.");
+  hooks.window.matchMedia = () => ({ matches: true });
+  hooks.reportHandoffFileProgress(trace, { completed: 4, total: 4, completedBytes: 100, totalBytes: 100 });
+  assert.equal(stage.dataset.contextGeneratorLineProgress, "0.9400");
+  assert.equal(stage.dataset.state, "active");
+  assert.equal(properties.get("--context-generator-stage-progress-duration"), "0ms");
 });
 
 test("native handoff activity respects reduced motion", () => {

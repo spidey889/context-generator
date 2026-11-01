@@ -35,8 +35,8 @@
     const receive = event => {
       const reply = event.data;
       if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id
-          && reply.version !== (platform === "deepseek" ? 37 : platform === "grok" ? 24 : 21)) metrics?.set({ hook_status: "version_mismatch" });
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 37 : platform === "grok" ? 24 : 21)) finish(true);
+          && reply.version !== (platform === "deepseek" ? 38 : platform === "grok" ? 24 : 21)) metrics?.set({ hook_status: "version_mismatch" });
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 38 : platform === "grok" ? 24 : 21)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
@@ -44,7 +44,7 @@
     window.addEventListener("message", receive); ping();
     if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!settled && !reply?.ok) { metrics?.set({ hook_status: "install_rejected" }); finish(false); } }, () => { if (!settled) { metrics?.set({ hook_status: "install_failed" }); finish(false); } });
   });
-  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false, signal, onEstimate, omitLargeFiles = false) => {
+  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false, signal, onEstimate, omitLargeFiles = false, onFileProgress) => {
     const hookStarted = Date.now();
     // Grok branch selection lives in the query string; pin it with the clicked chat.
     const expectedUrl = platform === "grok" ? new URL(expectedPath, location.origin) : null;
@@ -82,7 +82,18 @@
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); };
         const receive = event => {
           const reply = event.data;
-          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.platform !== platform || !["response", "measurement_progress", "capture_progress"].includes(reply.type) || reply.id !== id) return;
+          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.platform !== platform || !["response", "measurement_progress", "capture_progress", "file_progress"].includes(reply.type) || reply.id !== id) return;
+          if (reply.type === "file_progress") {
+            const p = reply.fileProgress;
+            if (platform === "deepseek" && !measureOnly && !changed && reply.chat === before.chat && reply.selected === before.selected
+                && JSON.stringify(current()) === JSON.stringify(before) && p
+                && [p.completed, p.total, p.completedBytes, p.totalBytes].every(Number.isSafeInteger)
+                && p.total > 0 && p.total <= 1000000 && p.completed >= 0 && p.completed <= p.total
+                && p.totalBytes >= 0 && p.totalBytes <= 4100000 && p.completedBytes >= 0 && p.completedBytes <= p.totalBytes) {
+              try { onFileProgress?.({ completed: p.completed, total: p.total, completedBytes: p.completedBytes, totalBytes: p.totalBytes }); } catch {}
+            }
+            return;
+          }
           if (reply.type === "measurement_progress") {
             if (measureOnly && !signal?.aborted && !changed && reply.chat === before.chat && reply.selected === before.selected
                 && JSON.stringify(current()) === JSON.stringify(before) && Number.isSafeInteger(reply.messageTurnCount)
@@ -147,7 +158,8 @@
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: replyTimeoutMs }, onProgress);
     metrics.stage("hook");
     try {
-      const capture = await readCapture(expectedPath, metrics, false, undefined, undefined, omitLargeFiles);
+      const capture = await readCapture(expectedPath, metrics, false, undefined, undefined, omitLargeFiles,
+        progress => onProgress?.({ fileProgress: progress }));
       metrics.checkpoint("complete", "serialize", { history_checked: true });
       metrics.set({ selected_turns: capture.messageTurnCount });
       if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });

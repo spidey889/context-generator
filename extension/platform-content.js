@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-31-picker-capture-v241";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-deepseek-file-progress-v242";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -224,7 +224,7 @@
   ];
   const HANDOFF_SUMMARY_WORD_OUT_MS = 120;
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
-  // native capture and summary creep below completion; DOM capture uses scroll diagnostics.
+  // native capture/summary use activity until measured file/DOM progress is available.
   const HANDOFF_STAGES = [
     { id: "capture", label: "Capturing chat" },
     { id: "summary", label: "Summarizing" },
@@ -1104,6 +1104,7 @@
       startHandoffActivityProgress,
       stopHandoffActivityProgress,
       reportHandoffCaptureProgress,
+      reportHandoffFileProgress,
       transitionDestinationSheetToHandoff,
       setHandoffProgress,
       completeHandoffForDestinationReveal,
@@ -8462,7 +8463,8 @@
       return entry.selected || pickerJsonCapture === entry;
     }, false, false, entry.controller?.signal, progress => {
       if (entry.discarded || !instanceActive) return;
-      entry.jsonProgress = progress;
+      if (progress?.fileProgress) entry.fileProgress = progress;
+      else entry.jsonProgress = progress;
       if (entry.selected && entry.trace) recordJsonCaptureProgress(entry.trace, progress, "prefetch");
     })
       .then(capture => entry.discarded ? {} : { capture }, error => entry.discarded ? {} : { error });
@@ -8526,6 +8528,8 @@
 
   function recordJsonCaptureProgress(trace, progress, mode) {
     if (!trace || trace.completed || trace.telemetryFinished) return;
+    // File progress stays in page memory; it is never another telemetry field.
+    if (progress?.fileProgress) { reportHandoffFileProgress(trace, progress.fileProgress); return; }
     const safe = globalThis.CapTransferDiagnostics?.validateJsonAttempt({ ...progress, mode });
     if (!safe) return;
     const previous = trace.diagnostics?.json_attempts?.find(entry => entry.mode === mode);
@@ -8579,6 +8583,7 @@
             entry.trace = trace;
             entry.selected = true;
             if (entry.jsonProgress) recordJsonCaptureProgress(trace, entry.jsonProgress, "prefetch");
+            if (entry.fileProgress) recordJsonCaptureProgress(trace, entry.fileProgress, "prefetch");
             const waitingAt = Date.now();
             traceChatGptCapture("prefetch_wait", { pending: true });
             const result = await entry.promise;
@@ -9721,6 +9726,27 @@
     }
   }
 
+  function reportHandoffFileProgress(trace, progress) {
+    if (currentPlatform.id !== "deepseek" || !trace || trace.completed || trace.cancelled || trace.expired) return;
+    const { completed, total, completedBytes, totalBytes } = progress || {};
+    if (![completed, total, completedBytes, totalBytes].every(Number.isSafeInteger)
+        || total <= 0 || completed < 0 || completed > total || totalBytes < 0 || totalBytes > 4100000
+        || completedBytes < 0 || completedBytes > totalBytes) return;
+    trace.captureFileProgress = { completed, total, completedBytes, totalBytes };
+    const stage = document.querySelector("#context-generator-handoff-progress [data-context-generator-stage='capture']");
+    if (stage?.dataset.state !== "active" || !isHandoffOverlayVisible()) return;
+    stopHandoffActivityProgress();
+    // Preserve the history-read position, then follow resolved file bytes.
+    // The verified capture result alone may complete the line and start summary.
+    trace.captureFileProgressBase ??= Math.max(HANDOFF_CAPTURE_LINE_MIN,
+      Math.min(HANDOFF_CAPTURE_LINE_MAX, getRenderedHandoffLineProgress(stage)));
+    const ratio = totalBytes ? completedBytes / totalBytes : completed / total;
+    const value = trace.captureFileProgressBase + (HANDOFF_CAPTURE_LINE_MAX - trace.captureFileProgressBase) * ratio;
+    stage.style.setProperty("--context-generator-stage-progress-duration",
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "0ms" : "220ms");
+    setHandoffStageLineProgress("capture", Math.max(value, Number(stage.dataset.contextGeneratorLineProgress || 0)));
+  }
+
   function getHandoffSummaryLineDuration(inputChars) {
     // This is a display estimate, never a request deadline or measured percentage.
     const sizeRatio = Math.max(0, Math.min(1, (Number(inputChars || 0) - 60000) / 440000));
@@ -9729,6 +9755,10 @@
 
   function startHandoffActivityProgress(stageId, inputChars = 0) {
     stopHandoffActivityProgress();
+    if (stageId === "capture" && currentPlatform.id === "deepseek" && activeTransferTrace?.captureFileProgress) {
+      reportHandoffFileProgress(activeTransferTrace, activeTransferTrace.captureFileProgress);
+      return;
+    }
     if (!["capture", "summary"].includes(stageId) || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     if (!window.requestAnimationFrame) return;
 

@@ -1029,6 +1029,7 @@ clockTest("DeepSeek: independent uploads overlap in bounded waves and preserve e
 test("DeepSeek: a failed upload retries in the next batch without downloading successful files again", async () => {
   const f = deepseekUploads(9);
   const attempts = new Map(), waiting = new Map(), started = [];
+  const fileProgress = [];
   let active = 0, peak = 0;
   const h = setup("deepseek", f, { fetchImpl: async request => {
     if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
@@ -1043,12 +1044,15 @@ test("DeepSeek: a failed upload retries in the next batch without downloading su
     }));
   } });
   await h.observe();
-  const pending = h.window.__capCaptureNetworkJson();
+  const pending = h.window.__capCaptureNetworkJson(undefined, false, progress => {
+    if (progress.fileProgress) fileProgress.push(progress.fileProgress);
+  });
   await new Promise(setImmediate);
   assert.deepEqual(started, f.uploads.slice(0, 4).map(file => file.id));
   waiting.get(f.uploads[0].id)();
   await new Promise(setImmediate);
   assert.equal(started.length, 4, "the retry must wait for the next batch");
+  assert.equal(fileProgress.at(-1).completed, 0, "A retry does not count as a processed file.");
   for (const file of f.uploads.slice(1, 4)) waiting.get(file.id)();
   await new Promise(setImmediate);
   assert.deepEqual(started.slice(4), [f.uploads[0].id, ...f.uploads.slice(4, 7).map(file => file.id)]);
@@ -1066,6 +1070,9 @@ test("DeepSeek: a failed upload retries in the next batch without downloading su
   assert.equal(capture.jsonCapture.files_skipped, undefined);
   assert.equal(capture.jsonCapture.failure_check, undefined);
   assert.equal(capture.skippedFiles, undefined);
+  assert.equal(fileProgress.at(-1).completed, 9);
+  assert.equal(fileProgress.at(-1).completedBytes, f.uploads.reduce((sum, file) => sum + file.file_size, 0));
+  assert.equal(fileProgress.at(-1).total, 9);
 });
 
 test("DeepSeek: a permanently failed upload gets only one retry and keeps its missing-file notice", async () => {
@@ -1154,7 +1161,7 @@ test("DeepSeek: one incomplete upload preserves siblings and a fresh capture ret
   assert.ok(!capture.text.includes(f.files[f.uploads[0].id]));
   assert.equal(h.requests.length, 8, "only the failed file retries before the missing-file notice");
   assert.equal(aborted.length, 0);
-  assert.equal(h.window.__capNetworkFetchState.version, 37);
+  assert.equal(h.window.__capNetworkFetchState.version, 38);
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
   healthy = true;
@@ -1292,10 +1299,10 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   await h.observe();
   const old = h.window.__capNetworkFetchState;
   // Open tabs may retain the preceding reader after extension reload.
-  old.version = platform === "deepseek" ? 36 : platform === "gemini" ? 20 : 23;
+  old.version = platform === "deepseek" ? 37 : platform === "gemini" ? 20 : 23;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 37 : platform === "grok" ? 24 : 21);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 38 : platform === "grok" ? 24 : 21);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
