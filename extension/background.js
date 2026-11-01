@@ -1689,8 +1689,8 @@ function markInterruptedSummaryResponse(error) {
 }
 
 async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null, sourceTab = null, messages = null, platform = null) {
-  await checkRemoteControls("transfers", getPlatformFromUrl(sourceTab?.url));
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
+  await checkRemoteControls("transfers", getPlatformFromUrl(sourceTab?.url));
   checkTransferDeadline(deadlineAt);
   await checkTransferSource(operation);
   // Keep the established <=1M transport/cache/retry path intact. Larger chats
@@ -2315,7 +2315,6 @@ function createTransferTimeoutError() {
 
 async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null,
   deferFinalActivation = false, deadlineAt = null, sourceTab = null, localDirect = false) {
-  await checkRemoteControls("automaticPaste", getPlatformFromUrl(sourceTab?.url), destinationId);
   const trace = createBackgroundTrace();
   trace.localDirect = localDirect;
   trace.diagnostics = { version: 1, diagnostics_revision: 3 };
@@ -2348,6 +2347,8 @@ async function transferToDestinationObserved(
 ) {
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   if (operation) operation.destinationId = destinationId;
+  await checkRemoteControls("automaticPaste", getPlatformFromUrl(sourceTab?.url), destinationId);
+  checkTransferOperation(operation);
   if (!text?.trim()) {
     const error = new Error("Context summary text was not available.");
     error.code = "paste_failed";
@@ -2689,9 +2690,10 @@ function recordDestinationObservation(operation, event, changes = {}, { destinat
 }
 
 async function prepareDestination(destinationId, deadlineAt = null, sourceTab = null, transferId = null) {
-  await checkRemoteControls("transfers", getPlatformFromUrl(sourceTab?.url), destinationId);
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   if (operation) operation.destinationId = destinationId;
+  await checkRemoteControls("transfers", getPlatformFromUrl(sourceTab?.url), destinationId);
+  checkTransferOperation(operation);
   checkTransferDeadline(deadlineAt);
   const startedAt = nowMs();
   const destination = DESTINATIONS[destinationId];

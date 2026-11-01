@@ -162,7 +162,8 @@ function loadBackgroundForTransferTest({
   useRealTimers = false,
   noticeStorage = null,
   cryptoImpl = null,
-  remoteConfig = null
+  remoteConfig = null,
+  remoteRefresh = null
 } = {}) {
   let messageListener = null;
   let toolbarClickListener = null;
@@ -191,7 +192,7 @@ function loadBackgroundForTransferTest({
     TextEncoder,
     ...(remoteConfig ? { CapRemoteControls: {
       ...require("../extension/remote-controls"),
-      create: () => ({ refresh: async () => remoteConfig, current: () => remoteConfig })
+      create: () => ({ refresh: remoteRefresh || (async () => remoteConfig), current: () => remoteConfig })
     } } : {}),
     crypto: cryptoImpl || require("node:crypto").webcrypto,
     URL,
@@ -329,6 +330,23 @@ function loadBackgroundForTransferTest({
     }
   };
 }
+
+test("source closure while controls are pending cannot start preparation or direct delivery afterward", async () => {
+  for (const stage of ["prepare", "delivery"]) {
+    let release;
+    const settings = new Promise(resolve => { release = resolve; });
+    const sourceTab = { id: 5, url: "https://chatgpt.com/c/source", windowId: 1 };
+    const remoteConfig = { version: 1, disabled: {} };
+    const worker = loadBackgroundForTransferTest({ sourceTab, remoteConfig, remoteRefresh: () => settings });
+    const pending = stage === "prepare" ? worker.prepare("claude", sourceTab)
+      : worker.sendTransfer("claude", null, false, null, sourceTab);
+    await worker.closeTab(5);
+    release(remoteConfig);
+    assert.equal((await pending).code, "user_cancelled", stage);
+    assert.equal(worker.operations.created.length, 0);
+    assert.equal(worker.operations.sent.filter(entry => entry.message?.type === "PASTE_CONTEXT").length, 0);
+  }
+});
 
 test("remote transfer stops check both source and destination before opening a tab", async () => {
   const sourceTab = { id: 5, url: "https://chatgpt.com/c/source", windowId: 1 };

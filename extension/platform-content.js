@@ -8762,6 +8762,13 @@
     if (pickerJsonCapture) pickerJsonCapture.trace = trace;
     const sourceUrl = window.location.href;
     try {
+      checkTransferDeadline(trace);
+      // Empty unsaved/DOM-only chats need no remote admission. Keep their
+      // immediate feedback, including reduced-motion repeat clicks.
+      if ((!hasSavedSourceConversation() || !jsonCaptureEnabled()) && getDetectedConversationMessageCount() === 0) {
+        rejectEmptyChat();
+        return;
+      }
       // Selection owns this source before waiting for settings. Escape or an
       // away-and-back navigation during the wait must revoke the same attempt.
       await remoteControlsReady;
@@ -8783,11 +8790,7 @@
       // The full JSON tree can be ready before its virtualized DOM mounts.
       // JSON validation, rather than rendered turn count, decides whether it is empty.
       if (!useClaudeJson && !useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
-        recordTransferFailureDiagnostics(trace, createDiagnosticError(NO_CONVERSATION_ERROR_MESSAGE, "no_conversation"));
-        markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
-        finishTransferTrace(trace, "no_conversation");
-        resetRunningFlag();
-        showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
+        rejectEmptyChat();
         return;
       }
 
@@ -8902,6 +8905,14 @@
       finishTransferTrace(trace, getSafeTelemetryFailureReason(error, "capture"));
       resetRunningFlag();
       showErrorOverlay(error);
+    }
+
+    function rejectEmptyChat() {
+      recordTransferFailureDiagnostics(trace, createDiagnosticError(NO_CONVERSATION_ERROR_MESSAGE, "no_conversation"));
+      markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
+      finishTransferTrace(trace, "no_conversation");
+      resetRunningFlag();
+      showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
     }
   }
 

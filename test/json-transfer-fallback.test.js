@@ -85,6 +85,17 @@ test("selection pins its source before waiting for remote controls and cannot ca
   assert.match(calls.errors[0], /conversation changed during capture/);
 });
 
+test("empty-chat feedback remains immediate even when remote settings are unavailable", async () => {
+  const { context, calls, navigate } = harness("chatgpt");
+  navigate("/");
+  context.getDetectedConversationMessageCount = () => 0;
+  context.remoteControlsReady = new Promise(() => {});
+  const transfer = context.start("claude");
+  assert.deepEqual(calls.errors, ["No conversation"]);
+  await transfer;
+  assert.equal(calls.json + calls.dom + calls.destination, 0);
+});
+
 test("DOM fallback starts immediately alongside a fresh count and blocks excess before summary or paste", async () => {
   for (const platform of ["claude", "gemini", "grok", "deepseek"]) {
     const { context, calls } = harness(platform);
