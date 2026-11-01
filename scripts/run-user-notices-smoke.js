@@ -81,21 +81,33 @@ async function run() {
     await waitFor(() => page.evaluate(`document.getElementById("context-generator-error-text")?.textContent === ${JSON.stringify(message)}`, context), "automatic targeted notice");
     assert.deepEqual(await page.evaluate(appearance), baseline, "Reuse the actual copy confirmation's material, placement and animation.");
     assert.equal(await page.evaluate('document.querySelectorAll("#context-generator-error-overlay b").length'), 0);
-    assert.equal(await page.evaluate('Array.from(document.querySelectorAll("#context-generator-error-overlay button")).filter(button=>getComputedStyle(button).display!=="none" && button.getBoundingClientRect().height>0).length'), 0);
+    const visibleControls = 'Array.from(document.querySelectorAll("#context-generator-error-overlay button")).filter(button=>getComputedStyle(button).display!=="none" && button.getBoundingClientRect().height>0).map(button=>button.textContent)';
+    assert.deepEqual(await page.evaluate(visibleControls), ["Dismiss"]);
     assert.equal(await page.evaluate('document.getElementById("context-generator-error-overlay").getAttribute("role")'), "status");
     if (output) {
       await new Promise(resolve => setTimeout(resolve, 300));
       const shot = await page.call("Page.captureScreenshot", { format: "png" });
       await fs.writeFile(path.join(output, "user-notice.png"), Buffer.from(shot.data, "base64"));
     }
-    console.log("PASS actual fallback Copy confirmation and targeted notice share glass styles, position and transition; literal message, no buttons.");
-    await waitFor(() => page.evaluate('document.getElementById("context-generator-error-overlay")?.style.display === "none"', context), "sixteen-second automatic expiry");
+    console.log("PASS actual fallback Copy confirmation and targeted notice share glass styles, position and transition; literal message, Dismiss only.");
+    await waitFor(() => page.evaluate('document.getElementById("context-generator-error-overlay")?.style.display === "none"', context), "ten-second automatic expiry");
     await page.evaluate(`Object.defineProperty(navigator, "clipboard", {configurable:true,value:{writeText:async()=>{}}});
       window.__capSmokeShowRecovery("Synthetic complete carry after a notice", false, true);
       document.getElementById("context-generator-fallback-copy").click();`, context);
     await waitFor(() => page.evaluate('document.getElementById("context-generator-error-title")?.textContent === "Copied to clipboard"', context), "copy confirmation after a user notice");
     assert.equal(await page.evaluate('Array.from(document.querySelectorAll("#context-generator-error-overlay button")).filter(button=>getComputedStyle(button).display!=="none" && button.getBoundingClientRect().height>0).length'), 2,
       "A later copy confirmation regains Copy again and Dismiss on the same notice node.");
+    await page.evaluate('document.getElementById("context-generator-error-dismiss").click()', context);
+    await waitFor(() => page.evaluate('document.getElementById("context-generator-error-overlay").style.display === "none"', context), "copy confirmation dismissal");
+    // Reuse the copy notice's actions container: hiding that whole row would
+    // also hide Dismiss even when the button itself is styled as visible.
+    entries[49] = "Dismiss this synthetic notice.";
+    await worker.evaluate('chrome.storage.local.get("context-generator-user-notices-v1").then(stored => chrome.storage.local.set({"context-generator-user-notices-v1":{...stored["context-generator-user-notices-v1"],checkedAt:0}}))');
+    assert.equal((await page.evaluate('chrome.runtime.sendMessage({type:"CHECK_USER_NOTICES"})', context)).shown, true);
+    assert.deepEqual(await page.evaluate(visibleControls), ["Dismiss"]);
+    await page.evaluate('document.getElementById("context-generator-error-dismiss").click()', context);
+    assert.equal(await page.evaluate('document.getElementById("context-generator-error-overlay").getAttribute("aria-hidden")'), "true");
+    await waitFor(() => page.evaluate('document.getElementById("context-generator-error-overlay").style.display === "none"', context), "user notice dismissal");
     previousContext = context;
     await page.call("Page.reload");
     context = await waitFor(() => { const id = page.getExtensionContextId(); return id !== previousContext && id; }, "content after once-only reload");
@@ -109,7 +121,7 @@ async function run() {
     assert.equal((await page.evaluate('chrome.runtime.sendMessage({type:"CHECK_USER_NOTICES"})', context)).shown, false);
     assert.equal(await worker.evaluate('chrome.storage.local.get("context-generator-user-notices-v1").then(result=>result["context-generator-user-notices-v1"].notice)'), null);
     assert.ok(requests.every(body => Object.keys(body).join() === "install_id"));
-    console.log("PASS automatic expiry, persisted no-repeat after navigation, backend-only message delivery and different-user exclusion.");
+    console.log("PASS ten-second expiry, Dismiss on a reused copy notice, persisted no-repeat after dismissal/navigation, backend-only updates and different-user exclusion.");
   } catch (error) {
     console.error(JSON.stringify({ requests,
       storage: worker ? await worker.evaluate('chrome.storage.local.get(["context-generator-install-id-v1","context-generator-user-notices-v1"])').catch(() => null) : null,

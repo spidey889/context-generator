@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-user-notices-v245";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-user-notices-v246";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -10235,7 +10235,7 @@
     const message = userNotice ? String(error) : getUserFacingTransferErrorMessage(error);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     // Keep recovery until copying succeeds; allow a short read before its exit.
-    const noticeDurationMs = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
+    const noticeDurationMs = userNotice ? 10000 : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
     const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
@@ -10396,7 +10396,7 @@
       // Keep the actions steady when the copy label changes to its confirmation.
       copyAgain.style.minWidth = copiedContext?.pasteBackup ? "112px" : "";
       copyAgain.disabled = false;
-      if (copyAgain.parentElement) copyAgain.parentElement.style.display = userNotice ? "none" : "flex";
+      if (copyAgain.parentElement) copyAgain.parentElement.style.display = "flex";
       if (copiedContext && !userNotice) {
         const owner = errorDiv.contextGeneratorCopyNoticeOwner = {};
         activeCopyNotice = errorDiv;
@@ -10489,7 +10489,7 @@
       }
       const dismiss = document.getElementById("context-generator-error-dismiss");
       if (dismiss) {
-        dismiss.style.display = userNotice ? "none" : "block";
+        dismiss.style.display = "block";
         dismiss.style.setProperty("background", glass ? "rgba(255,237,210,0.045)" : "rgba(255,255,255,0.07)", "important");
         dismiss.style.setProperty("border-color", glass ? "rgba(255,237,210,0.10)" : "rgba(255,255,255,0.12)", "important");
         dismiss.style.setProperty("color", glass ? "rgba(243,231,213,0.76)" : "rgba(255,255,255,0.86)", "important");

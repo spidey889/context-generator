@@ -3827,7 +3827,7 @@ clockTest("source draft recovery keeps its original copy dialog and prepared car
   }
 });
 
-clockTest("user notice preserves exact plain text, has no buttons, expires with the copy UI and cannot repeat", t => {
+clockTest("user notice keeps Dismiss, expires after ten seconds and cannot repeat", t => {
   const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message DeepSeek" } });
   const hooks = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice" });
   const notice = {};
@@ -3841,11 +3841,11 @@ clockTest("user notice preserves exact plain text, has no buttons, expires with 
   assert.equal(notice.text.textContent, "A plain notice <b>with literal markup</b>.");
   assert.equal(notice.title.textContent, "Cap Context");
   assert.equal(notice["copy-again"].style.display, "none");
-  assert.equal(notice.dismiss.style.display, "none");
+  assert.equal(notice.dismiss.style.display, "block");
   assert.equal(notice.overlay.style.top, "80px");
   assert.equal(notice.overlay.style.right, "20px");
   assert.equal(notice.overlay.getAttribute("role"), "status");
-  t.mock.timers.tick(15999);
+  t.mock.timers.tick(9999);
   assert.equal(notice.overlay.getAttribute("aria-hidden"), "false");
   t.mock.timers.tick(1);
   assert.equal(notice.overlay.getAttribute("aria-hidden"), "true");
