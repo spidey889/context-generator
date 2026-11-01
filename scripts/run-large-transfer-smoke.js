@@ -9,7 +9,7 @@ const http = require("node:http");
 const { spawn } = require("node:child_process");
 const { fixtures } = require("../test/network-json-fixtures");
 const { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort,
-  getTargets, waitFor } = require("./run-extension-smoke");
+  getTargets, waitFor, serveEmptyUserNotice } = require("./run-extension-smoke");
 const largeHandler = require("../api/large-summary");
 // Keep this mode free of worker debugging: attaching a debugger changes MV3
 // lifetime and masked the zero-request preparation failure in investigation.
@@ -82,6 +82,7 @@ async function scenario(failPart, failTransport = false, interruptedPhase = null
     return nativeFetch(input, options);
   };
   const server = http.createServer(async (req, res) => {
+    if (serveEmptyUserNotice(req, res)) return;
     try {
       const url = new URL(req.url, "http://localhost");
       if (url.pathname === "/api/large-summary") {

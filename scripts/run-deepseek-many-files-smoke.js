@@ -9,7 +9,7 @@ const http = require("node:http");
 const { spawn } = require("node:child_process");
 const { fixtures } = require("../test/network-json-fixtures");
 const { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension,
-  readDevToolsPort, getTargets, waitFor } = require("./run-extension-smoke");
+  readDevToolsPort, getTargets, waitFor, serveEmptyUserNotice } = require("./run-extension-smoke");
 
 async function run() {
   const fileCount = 93, fileBytes = 880092, historyBytes = 5746995;
@@ -34,6 +34,7 @@ async function run() {
   const attempts = new Map(), summaries = [], reports = [], held = [], firstBatch = [];
   let historyReads = 0, historyStartedAt, active = 0, peak = 0, released = false, firstBatchReleased = false, destinationLoads = 0;
   const server = http.createServer(async (req, res) => {
+    if (serveEmptyUserNotice(req, res)) return;
     const url = new URL(req.url, "http://localhost");
     if (req.method === "POST") {
       const chunks = []; for await (const chunk of req) chunks.push(chunk);

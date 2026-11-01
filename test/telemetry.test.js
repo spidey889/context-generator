@@ -254,6 +254,9 @@ test("telemetry keeps one install id across summaries, browser restarts, and ext
 });
 
 test("Vercel and Supabase enforce the same metadata-only telemetry schema", async () => {
+  const shippedVersion = JSON.parse(fs.readFileSync(path.join(ROOT, "extension/manifest.json"), "utf8")).version;
+  assert.ok(VERCEL_VALIDATION.validateTelemetryPayload(makeTelemetryPayload({ extension_version: shippedVersion })),
+    `The actual manifest version ${shippedVersion} must be accepted by the telemetry contract.`);
   const { validateTelemetryPayload: validateSupabasePayload } = await import(pathToFileURL(VALIDATION_PATH).href);
   const succeeded = (changes = {}) => makeTelemetryPayload({
     status: "succeeded", last_stage: "completed", failure_reason: null, ...changes

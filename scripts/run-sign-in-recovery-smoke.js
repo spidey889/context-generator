@@ -9,7 +9,7 @@ const http = require("node:http");
 const { spawn } = require("node:child_process");
 const { fixtures } = require("../test/network-json-fixtures");
 const { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort,
-  getTargets, waitFor } = require("./run-extension-smoke");
+  getTargets, waitFor, serveEmptyUserNotice } = require("./run-extension-smoke");
 
 async function run() {
   const fixture = fixtures("deepseek", "sign-in", 1), reports = [];
@@ -18,6 +18,7 @@ async function run() {
   let loginVisits = 0;
   let fixtureError;
   const server = http.createServer(async (req, res) => {
+    if (serveEmptyUserNotice(req, res)) return;
     try {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "POST") {

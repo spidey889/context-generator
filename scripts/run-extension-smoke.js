@@ -782,6 +782,16 @@ function streamOversizedFixtureResponse(response, prefix, metrics, tailMegabytes
   schedule();
 }
 
+// Transfer fixtures have an empty notice inbox. Keep this separate from model
+// and telemetry counters; the dedicated notice smoke owns nonempty responses.
+function serveEmptyUserNotice(request, response) {
+  if (request.method !== "POST" || new URL(request.url, "http://127.0.0.1").pathname !== "/api/user-notices") return false;
+  request.resume();
+  response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+  response.end(JSON.stringify({ notice: null }));
+  return true;
+}
+
 async function startFixtureServer() {
   const state = { summaryRequests: [], destinationRequests: 0, jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, fileRedirects: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
   const pickerLoadResponses = new Set();
@@ -801,6 +811,7 @@ async function startFixtureServer() {
   const network = NETWORK_SOURCE ? networkSmokeFixture(JSON_SOURCE) : null;
   const pendingFileResponses = [];
   const server = http.createServer(async (request, response) => {
+    if (serveEmptyUserNotice(request, response)) return;
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
     if (url.pathname === "/picker-preload-wait") {
@@ -4220,4 +4231,4 @@ if (require.main === module) {
 }
 
 module.exports = { CdpSession, dispatchTrustedFixtureInput, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort, getTargets, waitFor,
-  startFixtureServer, expectedChatGptConversation, SUMMARY_TEXT };
+  startFixtureServer, serveEmptyUserNotice, expectedChatGptConversation, SUMMARY_TEXT };

@@ -4,6 +4,25 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { getBrowserChecks, childEnvironment, runCheck, runChecks } = require("../scripts/run-ci-browser-checks");
+const { startFixtureServer } = require("../scripts/run-extension-smoke");
+
+test("ordinary transfer fixtures answer notice polling without counting summary or telemetry requests", async t => {
+  const fixture = await startFixtureServer();
+  t.after(async () => {
+    fixture.state.releasePickerLoad();
+    fixture.server.closeAllConnections();
+    await new Promise(resolve => fixture.server.close(resolve));
+    await fixture.telemetryFixture.close();
+  });
+  const response = await fetch(`${fixture.origin}/api/user-notices`, {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Cap-Context-Client": "cap-context-extension/1" },
+    body: JSON.stringify({ install_id: "11111111-1111-4111-8111-111111111111" })
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { notice: null });
+  assert.equal(fixture.state.summaryRequests.length, 0);
+  assert.equal(fixture.state.telemetryRequests.length, 0);
+});
 
 test("regular CI always includes the incident-shaped DeepSeek many-file transfer", () => {
   const check = getBrowserChecks().find(item => item.id === "deepseek-many-files");

@@ -10,7 +10,7 @@ const http = require("node:http");
 const { spawn } = require("node:child_process");
 const { fixtures } = require("../test/network-json-fixtures");
 const { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort,
-  getTargets, waitFor } = require("./run-extension-smoke");
+  getTargets, waitFor, serveEmptyUserNotice } = require("./run-extension-smoke");
 const greeting = 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
 const localTransfer = process.env.CAP_CONTEXT_LOCAL_TRANSFER_SMOKE === "1";
 const unreadableFile = process.env.CAP_CONTEXT_UNREADABLE_FILE_NOTE_SMOKE === "1";
@@ -29,6 +29,7 @@ async function run() {
   let fileReads = 0, historyReads = 0, destinations = 0;
   const fileAttempts = new Map();
   const server = http.createServer(async (req, res) => {
+    if (serveEmptyUserNotice(req, res)) return;
     const url = new URL(req.url, "http://localhost");
     if (req.method === "POST") {
       const chunks = []; for await (const chunk of req) chunks.push(chunk);

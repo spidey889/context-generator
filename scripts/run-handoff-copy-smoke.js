@@ -7,7 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort,
-  getTargets, waitFor } = require("./run-extension-smoke");
+  getTargets, waitFor, serveEmptyUserNotice } = require("./run-extension-smoke");
 
 const SUMMARY = "CONTEXT CARRY — READY TO PASTE\n\nWHAT WE WERE DOING\nTesting a manual handoff.\n\nWHERE WE LEFT OFF\nThe complete summary is ready.\n\nKEY CONTEXT\nKeep all this text.\n\nNEXT STEP\nContinue after the user pastes it.";
 
@@ -15,6 +15,7 @@ async function run() {
   let destinations = 0, summaryRequests = 0;
   const telemetryRequests = [];
   const server = http.createServer(async (req, res) => {
+    if (serveEmptyUserNotice(req, res)) return;
     const url = new URL(req.url, "http://localhost");
     if (req.method === "POST") {
       const chunks = [];
