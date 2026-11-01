@@ -94,6 +94,50 @@ test("notice backend authenticates its lookup and returns only the matching user
     { source: "/api/user-notices", destination: "/api/telemetry?cap_user_notices=1" });
 });
 
+test("dismissal logs the resolved user and exact notice ID, without text, and rejects invalid or unconsented reports", async () => {
+  const logs = [], relayCalls = [];
+  let consent = true, userNumber = 49;
+  const handler = createHandler({ env, log: (...args) => logs.push(args), rateLimit: async () => ({ allowed: true }),
+    fetchImpl: async (_url, options) => {
+      relayCalls.push(JSON.parse(options.body));
+      return json({ userNumber, message: entries[userNumber] });
+    } });
+  const run = delivery({ hasConsent: async () => consent, fetchImpl: async (_url, options) => {
+    const res = response();
+    await handler(request({ body: JSON.parse(options.body) }), res);
+    return new Response(res.body ? JSON.stringify(res.body) : null, { status: res.code,
+      headers: { "Content-Type": "application/json" } });
+  } });
+  await run.client.check(sender(1));
+  assert.deepEqual(logs, [], "Fetching/showing a notice is not a dismissal.");
+  // The current message may have changed while this cached notice was visible.
+  // Dismissal still attributes the original ID through a number-only lookup.
+  assert.equal((await run.client.dismiss(notice.id)).logged, true);
+  assert.deepEqual(relayCalls.at(-1), { kind: "user_notice_lookup", install_id: INSTALL });
+  assert.deepEqual(logs, [["cap_context_user_notice_dismiss", { user_no: 49, notice_id: notice.id }]]);
+  assert.deepEqual(JSON.parse(run.fetched.at(-1)[1].body), { install_id: INSTALL, event: "dismiss", notice_id: notice.id });
+  assert.equal(run.fetched.at(-1)[1].credentials, "omit");
+  assert.doesNotMatch(JSON.stringify(logs), /install_id|message|Your transfer|11111111/);
+  const before = run.fetched.length;
+  for (const id of ["not-a-notice", "b".repeat(64), null]) assert.equal((await run.client.dismiss(id)).logged, false);
+  consent = false;
+  assert.equal((await run.client.dismiss(notice.id)).logged, false);
+  consent = true;
+  run.storage["context-generator-install-id-v1"] = "22222222-2222-4222-8222-222222222222";
+  assert.equal((await run.client.dismiss(notice.id)).logged, false);
+  assert.equal(run.fetched.length, before);
+  for (const body of [{ install_id: INSTALL, event: "expire", notice_id: notice.id },
+    { install_id: INSTALL, event: "dismiss", notice_id: "bad" },
+    { install_id: INSTALL, event: "dismiss", notice_id: notice.id, user_no: 50 }]) {
+    const res = response(); await handler(request({ body }), res); assert.equal(res.code, 400);
+  }
+  userNumber = null;
+  const res = response();
+  await handler(request({ body: { install_id: INSTALL, event: "dismiss", notice_id: notice.id } }), res);
+  assert.equal(res.code, 204);
+  assert.equal(logs.length, 1, "Unknown installations do not produce user click logs.");
+});
+
 test("notice delivery waits for a free tab, survives restarts and accepts later messages", async () => {
   let ready = false;
   const first = delivery({ sendMessage: async () => ({ shown: ready }) });

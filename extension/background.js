@@ -935,11 +935,11 @@ function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
   };
 }
 
-function checkUserNotices(sender) {
+function getUserNoticeDelivery() {
   userNoticeDelivery ||= globalThis.CapUserNotices.create({ chrome,
     endpoint: () => new URL("/api/user-notices", SUMMARY_BACKEND_URL).href,
     headers: localPreviewAuthHeaders, hasConsent: hasTelemetryConsent });
-  return userNoticeDelivery.check(sender);
+  return userNoticeDelivery;
 }
 
 async function getOrCreateTelemetryInstallId() {
@@ -1319,12 +1319,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       config: config || globalThis.CapRemoteControls?.defaults() })).catch(() => sendResponse({ ok: false }));
     return true;
   }
-  if (message?.type === "CHECK_USER_NOTICES") {
+  if (message?.type === "CHECK_USER_NOTICES" || message?.type === "DISMISS_USER_NOTICE") {
     if (!Number.isInteger(sender?.tab?.id) || sender.id !== chrome.runtime.id || sender.frameId !== 0
         || !getPlatformFromUrl(sender.url || sender.tab.url)) {
       sendResponse({ ok: false }); return false;
     }
-    checkUserNotices(sender).then(result => sendResponse({ ok: true, ...result }));
+    const delivery = getUserNoticeDelivery();
+    const work = message.type === "DISMISS_USER_NOTICE" ? delivery.dismiss(message.noticeId) : delivery.check(sender);
+    work.then(result => sendResponse({ ok: true, ...result })).catch(() => sendResponse({ ok: false }));
     return true;
   }
   if (message?.type === "CANCEL_TRANSFER") {

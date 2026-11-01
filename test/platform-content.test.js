@@ -3881,8 +3881,10 @@ clockTest("source draft recovery keeps its original copy dialog and prepared car
 });
 
 clockTest("user notice keeps Dismiss, expires after ten seconds and cannot repeat", t => {
+  const messages = [];
   const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message DeepSeek" } });
-  const hooks = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice" });
+  const hooks = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice",
+    runtimeSendMessage: async message => { messages.push(message); return { ok: true }; } });
   const notice = {};
   for (const id of ["overlay", "title", "text", "mark", "dismiss", "copy-again"]) {
     notice[id] = new FakeElement();
@@ -3904,6 +3906,9 @@ clockTest("user notice keeps Dismiss, expires after ten seconds and cannot repea
   assert.equal(notice.overlay.getAttribute("aria-hidden"), "true");
   t.mock.timers.tick(280);
   assert.equal(notice.overlay.style.display, "none");
+  assert.equal(notice.overlay.contextGeneratorUserNoticeId, null);
+  assert.equal(messages.filter(message => message.type === "DISMISS_USER_NOTICE").length, 0,
+    "Automatic expiry must never send a Dismiss click report.");
   assert.equal(hooks.showUserNotice({ id: "a".repeat(64), message: "A plain notice <b>with literal markup</b>." }), false);
 });
 

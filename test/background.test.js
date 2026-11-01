@@ -115,11 +115,14 @@ test("remote notice requests accept only supported top-frame content scripts", a
   const sender = { id: "cap-context-test", frameId: 0, tab: { id: 1, url: "https://chatgpt.com/" } };
   const worker = loadBackgroundForTransferTest({ noticeStorage: {} });
   for (const invalid of [{ ...sender, frameId: 1 }, { ...sender, id: "other-extension" },
-    { ...sender, tab: { id: 1, url: "https://example.com/" } }])
+    { ...sender, tab: { id: 1, url: "https://example.com/" } }]) {
     assert.equal(worker.message({ type: "CHECK_USER_NOTICES" }, invalid).ok, false);
+    assert.equal(worker.message({ type: "DISMISS_USER_NOTICE", noticeId: "a".repeat(64) }, invalid).ok, false);
+  }
   const reply = await worker.request({ type: "CHECK_USER_NOTICES" }, sender);
   assert.equal(reply.ok, true);
   assert.equal(reply.shown, false);
+  assert.equal((await worker.request({ type: "DISMISS_USER_NOTICE", noticeId: "a".repeat(64) }, sender)).logged, false);
 });
 
 test("production worker never imports the absent local preview dependency", () => {

@@ -6,15 +6,15 @@ const path = require("node:path");
 const os = require("node:os");
 const http = require("node:http");
 const { spawn } = require("node:child_process");
-const { createHandler } = require("../backend/user-notices");
+const { createHandler, noticeForUser } = require("../backend/user-notices");
 const { CdpSession, findBraveExecutable, createSmokeExtension, readDevToolsPort, getTargets, waitFor,
-  waitForProcessExit } = require("./run-extension-smoke");
+  waitForProcessExit, dispatchTrustedFixtureInput } = require("./run-extension-smoke");
 
 async function run() {
-  const entries = {}, requests = [];
+  const entries = {}, requests = [], dismissals = [];
   const installId = "11111111-1111-4111-8111-111111111111";
   const message = "Hello from Cap Context. Your transfer is ready to try again. 🙂 <b>This stays plain text.</b>";
-  const handler = createHandler({ rateLimit: async () => ({ allowed: true }),
+  const handler = createHandler({ rateLimit: async () => ({ allowed: true }), log: (...args) => dismissals.push(args),
     env: { SUPABASE_TELEMETRY_FUNCTION_URL: "https://example.invalid", SUPABASE_TELEMETRY_PUBLISHABLE_KEY: "synthetic",
       TELEMETRY_RELAY_SECRET: "synthetic-private-relay-secret-0123456789abcdef" },
     fetchImpl: async (_url, options) => {
@@ -92,6 +92,7 @@ async function run() {
     }
     console.log("PASS actual fallback Copy confirmation and targeted notice share glass styles, position and transition; literal message, Dismiss only.");
     await waitFor(() => page.evaluate('document.getElementById("context-generator-error-overlay")?.style.display === "none"', context), "ten-second automatic expiry");
+    assert.deepEqual(dismissals, [], "Automatic expiry must not log a click.");
     await page.evaluate(`Object.defineProperty(navigator, "clipboard", {configurable:true,value:{writeText:async()=>{}}});
       window.__capSmokeShowRecovery("Synthetic complete carry after a notice", false, true);
       document.getElementById("context-generator-fallback-copy").click();`, context);
@@ -106,7 +107,12 @@ async function run() {
     await worker.evaluate('chrome.storage.local.get("context-generator-user-notices-v1").then(stored => chrome.storage.local.set({"context-generator-user-notices-v1":{...stored["context-generator-user-notices-v1"],checkedAt:0}}))');
     assert.equal((await page.evaluate('chrome.runtime.sendMessage({type:"CHECK_USER_NOTICES"})', context)).shown, true);
     assert.deepEqual(await page.evaluate(visibleControls), ["Dismiss"]);
-    await page.evaluate('document.getElementById("context-generator-error-dismiss").click()', context);
+    assert.deepEqual(dismissals, [], "Dismiss on an ordinary copy confirmation is not a user-notice click.");
+    await dispatchTrustedFixtureInput(page, { selector: "#context-generator-error-dismiss" });
+    await waitFor(() => dismissals.length === 1, "trusted Dismiss report in backend logs");
+    assert.deepEqual(dismissals, [["cap_context_user_notice_dismiss", {
+      user_no: 49, notice_id: noticeForUser(49, entries[49]).id
+    }]]);
     assert.equal(await page.evaluate('document.getElementById("context-generator-error-overlay").getAttribute("aria-hidden")'), "true");
     await waitFor(() => page.evaluate('document.getElementById("context-generator-error-overlay").style.display === "none"', context), "user notice dismissal");
     previousContext = context;
@@ -121,7 +127,9 @@ async function run() {
     await worker.evaluate('chrome.storage.local.set({"context-generator-install-id-v1":"22222222-2222-4222-8222-222222222222","context-generator-user-notices-v1":{checkedAt:0,seen:[]}})');
     assert.equal((await page.evaluate('chrome.runtime.sendMessage({type:"CHECK_USER_NOTICES"})', context)).shown, false);
     assert.equal(await worker.evaluate('chrome.storage.local.get("context-generator-user-notices-v1").then(result=>result["context-generator-user-notices-v1"].notice)'), null);
-    assert.ok(requests.every(body => Object.keys(body).join() === "install_id"));
+    assert.ok(requests.every(body => body.event === "dismiss"
+      ? Object.keys(body).sort().join() === "event,install_id,notice_id" : Object.keys(body).join() === "install_id"));
+    assert.equal(dismissals.length, 1);
     console.log("PASS ten-second expiry, Dismiss on a reused copy notice, persisted no-repeat after dismissal/navigation, backend-only updates and different-user exclusion.");
   } catch (error) {
     console.error(JSON.stringify({ requests,

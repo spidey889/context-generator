@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-remote-controls-v247";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-02-notice-dismiss-v248";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -10341,7 +10341,7 @@
     if (!notice || typeof notice.id !== "string" || !/^[a-f0-9]{64}$/.test(notice.id)
         || typeof notice.message !== "string" || !notice.message.trim() || notice.message.length > 1000
         || displayedUserNotices.has(notice.id) || !canShowUserNotice()) return false;
-    showErrorOverlay(notice.message, { userNotice: true });
+    showErrorOverlay(notice.message, { userNotice: true, noticeId: notice.id });
     const shown = document.getElementById("context-generator-error-overlay")?.style.display === "flex";
     if (shown) displayedUserNotices.add(notice.id);
     return shown;
@@ -10460,8 +10460,11 @@
         "font-weight:650",
         "line-height:28px"
       ].join(";");
-      addOwnedEventListener(closeBtn, "click", () => {
+      addOwnedEventListener(closeBtn, "click", event => {
+        const noticeId = event.isTrusted && errorDiv.getAttribute("aria-hidden") === "false"
+          ? errorDiv.contextGeneratorUserNoticeId : null;
         hideErrorOverlay(errorDiv);
+        if (noticeId) notifyBackground({ type: "DISMISS_USER_NOTICE", noticeId }).catch(() => {});
       });
 
       header.appendChild(mark);
@@ -10496,6 +10499,7 @@
     }
 
     hideErrorOverlay(errorDiv, { immediate: true });
+    errorDiv.contextGeneratorUserNoticeId = userNotice ? copiedContext.noticeId : null;
     errorDiv.contextGeneratorPasteBackup = Boolean(copiedContext?.pasteBackup);
     errorDiv.setAttribute("role", copiedContext ? "status" : "alert");
     let copyAgain = document.getElementById("context-generator-error-copy-again");
@@ -10688,6 +10692,9 @@
 
   function hideErrorOverlay(errorDiv = document.getElementById("context-generator-error-overlay"), { immediate = false } = {}) {
     if (!errorDiv) return;
+    // Expiry, replacement and teardown only clear attribution. The trusted
+    // Dismiss-button handler is the sole source of click reports.
+    errorDiv.contextGeneratorUserNoticeId = null;
     releaseCopyNotice(errorDiv);
     clearTimeout(errorDiv.contextGeneratorEnterTimer);
     clearTimeout(errorDiv.contextGeneratorHideTimer);

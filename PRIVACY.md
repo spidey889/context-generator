@@ -4,6 +4,8 @@ This Privacy Policy explains how Cap Context ("we", "our", or "us") handles user
 
 ## Information Collection and Use
 
+- **Notice Dismissals**: When you click Dismiss on a Cap Context user notice, updated clients report the existing installation identifier and notice ID so the backend can log the corresponding installation's internal user number and notice ID. These logs include no notice/chat text or page URL. Automatic expiration does not report a click, and optional diagnostics consent applies.
+
 - **Emergency Settings**: Updated extensions periodically fetch a small public settings file from our backend to pause broken features. These requests do not include conversations, installation identifiers, page URLs, AI account data or cookies. The last valid settings are cached locally and these checks operate independently of optional diagnostics.
 
 - **Picker Privacy**: With Speed enabled, opening the destination picker reads a saved conversation from its current AI website and keeps the capture temporarily in source-page memory. Closing the picker or turning Speed off discards it. Picker interaction does not send conversation text to our backend or another destination. The picker may preconnect to supported AI websites; those preconnections do not include chat content.

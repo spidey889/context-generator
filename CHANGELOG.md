@@ -4,6 +4,10 @@ Decisions, important regressions and replaced approaches worth remembering. [LOG
 
 Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spidey889/context-generator/blob/9b663fdfbe98204803ec5526f91be2c01c61d62e/CHANGELOG.md) remains in Git with detailed experiments, rollout evidence and superseded iterations.
 
+## 2026-11-02
+
+- **Log explicit user-notice dismissal clicks.** Reuse the notice endpoint and private user-number lookup to write `cap_context_user_notice_dismiss` runtime logs with only `user_no` and the original notice ID. Automatic expiry, replacement and ordinary copy/error dismissals stay silent. Respect diagnostics consent; logging is best-effort and adds no database table, counter or retry queue. Cover attribution and expiry with one new regression plus existing UI/Brave checks; backend and client rollout remain separate from this source change.
+
 ## 2026-11-01
 
 - **Add emergency frontend controls on the existing backend.** Static validated JSON can pause transfers, inline orbs, JSON capture or automatic paste globally or per AI site after one initial extension update. Later changes require only backend deployment, without a database or new permissions.

@@ -11,7 +11,7 @@ returning user_no;
 
 Use the existing `users.user_no` number and exact message. The primary/foreign key allows one current message per existing user; an unknown number fails instead of allocating a user. Keep messages nonblank and within 1,000 JavaScript UTF-16 units (an emoji can count as two). Other users' rows stay unchanged. Messages are plain text, including literal markup; never put credentials or chat contents in them.
 
-When the owner gives a number and message, validate them, execute the upsert through `supabase db query --linked --project-ref iqkzynzxbmemhtiupwwu` and verify the stored row and targeted `/api/user-notices` response. Use a SQL file with `--file` for complex text and escape SQL quotes correctly; never interpolate unescaped message text into a shell command. A normal send needs no code edits, tests, commits, merges or deployments. Do not claim the user saw it merely because the database/API contains it: there are no delivery receipts.
+When the owner gives a number and message, validate them, execute the upsert through `supabase db query --linked --project-ref iqkzynzxbmemhtiupwwu` and verify the stored row and targeted `/api/user-notices` response. Use a SQL file with `--file` for complex text and escape SQL quotes correctly; never interpolate unescaped message text into a shell command. A normal send needs no code edits, tests, commits, merges or deployments. Do not claim the user saw it merely because the database/API contains it: there are no delivery receipts. Explicit Dismiss clicks have separate best-effort backend logs below.
 
 The storage move preserves the exact live messages for #1 and #49. Existing hashes and the original #49 local seen flag remain recognized, so migration does not resend them.
 
@@ -26,6 +26,14 @@ The notice uses the fallback-copy confirmation's existing glass material, 80px t
 The stable notice ID hashes the user number and exact message. Changing the text makes a new notice; reusing identical text keeps the same ID and does not show it again. Delivery is serialized across tabs, with IDs retained in local extension storage across page/browser/worker restarts. The cache is tied to the installation UUID so an identity change cannot reuse another user's message. A reservation is persisted before display to avoid repeats if the acknowledgement is lost; explicit refusal or a definitely absent recipient releases it. A crash between reservation and display can therefore lose a notice rather than repeat it. Clearing extension storage resets local delivery history. There is no server delivery/read receipt.
 
 Removing a row stops future successful fetches from returning it. An already fetched, unseen message can still display while offline; removing a row does not recall it. This is a small current-message system, not an inbox or a guaranteed delivery queue.
+
+## Dismiss clicks
+
+Updated clients report only a trusted click on the visible notice's Dismiss button through the existing `/api/user-notices` endpoint. Expiry, replacement, teardown, synthetic clicks and dismissal of ordinary copy/error notices do not report a notice click. The worker checks diagnostics consent and its installation-bound seen history; the backend resolves the user number with the existing private number-only lookup.
+
+In Vercel runtime logs, search for `cap_context_user_notice_dismiss`. Each event contains `user_no` and the original `notice_id` hash, with the runtime log timestamp. It includes no notice/chat text, installation UUID or page URL. This remains a client-reported action, not independently verified user identity. The original ID remains attributable if the current message has since changed. Match it with `noticeForUser(userNumber, exactMessage).id` in `backend/user-notices.js`.
+
+Logging is best-effort: offline/failing requests are not queued or retried, dismissal never waits for logging, and retention follows Vercel runtime logs. There is no dismissal database table or counter. Rollout needs the backend and client updates; it needs no SQL or Edge change and cannot recover historical clicks.
 
 ## Storage rollout (one time)
 

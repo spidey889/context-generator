@@ -11,6 +11,26 @@
   function create({ chrome, fetchImpl = (...args) => fetch(...args), endpoint, headers = () => ({}),
     hasConsent = async () => true, now = Date.now, timeoutMs = 8000, displayTimeoutMs = 2000 }) {
     let chain = Promise.resolve();
+    async function dismiss(noticeId) {
+      if (typeof noticeId !== "string" || !/^[a-f0-9]{64}$/.test(noticeId) || !await hasConsent()) return { logged: false };
+      const stored = await chrome.storage.local.get([INSTALL_KEY, STORAGE_KEY]);
+      const installId = stored[INSTALL_KEY], state = stored[STORAGE_KEY];
+      if (!installId || state?.installId !== installId || !state.seen?.includes(noticeId)) return { logged: false };
+      const controller = new AbortController();
+      let timer;
+      try {
+        if (!await hasConsent()) return { logged: false };
+        const response = await Promise.race([fetchImpl(endpoint(), {
+          method: "POST", redirect: "error", credentials: "omit", cache: "no-store", signal: controller.signal,
+          headers: { "Content-Type": "application/json", "X-Cap-Context-Client": "cap-context-extension/1", ...headers(endpoint()) },
+          body: JSON.stringify({ install_id: installId, event: "dismiss", notice_id: noticeId })
+        }), new Promise((_, reject) => {
+          timer = setTimeout(() => { controller.abort(); reject(new Error("notice_timeout")); }, timeoutMs);
+        })]);
+        return { logged: response.status === 204 };
+      } catch { return { logged: false }; }
+      finally { clearTimeout(timer); }
+    }
     async function check(sender) {
       const work = chain.then(async () => {
         if (!await hasConsent()) return { shown: false };
@@ -81,7 +101,7 @@
       chain = work.catch(() => ({ shown: false }));
       return chain;
     }
-    return { check };
+    return { check, dismiss };
   }
   root.CapUserNotices = { create, validNotice };
   if (typeof module !== "undefined") module.exports = root.CapUserNotices;

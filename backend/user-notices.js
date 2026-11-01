@@ -11,7 +11,7 @@ function noticeForUser(userNumber, message) {
 }
 
 function createHandler({ fetchImpl = (...args) => fetch(...args), timeoutMs = 5000,
-  rateLimit = consumeTelemetryRateLimit, env = process.env } = {}) {
+  rateLimit = consumeTelemetryRateLimit, env = process.env, log = console.info } = {}) {
   return async (req, res) => {
     const cors = applyCorsHeaders(req, res);
     if (req.method === "OPTIONS") return cors.allowedOrigin && isValidPreflightRequest(req)
@@ -26,7 +26,9 @@ function createHandler({ fetchImpl = (...args) => fetch(...args), timeoutMs = 50
     const parsed = parseBoundedJsonBody(req, 256, "Notice request");
     if (!parsed.ok) return res.status(parsed.status).json({ code: parsed.code });
     const input = parsed.body;
-    if (!input || Object.keys(input).length !== 1 || typeof input.install_id !== "string"
+    const dismissal = input?.event === "dismiss";
+    if (!input || Object.keys(input).length !== (dismissal ? 3 : 1) || typeof input.install_id !== "string"
+        || (dismissal && (typeof input.notice_id !== "string" || !/^[a-f0-9]{64}$/.test(input.notice_id)))
         || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.install_id))
       return res.status(400).json({ code: "invalid_payload" });
     const upstream = env.SUPABASE_TELEMETRY_FUNCTION_URL, key = env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
@@ -47,13 +49,14 @@ function createHandler({ fetchImpl = (...args) => fetch(...args), timeoutMs = 50
         const response = await fetchImpl(upstream, {
           method: "POST", redirect: "error", signal: controller.signal,
           headers: { "Content-Type": "application/json", apikey: key, "X-Cap-Context-Relay": secret },
-          body: JSON.stringify({ kind: "user_notice_lookup", install_id: input.install_id, include_message: true })
+          body: JSON.stringify({ kind: "user_notice_lookup", install_id: input.install_id, ...(!dismissal ? { include_message: true } : {}) })
         });
         if (!response.ok) throw new Error("lookup_failed");
         const body = await response.text();
         if (body.length > 7000) throw new Error("lookup_invalid");
         const { userNumber, message } = JSON.parse(body);
         if (userNumber !== null && (!Number.isSafeInteger(userNumber) || userNumber < 1)) throw new Error("lookup_invalid");
+        if (dismissal) return userNumber;
         if (message === null) return null;
         const notice = noticeForUser(userNumber, message);
         if (!notice) throw new Error("lookup_invalid");
@@ -61,6 +64,13 @@ function createHandler({ fetchImpl = (...args) => fetch(...args), timeoutMs = 50
       })(), new Promise((_, reject) => {
         timer = setTimeout(() => { controller.abort(); reject(new Error("lookup_timeout")); }, timeoutMs);
       })]);
+      if (dismissal) {
+        // Attribute using the private installation lookup, never a client-
+        // supplied user number. Keep notice text and the installation UUID out
+        // of logs; cached notices may have since been replaced in the table.
+        if (result !== null) log("cap_context_user_notice_dismiss", { user_no: result, notice_id: input.notice_id });
+        return res.status(204).end();
+      }
       return res.status(200).json({ notice: result });
     } catch {
       return res.status(503).json({ code: "notices_unavailable" });

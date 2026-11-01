@@ -862,6 +862,8 @@ All five destinations record metadata-only editor search counts: current/peak un
 
 After the final acknowledged paste failure, the worker offers the existing copy dialog on the last destination tab with “Pasting failed” and the complete prepared carry. This best-effort message never gates the failure response or interrupts an automatic fresh-tab retry. Existing draft and sign-in recovery retain their own dialogs; cancelled, expired or navigated-away destinations do not open a new failure box. The source's copy recovery stays available if the destination script cannot receive the message. Both locations use the same manual Copy behavior; neither sends the message automatically.
 
+Explicit notice Dismiss clicks in updated clients send only the existing installation UUID, fixed `dismiss` event and notice hash to the same notice endpoint. The worker requires diagnostics consent and installation-bound seen history; the private number-only lookup supplies `user_no` for the `cap_context_user_notice_dismiss` Vercel runtime log, alongside the original `notice_id`. Notice/chat text, installation UUIDs and page URLs are not logged. The trusted visible-button handler owns this report; expiry, replacement, teardown, synthetic clicks and other notice types are silent. Delivery/read receipts remain absent. Click logging is best-effort without retries, queues, SQL/Edge changes or counters; backend/client updates are required and old clicks cannot be recovered. See [notice operations](docs/user-notices.md#dismiss-clicks).
+
 ## Changes that must stay aligned
 
 | Change | Coupled contracts |
