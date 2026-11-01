@@ -5,6 +5,13 @@ const path = require("node:path");
 const test = require("node:test");
 const { getBrowserChecks, childEnvironment, runCheck, runChecks } = require("../scripts/run-ci-browser-checks");
 
+test("regular CI always includes the incident-shaped DeepSeek many-file transfer", () => {
+  const check = getBrowserChecks().find(item => item.id === "deepseek-many-files");
+  assert.ok(check, "This regression must not require extended/manual CI.");
+  assert.equal(check.script, "scripts/run-deepseek-many-files-smoke.js");
+  assert.ok(check.timeoutMs > 60000, "The fixture must outlive the full capture allowance.");
+});
+
 test("the real CI queue isolates local handoff motion from every other browser fixture", async () => {
   for (const extended of [false, true]) {
     const active = new Set();

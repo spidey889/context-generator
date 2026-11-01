@@ -147,6 +147,15 @@ the direct carry without a summary request. The dedicated local-transfer case
 retains its separate animation assertions. These fixtures do not call a real AI
 or prove it will obey the upload instruction.
 
+Regular CI also runs `node scripts/run-deepseek-many-files-smoke.js`: an installed
+Brave DeepSeek-to-Gemini transfer with 93 synthetic files totaling 880,092 bytes
+and 1,744 history items totaling 5,746,995 raw bytes. A controlled HTTP pause lasts
+30 seconds, beyond both former capture/reply deadlines. It verifies the live
+12-of-93 counter and shimmer, stationary pending progress, four downloads,
+failed-only retries, intact healthy file bodies and the exhausted file's named
+re-upload request. It never calls a real AI or clicks Send; this proves the
+recovery contracts under forced timing, not the original user's network cause.
+
 ### Paste and activation order
 
 While the source handoff is at `paste_started`, its header offers **Copy instead** for the complete prepared carry, including short local transfers. Clipboard access starts in the click; automatic delivery is cancelled without closing the destination. Confirmation waits for the destination's cancellation acknowledgement (up to three seconds), and clipboard/worker waits are each bounded to four seconds. A missing worker inventory, unknown/lost acknowledgement or clipboard failure keeps the original copy dialog available; uncertain delivery uses its existing check-the-destination warning. A paste may already have landed before the click, so even confirmed copying asks the user to check the destination before pasting. The action releases its text/handler on completion or dismissal; late replies cannot restart delivery or replace a newer attempt. Manual takeover retains the existing `user_cancelled` outcome, not successful paste. No permission, schema, storage or normal-delivery round trip is added.
