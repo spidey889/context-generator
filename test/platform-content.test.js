@@ -1096,6 +1096,20 @@ test("DeepSeek file progress replaces elapsed activity, weights file bytes and n
   assert.equal(properties.get("--context-generator-stage-progress-duration"), "0ms");
 });
 
+test("DeepSeek replaces the capture caption with a file count only for ten or more files", () => {
+  for (const [completed, total, expected] of [[3, 9, "Capturing chat"], [0, 10, "Reading files 0 of 10"], [12, 93, "Reading files 12 of 93"]]) {
+    const { hooks, stage } = createHandoffMotionFixture("capture", "chat.deepseek.com");
+    const label = new FakeElement();
+    hooks.registerElementId("context-generator-text-label", label);
+    const trace = hooks.createTransferTrace("gemini", "test");
+    hooks.reportHandoffFileProgress(trace, { completed, total, completedBytes: completed, totalBytes: total });
+    assert.equal(label.textContent, expected);
+    assert.equal(stage.getAttribute("aria-label"), `${expected}, active`);
+    assert.equal(hooks.getHandoffProgressStatusText("summary", "active", undefined, trace), "Summarizing");
+    assert.equal(hooks.getHandoffProgressStatusText("capture", "done", undefined, trace), "Chat captured");
+  }
+});
+
 test("native handoff activity respects reduced motion", () => {
   const { hooks, stage, paint } = createHandoffMotionFixture();
   hooks.window.matchMedia = () => ({ matches: true });

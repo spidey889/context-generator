@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-deepseek-file-progress-v242";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-deepseek-file-count-v243";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -234,6 +234,7 @@
   const HANDOFF_CAPTURE_CUE_MS = 400;
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_NATIVE_CAPTURE_LINE_MS = 45000; // Display pacing, independent of native read deadlines.
+  const HANDOFF_FILE_COUNT_MIN = 10; // Keep small captures' existing short caption.
   const HANDOFF_LINE_COMPLETE_MS = 220;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
@@ -8743,6 +8744,10 @@
             releaseDestinationSheetBackdrop();
           }
           stopHandoffActivityProgress();
+          if (trace.captureFileProgress) {
+            delete trace.captureFileProgress;
+            setHandoffProgress("capture", "active");
+          }
           showFastCaptureFallbackMessage();
           const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
           updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");
@@ -9658,7 +9663,7 @@
     });
   }
 
-  function getHandoffProgressStatusText(stageId, phase = "active", destinationName = "destination") {
+  function getHandoffProgressStatusText(stageId, phase = "active", destinationName = "destination", trace = activeTransferTrace) {
     const safeDestinationName = destinationName || "destination";
     if (phase === "done") {
       if (stageId === "capture") return "Chat captured";
@@ -9668,6 +9673,8 @@
 
     if (stageId === "summary") return "Summarizing";
     if (stageId === "paste") return `Pasting into ${safeDestinationName}`;
+    const files = currentPlatform.id === "deepseek" ? trace?.captureFileProgress : null;
+    if (files?.total >= HANDOFF_FILE_COUNT_MIN) return `Reading files ${files.completed} of ${files.total}`;
     return "Capturing chat";
   }
 
@@ -9735,6 +9742,13 @@
     trace.captureFileProgress = { completed, total, completedBytes, totalBytes };
     const stage = document.querySelector("#context-generator-handoff-progress [data-context-generator-stage='capture']");
     if (stage?.dataset.state !== "active" || !isHandoffOverlayVisible()) return;
+    const label = getHandoffProgressStatusText("capture", "active", undefined, trace);
+    const headline = document.getElementById("context-generator-text-label");
+    if (headline) headline.textContent = label;
+    const stageLabel = stage.querySelector(".context-generator-handoff-stage-label");
+    if (stageLabel) stageLabel.textContent = label;
+    stage.setAttribute("aria-label", `${label}, active`);
+    document.getElementById("context-generator-handoff-progress")?.setAttribute("aria-label", `Transfer progress: ${label}`);
     stopHandoffActivityProgress();
     // Preserve the history-read position, then follow resolved file bytes.
     // The verified capture result alone may complete the line and start summary.
