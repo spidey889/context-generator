@@ -24,7 +24,7 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
     TextDecoder,
     TextEncoder,
     Date: clock,
-    ...(importScripts ? { importScripts, CapLargeTransfer: {} } : {}),
+    ...(importScripts ? { importScripts, CapLargeTransfer: {}, CapRemoteControls: { create: () => null, disabled: () => false } } : {}),
     URL,
     clearTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
@@ -161,7 +161,8 @@ function loadBackgroundForTransferTest({
   firstCreatedTabId = 100,
   useRealTimers = false,
   noticeStorage = null,
-  cryptoImpl = null
+  cryptoImpl = null,
+  remoteConfig = null
 } = {}) {
   let messageListener = null;
   let toolbarClickListener = null;
@@ -188,6 +189,10 @@ function loadBackgroundForTransferTest({
     AbortController,
     Date,
     TextEncoder,
+    ...(remoteConfig ? { CapRemoteControls: {
+      ...require("../extension/remote-controls"),
+      create: () => ({ refresh: async () => remoteConfig, current: () => remoteConfig })
+    } } : {}),
     crypto: cryptoImpl || require("node:crypto").webcrypto,
     URL,
     clearTimeout,
@@ -325,6 +330,39 @@ function loadBackgroundForTransferTest({
   };
 }
 
+test("remote transfer stops check both source and destination before opening a tab", async () => {
+  const sourceTab = { id: 5, url: "https://chatgpt.com/c/source", windowId: 1 };
+  for (const site of ["chatgpt", "claude", "*"]) {
+    const worker = loadBackgroundForTransferTest({ sourceTab, remoteConfig: { version: 1, disabled: { transfers: [site] } } });
+    const result = await worker.prepare("claude", sourceTab);
+    assert.equal(result.code, "feature_disabled", site);
+    assert.equal(worker.operations.created.length, 0);
+    assert.equal(worker.operations.fetched.length, 0);
+  }
+});
+
+test("automatic-paste stop after native activation prevents dispatch and fresh-tab recovery", async () => {
+  const sourceTab = { id: 5, url: "https://chatgpt.com/c/source", windowId: 1 };
+  const remoteConfig = { version: 1, disabled: {} };
+  const worker = loadBackgroundForTransferTest({ sourceTab, remoteConfig,
+    preparedTab: { id: 41, url: "https://claude.ai/new", windowId: 1 },
+    tabUpdateImpl: async (_id, options) => { if (options.active) remoteConfig.disabled.automaticPaste = ["claude"]; } });
+  const result = await worker.sendTransfer("claude", 41, false, null, sourceTab);
+  assert.equal(result.code, "feature_disabled");
+  assert.equal(worker.operations.sent.filter(entry => entry.message?.type === "PASTE_CONTEXT").length, 0);
+  assert.equal(worker.operations.created.length, 0);
+});
+
+test("remote controls requests reject unsupported tabs and other extensions", async () => {
+  const remoteConfig = { version: 1, disabled: { transfers: ["*"] } };
+  const worker = loadBackgroundForTransferTest({ remoteConfig });
+  const sender = { id: "cap-context-test", frameId: 0, tab: { id: 1, url: "https://chatgpt.com/" } };
+  assert.equal((await worker.request({ type: "GET_REMOTE_CONTROLS" }, sender)).config, remoteConfig);
+  for (const invalid of [{ ...sender, frameId: 1 }, { ...sender, id: "other" },
+    { ...sender, tab: { id: 1, url: "https://example.com/" } }])
+    assert.equal(worker.message({ type: "GET_REMOTE_CONTROLS" }, invalid).ok, false);
+});
+
 test("uninstall feedback registers an anonymous public URL for new and existing installations", () => {
   const urls = [];
   const background = loadBackgroundForTransferTest({ setUninstallURL: async url => { urls.push(url); } });
@@ -392,7 +430,7 @@ test("toolbar repairs a missing receiver but rejects unsupported tabs and failed
   assert.deepEqual(repaired.operations.injected.map(item => [...item.files]), [
     ["json-capture-metrics-main.js", "chatgpt-fetch-main.js"],
     ["transfer-diagnostics.js", "json-capture-metrics.js", "chatgpt-json-capture.js"],
-    ["transfer-diagnostics.js", "platform-content.js"]
+    ["transfer-diagnostics.js", "remote-controls.js", "platform-content.js"]
   ], "repair must restore JSON before opening the picker");
   assert.deepEqual(repaired.operations.sent.map(entry => entry.message.type), ["OPEN_DESTINATION_PICKER", "OPEN_DESTINATION_PICKER"]);
   assert.equal(repaired.operations.created.length, 0);
@@ -1775,7 +1813,7 @@ for (const firstReply of ["missing receiver", "no response"]) {
     const result = await harness.sendMessageWhenReady(41, { type: firstReply === "no response" ? "CONTEXT_GENERATOR_PING" : "PASTE_CONTEXT" }, 1000, "Claude", trace);
     assert.equal(result.ok, true);
     assert.equal(calls, 2);
-    assert.deepEqual(JSON.parse(JSON.stringify(harness.operations.injected)), [{ target: { tabId: 41 }, files: ["transfer-diagnostics.js", "platform-content.js"] }]);
+    assert.deepEqual(JSON.parse(JSON.stringify(harness.operations.injected)), [{ target: { tabId: 41 }, files: ["transfer-diagnostics.js", "remote-controls.js", "platform-content.js"] }]);
     assert.deepEqual(Array.from(trace.marks, mark => mark.label), ["content script inject attempt", "tab ready/message response after inject"]);
     assert.equal(trace.marks.at(-1).detail.attempts, 1);
   });
@@ -1810,14 +1848,14 @@ test("JSON scripts reinstall in MAIN then isolated on the matching platform tabs
   ] });
   await new Promise(resolve => setTimeout(resolve, 0));
   const claude = injections.filter(item => item.target.tabId === 1);
-  assert.deepEqual(claude.map(item => [...item.files]), [["json-capture-metrics-main.js", "claude-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "claude-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
+  assert.deepEqual(claude.map(item => [...item.files]), [["json-capture-metrics-main.js", "claude-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "claude-json-capture.js"], ["transfer-diagnostics.js", "remote-controls.js", "platform-content.js"]]);
   assert.equal(claude[0].world, "MAIN");
   const chatgpt = injections.filter(item => item.target.tabId === 2);
-  assert.deepEqual(chatgpt.map(item => [...item.files]), [["json-capture-metrics-main.js", "chatgpt-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "chatgpt-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
+  assert.deepEqual(chatgpt.map(item => [...item.files]), [["json-capture-metrics-main.js", "chatgpt-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "chatgpt-json-capture.js"], ["transfer-diagnostics.js", "remote-controls.js", "platform-content.js"]]);
   assert.equal(chatgpt[0].world, "MAIN");
   for (const id of [3, 4, 5]) {
     const platform = injections.filter(item => item.target.tabId === id);
-    assert.deepEqual(platform.map(item => [...item.files]), [["json-capture-metrics-main.js", "network-json-data.js", "network-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "network-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
+    assert.deepEqual(platform.map(item => [...item.files]), [["json-capture-metrics-main.js", "network-json-data.js", "network-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "network-json-capture.js"], ["transfer-diagnostics.js", "remote-controls.js", "platform-content.js"]]);
     assert.equal(platform[0].world, "MAIN");
   }
 });

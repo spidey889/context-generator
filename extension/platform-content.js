@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-user-notices-v246";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-remote-controls-v247";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -518,6 +518,80 @@
   }
 
   let isRunning = false;
+  let remoteControlConfig = globalThis.CapRemoteControls?.defaults();
+  let remoteControlsReady = Promise.resolve();
+  let remoteControlsStorageListener = null;
+
+  function remoteFeatureDisabled(feature, ...platforms) {
+    return globalThis.CapRemoteControls?.disabled(remoteControlConfig, feature, ...(platforms.length ? platforms : [currentPlatform.id])) || false;
+  }
+
+  function remoteDisabledError(feature = "transfers") {
+    return Object.assign(new Error(feature === "automaticPaste"
+      ? "Automatic paste is temporarily paused. Copy your context and paste it manually."
+      : "Context transfers are temporarily paused for this AI. Please try again later."), { code: "feature_disabled" });
+  }
+
+  function jsonCaptureEnabled() {
+    return !remoteFeatureDisabled("jsonCapture") && (currentPlatform.id === "claude" ? claudeJsonCaptureEnabled
+      : currentPlatform.id === "chatgpt" ? chatGptJsonCaptureEnabled : networkJsonCaptureEnabled);
+  }
+
+  function removeRemoteDisabledOrb() {
+    const bubble = document.getElementById(BUBBLE_ID) || inlineBubble || transientComposerPlacement?.bubble;
+    releaseClaudeInlineMount();
+    releaseChatGptInlineMount();
+    releaseProviderInlineMount();
+    clearLegacyInlineBackup();
+    bubble?.remove();
+    inlineBubble = null;
+    transientComposerPlacement = null;
+    hideOnboardingNudge();
+    hideClaudeLimitNudge();
+    releaseBubbleSlot();
+    releaseComposerSurface();
+  }
+
+  function applyRemoteControls(value) {
+    const config = globalThis.CapRemoteControls?.validate(value);
+    if (!instanceActive || !config || JSON.stringify(config) === JSON.stringify(remoteControlConfig)) return;
+    remoteControlConfig = config;
+    if (remoteFeatureDisabled("jsonCapture") || remoteFeatureDisabled("transfers")) clearPickerJsonCapture();
+    if (remoteFeatureDisabled("transfers", currentPlatform.id, activeTransferTrace?.destinationId)) {
+      hideDestinationSheet({ restoreFocus: false });
+      if (activeTransferTrace && !activeTransferTrace.completed) {
+        cancelSourceTransfer(activeTransferTrace.id, activeTransferTrace, { notifyWorker: true });
+        showErrorOverlay(remoteDisabledError());
+      }
+    }
+    if (remoteFeatureDisabled("transfers") || remoteFeatureDisabled("inlineOrb")) removeRemoteDisabledOrb();
+    scheduleFloatingButtonUpdate();
+  }
+
+  async function refreshRemoteControls() {
+    if (!globalThis.CapRemoteControls) return;
+    let timer;
+    try {
+      const result = await Promise.race([extensionRuntime.sendMessage({ type: "GET_REMOTE_CONTROLS" }),
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), 4000); })]);
+      if (result?.ok) applyRemoteControls(result.config);
+    } catch {} finally { clearTimeout(timer); }
+  }
+
+  async function initializePageRemoteControls() {
+    const controls = globalThis.CapRemoteControls;
+    if (!controls) return;
+    remoteControlsStorageListener = (changes, area) => {
+      if (area === "local" && changes[controls.STORAGE_KEY]?.newValue?.config)
+        applyRemoteControls(changes[controls.STORAGE_KEY].newValue.config);
+    };
+    chrome.storage?.onChanged?.addListener(remoteControlsStorageListener);
+    try {
+      const stored = await chrome.storage?.local?.get?.(controls.STORAGE_KEY);
+      applyRemoteControls(stored?.[controls.STORAGE_KEY]?.config);
+    } catch {}
+    await refreshRemoteControls();
+  }
   let activeTransferTrace = null;
   const activePasteGuards = new Map();
   const cancelledTransferIds = new Set();
@@ -705,6 +779,7 @@
     activePasteGuards.forEach(guard => guard.cancel());
     cancelPendingPasteRecheck();
     try { extensionRuntime.onMessage.removeListener?.(handleRuntimeMessage); } catch {}
+    if (remoteControlsStorageListener) chrome.storage?.onChanged?.removeListener?.(remoteControlsStorageListener);
     if (activeCopyNotice) releaseCopyNotice(activeCopyNotice);
     if (!preserveSharedUi) disableFloatingButtonMonitoring();
     clearOwnedLifecycleResources();
@@ -1032,6 +1107,7 @@
   extensionRuntime.onMessage.addListener(handleRuntimeMessage);
   addOwnedEventListener(document, "keydown", handleTransferEscape, true);
   window[INSTANCE_TEARDOWN_KEY] = teardownContextGeneratorInstance;
+  remoteControlsReady = initializePageRemoteControls();
 
   if (window.__CONTEXT_GENERATOR_TEST_HOOKS__?.register) {
     window.__CONTEXT_GENERATOR_TEST_HOOKS__.register({
@@ -1113,6 +1189,10 @@
       getHandoffProgressState,
       getHandoffProgressStatusText,
       showUserNotice,
+      applyRemoteControls,
+      remoteFeatureDisabled,
+      jsonCaptureEnabled,
+      startPickerJsonCapture,
       startHandoffActivityProgress,
       stopHandoffActivityProgress,
       reportHandoffCaptureProgress,
@@ -1178,7 +1258,8 @@
         releaseDestinationSheetBackdrop();
       }
       transferStage = "summary";
-      const earlyReveal = localDirect ? null : createEarlyDestinationReveal(transferTrace, destinationPrepPromise);
+      const earlyReveal = localDirect || remoteFeatureDisabled("automaticPaste", currentPlatform.id, destinationId)
+        ? null : createEarlyDestinationReveal(transferTrace, destinationPrepPromise);
       try {
         summary = await summarizeWithBackend(conversationText, transferTrace, earlyReveal?.onNearEnd);
       } finally {
@@ -1203,6 +1284,7 @@
         resetRunningFlag();
         return;
       }
+      if (remoteFeatureDisabled("automaticPaste", currentPlatform.id, destinationId)) throw remoteDisabledError("automaticPaste");
       const localPresentation = localDirect ? completeLocalHandoff(transferTrace, destinationPrepPromise) : null;
       // Preparation/cancellation may settle while the same tab promise is awaited below.
       localPresentation?.catch(() => {});
@@ -1313,6 +1395,13 @@
     const stage = details.stage || "transfer";
     const summary = details.summary?.trim?.() || "";
     const destinationName = getPlatform(details.destinationId)?.name || "the destination";
+
+    if (error?.code === "feature_disabled") {
+      if (summary) return showFallbackModal(summary, destinationName, false, false, false,
+        { pastePaused: true, recovery: { transferId: details.transferId, destination: details.destinationId } });
+      showErrorOverlay(remoteDisabledError());
+      return;
+    }
 
     if (stage === "summary") {
       if (["conversation_too_large", "request_too_large", "rate_limited", "service_busy", "client_not_allowed", "extension_reloaded"].includes(error?.code)) {
@@ -1550,6 +1639,7 @@
   }
 
   function checkTransferDeadline(trace) {
+    if (remoteFeatureDisabled("transfers", currentPlatform.id, trace?.destinationId)) throw remoteDisabledError();
     if (trace?.cancelled) throw createTransferCancelledError();
     if (trace?.expired || (trace?.deadlineAt && Date.now() >= trace.deadlineAt)) {
       const error = new Error("Transfer timed out. Please try again.");
@@ -1879,6 +1969,7 @@
   }
 
   function getUserFacingTransferErrorMessage(error) {
+    if (error?.code === "feature_disabled") return remoteDisabledError().message;
     if (typeof error === "string") return error;
     const contract = globalThis.CapTransferDiagnostics;
     const details = contract?.errorDetails(error, error?.captureFailureReason || error?.jsonCapture ? "capture_json" : undefined) || error?.diagnostics || {};
@@ -3329,6 +3420,7 @@
   }
 
   async function pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, diagnosticStartedAt, reportCheckpoint) {
+    if (remoteFeatureDisabled("automaticPaste")) throw remoteDisabledError("automaticPaste");
     if (cancelledTransferIds.has(transferId)) throw createTransferCancelledError();
     checkTransferDeadline({ deadlineAt });
     cancelPendingPasteRecheck();
@@ -3354,6 +3446,9 @@
     guard.reportCheckpoint = reportCheckpoint;
     let retainedGuard = false;
     try {
+      // Pin navigation before waiting for the worker's first controls reply.
+      if (globalThis.CapRemoteControls) await remoteControlsReady;
+      guard.check();
       const platformMatches = destination.id === currentPlatform.id;
       const routeAllowed = landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/");
       if (destination.id === "claude") {
@@ -3432,6 +3527,7 @@
       },
       check() {
         if (cancelled || !instanceActive) throw createTransferCancelledError();
+        if (remoteFeatureDisabled("automaticPaste")) throw remoteDisabledError("automaticPaste");
         // Awaited source checks and synchronous native focus/input handlers can
         // cross expiry before its timer runs. Enforce it at the write boundary.
         checkTransferDeadline({ deadlineAt });
@@ -6402,6 +6498,10 @@
   }
 
   function ensureFloatingButton(recalculationReason = "direct") {
+    if (remoteFeatureDisabled("transfers") || remoteFeatureDisabled("inlineOrb")) {
+      removeRemoteDisabledOrb();
+      return null;
+    }
     const input = findPlatformInput();
     const existingBubble = document.getElementById(BUBBLE_ID) || inlineBubble || transientComposerPlacement?.bubble || null;
     if (!input) {
@@ -7927,6 +8027,10 @@
   }
 
   function toggleDestinationSheet({ openOnly = false } = {}) {
+    if (remoteFeatureDisabled("transfers")) {
+      showErrorOverlay(remoteDisabledError());
+      return;
+    }
     traceChatGptCapture("picker_open");
     hideErrorOverlay(undefined, { immediate: true });
     hideOnboardingNudge();
@@ -8338,6 +8442,7 @@
   }
 
   function startDomCaptureSizeCheck(trace) {
+    if (remoteFeatureDisabled("jsonCapture")) return;
     // Two native reads just failed temporarily; do not send a third count-only
     // request to the same provider while switching to page capture.
     if (!trace || trace.domSizeCheck || trace.sourceJsonRetryExhausted || !hasSavedSourceConversation()) return;
@@ -8423,6 +8528,7 @@
     const queuedAt = Date.now(), queue = currentPlatform.id === "chatgpt" ? ++chatGptDebugSequence : 0;
     traceChatGptCapture("queued", { queue, measure: measureOnly });
     const pending = pendingJsonCapture.then(() => {
+      if (remoteFeatureDisabled("jsonCapture")) throw remoteDisabledError("jsonCapture");
       traceChatGptCapture("dequeued", { queue, wait_ms: Date.now() - queuedAt, aborted: Boolean(signal?.aborted) });
       if (!instanceActive || signal?.aborted || !shouldRead()) throw createDiagnosticError("The conversation changed during capture.", "conversation_changed");
       checkTransferDeadline(transferTrace);
@@ -8435,8 +8541,8 @@
       const read = captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal
         : currentPlatform.id === "chatgpt" ? signal || undefined : omitLargeFiles || undefined,
         measureOnly ? transferTrace?.domSizeCheck?.onEstimate : onProgress);
-      if (currentPlatform.id !== "chatgpt") return read;
       return Promise.resolve(read).then(capture => {
+        if (remoteFeatureDisabled("jsonCapture")) throw remoteDisabledError("jsonCapture");
         traceChatGptCapture("queue_done", { queue, ok: true, elapsed_ms: Date.now() - queuedAt });
         return capture;
       }, error => {
@@ -8458,8 +8564,7 @@
 
   function startPickerJsonCapture() {
     clearPickerJsonCapture();
-    const enabled = currentPlatform.id === "claude" ? claudeJsonCaptureEnabled
-      : currentPlatform.id === "chatgpt" ? chatGptJsonCaptureEnabled : networkJsonCaptureEnabled;
+    const enabled = jsonCaptureEnabled() && !remoteFeatureDisabled("transfers");
     if (!enabled || !hasSavedSourceConversation() || !instanceActive || isRunning) return;
     const entry = {
       url: window.location.href,
@@ -8472,6 +8577,7 @@
     const path = currentPlatform.id === "grok" ? window.location.href : window.location.pathname;
     // Failures stay silent until selection, when platform-specific recovery handles them.
     entry.promise = captureSourceJson(path, () => {
+      if (remoteFeatureDisabled("jsonCapture")) throw remoteDisabledError("jsonCapture");
       checkTransferDeadline(entry.trace);
       return entry.selected || pickerJsonCapture === entry;
     }, false, false, entry.controller?.signal, progress => {
@@ -8655,33 +8761,38 @@
     // prevent its read after the running lock resets or another attempt starts.
     if (pickerJsonCapture) pickerJsonCapture.trace = trace;
     const sourceUrl = window.location.href;
-    const hasSavedConversation = hasSavedSourceConversation();
-    const useClaudeJson = hasSavedConversation && currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
-    const claudeJsonPath = useClaudeJson ? window.location.pathname : null;
-    const useChatGptJson = hasSavedConversation && currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
-    const chatGptJsonPath = useChatGptJson ? window.location.pathname : null;
-    const useNetworkJson = hasSavedConversation && ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
-    updateTransferDiagnostics(trace, { source_saved: hasSavedConversation,
-      speed_enabled: currentPlatform.id === "claude" ? claudeJsonCaptureEnabled : currentPlatform.id === "chatgpt" ? chatGptJsonCaptureEnabled : networkJsonCaptureEnabled,
-      json_attempted: Boolean(useClaudeJson || useChatGptJson || useNetworkJson),
-      initial_rendered_turns: getDetectedConversationMessageCount() });
-    const geminiJsonPath = useNetworkJson && currentPlatform.id === "gemini" ? window.location.pathname : null;
-    const grokJsonUrl = useNetworkJson && currentPlatform.id === "grok" ? window.location.href : null;
-    const deepseekJsonPath = useNetworkJson && currentPlatform.id === "deepseek" ? window.location.pathname : null;
-    // The full JSON tree can be ready before its virtualized DOM mounts.
-    // JSON validation, rather than rendered turn count, decides whether it is empty.
-    if (!useClaudeJson && !useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
-      recordTransferFailureDiagnostics(trace, createDiagnosticError(NO_CONVERSATION_ERROR_MESSAGE, "no_conversation"));
-      markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
-      finishTransferTrace(trace, "no_conversation");
-      resetRunningFlag();
-      showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
-      return;
-    }
-
-    markTransferTrace(trace, "destination click", { destination: destinationId });
-
     try {
+      // Selection owns this source before waiting for settings. Escape or an
+      // away-and-back navigation during the wait must revoke the same attempt.
+      await remoteControlsReady;
+      await refreshRemoteControls();
+      checkTransferDeadline(trace);
+      const hasSavedConversation = hasSavedSourceConversation();
+      const useClaudeJson = hasSavedConversation && currentPlatform.id === "claude" && jsonCaptureEnabled();
+      const claudeJsonPath = useClaudeJson ? window.location.pathname : null;
+      const useChatGptJson = hasSavedConversation && currentPlatform.id === "chatgpt" && jsonCaptureEnabled();
+      const chatGptJsonPath = useChatGptJson ? window.location.pathname : null;
+      const useNetworkJson = hasSavedConversation && ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && jsonCaptureEnabled();
+      updateTransferDiagnostics(trace, { source_saved: hasSavedConversation,
+        speed_enabled: jsonCaptureEnabled(),
+        json_attempted: Boolean(useClaudeJson || useChatGptJson || useNetworkJson),
+        initial_rendered_turns: getDetectedConversationMessageCount() });
+      const geminiJsonPath = useNetworkJson && currentPlatform.id === "gemini" ? window.location.pathname : null;
+      const grokJsonUrl = useNetworkJson && currentPlatform.id === "grok" ? window.location.href : null;
+      const deepseekJsonPath = useNetworkJson && currentPlatform.id === "deepseek" ? window.location.pathname : null;
+      // The full JSON tree can be ready before its virtualized DOM mounts.
+      // JSON validation, rather than rendered turn count, decides whether it is empty.
+      if (!useClaudeJson && !useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
+        recordTransferFailureDiagnostics(trace, createDiagnosticError(NO_CONVERSATION_ERROR_MESSAGE, "no_conversation"));
+        markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
+        finishTransferTrace(trace, "no_conversation");
+        resetRunningFlag();
+        showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
+        return;
+      }
+
+      markTransferTrace(trace, "destination click", { destination: destinationId });
+
       // Start navigation during the picker bridge, after empty-chat admission.
       // These probes contain no chat text and do not wait on cosmetic motion.
       let preparedDestinationPromise = null;
@@ -10582,7 +10693,7 @@
   }
 
   function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false,
-    { destinationCopy = false, recovery = null, largeTranscript = false, signInRequired = false, pasteFailed = false } = {}) {
+    { destinationCopy = false, recovery = null, largeTranscript = false, signInRequired = false, pasteFailed = false, pastePaused = false } = {}) {
     // A new destination recovery owns the carry. A pending Copy again from an
     // older notice must not reopen its text over this dialog after rejection.
     const copyNotice = document.getElementById("context-generator-error-overlay");
@@ -10962,6 +11073,8 @@
     if (desc) {
       desc.textContent = signInRequired
         ? `You're not signed in to ${destinationName}, so we couldn't paste here. Your summary is ready to copy. Sign in, then paste it into a new chat.`
+        : pastePaused
+        ? `Automatic paste is temporarily paused. Copy your context and paste it into ${destinationName}'s message box.`
         : largeTranscript
         ? "We couldn’t summarize this large chat. Your complete conversation is safe here to copy."
         : draftPresent

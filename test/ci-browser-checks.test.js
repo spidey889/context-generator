@@ -6,6 +6,11 @@ const test = require("node:test");
 const { getBrowserChecks, childEnvironment, runCheck, runChecks } = require("../scripts/run-ci-browser-checks");
 const { startFixtureServer } = require("../scripts/run-extension-smoke");
 
+test("regular CI includes the installed emergency-control flow", () => {
+  assert.equal(getBrowserChecks(false).find(check => check.id === "remote-controls")?.script,
+    "scripts/run-remote-controls-smoke.js");
+});
+
 test("ordinary transfer fixtures answer notice polling without counting summary or telemetry requests", async t => {
   const fixture = await startFixtureServer();
   t.after(async () => {
@@ -20,6 +25,9 @@ test("ordinary transfer fixtures answer notice polling without counting summary 
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { notice: null });
+  const controls = await fetch(`${fixture.origin}/extension-controls.json`);
+  assert.equal(controls.status, 200);
+  assert.deepEqual(await controls.json(), require("../extension/remote-controls").defaults());
   assert.equal(fixture.state.summaryRequests.length, 0);
   assert.equal(fixture.state.telemetryRequests.length, 0);
 });

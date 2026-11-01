@@ -785,6 +785,11 @@ function streamOversizedFixtureResponse(response, prefix, metrics, tailMegabytes
 // Transfer fixtures have an empty notice inbox. Keep this separate from model
 // and telemetry counters; the dedicated notice smoke owns nonempty responses.
 function serveEmptyUserNotice(request, response) {
+  if (request.method === "GET" && new URL(request.url, "http://127.0.0.1").pathname === "/extension-controls.json") {
+    response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    response.end(JSON.stringify(require("../extension/remote-controls").defaults()));
+    return true;
+  }
   if (request.method !== "POST" || new URL(request.url, "http://127.0.0.1").pathname !== "/api/user-notices") return false;
   request.resume();
   response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
@@ -4231,4 +4236,4 @@ if (require.main === module) {
 }
 
 module.exports = { CdpSession, dispatchTrustedFixtureInput, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort, getTargets, waitFor,
-  startFixtureServer, serveEmptyUserNotice, expectedChatGptConversation, SUMMARY_TEXT };
+  startFixtureServer, serveEmptyUserNotice, providerPlacementFixture, expectedChatGptConversation, SUMMARY_TEXT };

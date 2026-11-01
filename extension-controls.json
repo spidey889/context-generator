@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "disabled": {
+    "transfers": [],
+    "inlineOrb": [],
+    "jsonCapture": [],
+    "automaticPaste": []
+  }
+}

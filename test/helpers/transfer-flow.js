@@ -15,6 +15,7 @@ const code = new vm.Script(
   + source.match(/  const SOURCE_JSON_RETRY_DELAY_MS = .+;/)[0] + "\n"
   + source.match(/  const DOM_CAPTURE_MIN_ALLOWANCE_MS = .+;/)[0] + "\n"
   + source.match(/  const DOM_CAPTURE_MAX_ALLOWANCE_MS = .+;/)[0] + "\n"
+  + sliceBetween("  function remoteFeatureDisabled(", "  function removeRemoteDisabledOrb(")
   + sliceBetween("  function updateTransferDiagnostics(", "  function markCaptureDone(")
   + sliceBetween("  function stopSourceDestinationProgress(", "  function prepareDestinationTab(")
   + sliceBetween("  function checkTransferDeadline(", "  function createTransferTrace(")
@@ -28,6 +29,9 @@ const code = new vm.Script(
 function loadTransferFlow(overrides) {
   const context = vm.createContext({
     CapTransferDiagnostics: require("../../extension/transfer-diagnostics.js"),
+    CapRemoteControls: require("../../extension/remote-controls.js"),
+    remoteControlConfig: require("../../extension/remote-controls.js").defaults(),
+    remoteControlsReady: Promise.resolve(), refreshRemoteControls: async () => {},
     getNow: () => Date.now(), isNoConversationError: error => error?.message === "No conversation",
     isExtensionContextInvalidated: error => /extension context invalidated/i.test(error?.message || ""),
     URL, AbortController, INLINE_PATHNAME_POLL_MS: 80, RUNNING_AUTO_RESET_MS: 360000, MAX_TRANSFER_CONVERSATION_CHARS: 4000000,

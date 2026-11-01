@@ -1,5 +1,15 @@
 {
   "version": 2,
+  "headers": [
+    {
+      "source": "/extension-controls.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" },
+        { "key": "CDN-Cache-Control", "value": "no-store" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "no-store" }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/api/user-notices", "destination": "/api/telemetry?cap_user_notices=1" }
   ],

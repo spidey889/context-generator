@@ -15,6 +15,55 @@ const COMPILED_PLATFORM_CONTENT_SCRIPT = new vm.Script(
 const virtualSweepTests = [];
 const loadedInstances = new Set();
 
+test("remote JSON stop is site-scoped, prevents picker reads and can be reversed without reinjection", async () => {
+  for (const [hostname, platform, pathname] of [["claude.ai", "claude", "/chat/test"], ["chatgpt.com", "chatgpt", "/c/test"],
+    ["gemini.google.com", "gemini", "/app/test"], ["grok.com", "grok", "/c/test"], ["chat.deepseek.com", "deepseek", "/a/chat/s/test"]]) {
+    let reads = 0;
+    const hooks = loadPlatformContent([], hostname, { pathname, remoteControls: true });
+    for (const key of ["__capCaptureClaudeJson", "__capCaptureChatGptJson", "__capCaptureNetworkJson"])
+      hooks.window[key] = async () => { reads++; return {}; };
+    hooks.applyRemoteControls({ version: 1, disabled: { jsonCapture: [platform] } });
+    assert.equal(hooks.jsonCaptureEnabled(), false);
+    hooks.startPickerJsonCapture();
+    await new Promise(setImmediate);
+    assert.equal(reads, 0, platform);
+    hooks.applyRemoteControls({ version: 1, disabled: { jsonCapture: [platform === "gemini" ? "claude" : "gemini"] } });
+    assert.equal(hooks.jsonCaptureEnabled(), true);
+    hooks.startPickerJsonCapture();
+    await new Promise(setImmediate);
+    assert.equal(reads, 1, platform);
+  }
+});
+
+test("remote automatic-paste stop preserves both empty composers and drafts, then permits restored delivery", async () => {
+  for (const draft of ["", "My existing draft"] ) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    editor.value = draft;
+    const hooks = loadPlatformContent([editor], "claude.ai", { pathname: "/new", remoteControls: true });
+    hooks.applyRemoteControls({ version: 1, disabled: { automaticPaste: ["claude"] } });
+    await assert.rejects(hooks.pasteIntoPlatform("Exact complete carry", "claude"), { code: "feature_disabled" });
+    assert.equal(editor.value, draft);
+    if (!draft) {
+      hooks.applyRemoteControls({ version: 1, disabled: {} });
+      await hooks.pasteIntoPlatform("Exact complete carry", "claude");
+      assert.equal(editor.value, "Exact complete carry");
+    }
+  }
+});
+
+test("waiting for the first controls reply cannot grant paste permission to a different conversation", async () => {
+  let reply;
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const hooks = loadPlatformContent([editor], "claude.ai", { remoteControls: true,
+    runtimeSendMessage: message => message.type === "GET_REMOTE_CONTROLS" ? new Promise(resolve => { reply = resolve; }) : Promise.resolve({ ok: true }) });
+  const observed = hooks.pasteIntoPlatform("Never paste into another chat", "claude").then(() => null, error => error);
+  await new Promise(setImmediate);
+  hooks.navigate("/chat/other");
+  reply({ ok: true, config: { version: 1, disabled: {} } });
+  assert.equal((await observed).code, "conversation_changed");
+  assert.equal(editor.value, "");
+});
+
 for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
   test(`${hostname}: an active reply freezes existing DOM text without scrolling or taking future text`, async () => {
     const user = new FakeElement({ text: "Keep this existing user request in the transfer.", attrs: { "data-message-author-role": "user" } });
@@ -305,7 +354,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   runtimeSendMessage = async () => ({ ok: true }),
   clipboardWrite = null,
   online,
-  storageSet = null
+  storageSet = null,
+  remoteControls = false
 } = {}) {
   let hooks = null;
   const sessionValues = new Map();
@@ -443,6 +493,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   };
   if (storageSet) chrome.storage = { local: { set: storageSet } };
   const sandbox = {
+    ...(remoteControls ? { CapRemoteControls: require("../extension/remote-controls") } : {}),
     TextEncoder,
     AbortController,
     navigator: { userAgent: "Chrome", ...(typeof online === "boolean" ? { onLine: online } : {}),
@@ -3060,6 +3111,7 @@ test("large local recovery offers the full transcript before destination waits a
     hooks.markCaptureDone(trace, transcript);
     const context = vm.createContext({
       MIN_BACKEND_CONVERSATION_CHARS: 10000, activeTransferTrace: trace, instanceActive: true,
+      currentPlatform: { id: "chatgpt" }, remoteFeatureDisabled: () => false,
       startTransferTelemetry() {}, checkTransferDeadline: attempt => attempt.sourceGuard?.check(),
       isHandoffOverlayVisible: () => true,
       createEarlyDestinationReveal: () => ({ stop() {}, wait() { throw new Error("Manual recovery must not wait for a destination reveal"); } }),
@@ -3105,6 +3157,7 @@ test("a large local recovery cannot reopen a copy box over a newer source attemp
   let staleActions = 0;
   const context = vm.createContext({
     MIN_BACKEND_CONVERSATION_CHARS: 10000, activeTransferTrace: trace, instanceActive: true,
+    currentPlatform: { id: "chatgpt" }, remoteFeatureDisabled: () => false,
     startTransferTelemetry() {}, checkTransferDeadline() {}, isHandoffOverlayVisible: () => true,
     createEarlyDestinationReveal: () => ({ stop() {} }), stopHandoffCountdown() {},
     summarizeWithBackend: async () => {

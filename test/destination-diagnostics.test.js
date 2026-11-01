@@ -27,6 +27,8 @@ function fixture({ create, focus, reporting } = {}) {
     DESTINATIONS: { gemini: { url: "https://gemini.google.com/app", name: "Gemini" } },
     nowMs: () => now,
     getTransferOperation: () => operation,
+    // Configuration transport is covered by the full-worker/control fixtures.
+    checkRemoteControls: async () => {}, getPlatformFromUrl: () => null,
     checkTransferDeadline() {},
     checkTransferOperation: current => current?.controller.signal.throwIfAborted(),
     checkTransferSource: async current => { current?.controller.signal.throwIfAborted(); return source; },

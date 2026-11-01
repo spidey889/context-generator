@@ -72,6 +72,19 @@ const captureKeyFor = platform => platform === "claude" ? "__capCaptureClaudeJso
   : platform === "chatgpt" ? "__capCaptureChatGptJson" : "__capCaptureNetworkJson";
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
+test("selection pins its source before waiting for remote controls and cannot capture a changed chat", async () => {
+  const { context, calls, navigate } = harness("chatgpt", { mode: "success" });
+  const settings = deferred();
+  context.refreshRemoteControls = () => settings.promise;
+  const transfer = context.start("claude");
+  assert.ok(context.activeTransferTrace, "Selection must own its cancellation/navigation guard immediately.");
+  navigate("/c/other"); navigate("/c/source");
+  settings.resolve();
+  await transfer;
+  assert.equal(calls.json + calls.dom + calls.destination, 0);
+  assert.match(calls.errors[0], /conversation changed during capture/);
+});
+
 test("DOM fallback starts immediately alongside a fresh count and blocks excess before summary or paste", async () => {
   for (const platform of ["claude", "gemini", "grok", "deepseek"]) {
     const { context, calls } = harness(platform);

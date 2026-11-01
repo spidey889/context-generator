@@ -3,6 +3,7 @@ if (!globalThis.CapTransferDiagnostics && typeof importScripts === "function") i
 // to use them. Importing a new script lazily from a transfer event can fail.
 if (!globalThis.CapLargeTransfer && typeof importScripts === "function") importScripts("large-transfer.js");
 if (!globalThis.CapUserNotices && typeof importScripts === "function") importScripts("user-notices.js");
+if (!globalThis.CapRemoteControls && typeof importScripts === "function") importScripts("remote-controls.js");
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 function localPreviewAuthHeaders(url) {
   const auth = globalThis.CapLocalPreviewAuth;
@@ -142,6 +143,35 @@ const DESTINATION_LANDING_PATHS = {
   grok: ["/", "/chat"], deepseek: ["/", "/a/chat"]
 };
 
+const remoteControls = globalThis.CapRemoteControls?.create({ chrome,
+  endpoint: () => new URL("/extension-controls.json", SUMMARY_BACKEND_URL).href, headers: localPreviewAuthHeaders });
+
+function remoteFeatureDisabled(feature, ...platforms) {
+  return globalThis.CapRemoteControls?.disabled(remoteControls?.current(), feature, ...platforms) || false;
+}
+
+function remoteDisabledError(feature) {
+  return Object.assign(new Error(feature === "automaticPaste"
+    ? "Automatic paste is temporarily paused. Copy your context and paste it manually."
+    : "Context transfers are temporarily paused for this AI. Please try again later."), { code: "feature_disabled" });
+}
+
+async function checkRemoteControls(feature, ...platforms) {
+  await remoteControls?.refresh();
+  if (remoteFeatureDisabled("transfers", ...platforms)) throw remoteDisabledError("transfers");
+  if (remoteFeatureDisabled(feature, ...platforms)) throw remoteDisabledError(feature);
+}
+
+function initializeRemoteControls() {
+  if (!remoteControls) return;
+  // Do not recreate an existing alarm on every worker wake: doing so can keep
+  // moving its next refresh into the future in an active browser.
+  Promise.resolve(chrome.alarms.get?.(globalThis.CapRemoteControls.ALARM)).then(alarm => {
+    if (!alarm) return chrome.alarms.create(globalThis.CapRemoteControls.ALARM, { periodInMinutes: 1 });
+  }).catch(() => {});
+  remoteControls.refresh().catch(() => {});
+}
+
 chrome.runtime.onInstalled.addListener(initializeBackground);
 chrome.runtime.onStartup.addListener(initializeBackground);
 
@@ -180,7 +210,7 @@ function getTransferOperation(transferId, sourceTab, deadlineAt) {
   }
   let operation = transferOperations.get(transferId);
   if (!operation) {
-    operation = { transferId, sourceTabId: sourceTab.id, tabIds: new Set([sourceTab.id]), createdTabIds: new Set(),
+    operation = { transferId, sourceTabId: sourceTab.id, sourcePlatform: getPlatformFromUrl(sourceTab.url), tabIds: new Set([sourceTab.id]), createdTabIds: new Set(),
       controller: new AbortController(), deadlineAt, expiresAt: deadlineAt || Date.now() + 360000 };
     transferOperations.set(transferId, operation);
   }
@@ -192,6 +222,7 @@ function getTransferOperation(transferId, sourceTab, deadlineAt) {
 function checkTransferOperation(operation) {
   operation?.controller.signal.throwIfAborted();
   checkTransferDeadline(operation?.deadlineAt);
+  if (operation && remoteFeatureDisabled("transfers", operation.sourcePlatform, operation.destinationId)) throw remoteDisabledError("transfers");
 }
 
 function cancelTransferOperation(operation, { closeDestinations = false, waitForDestinations = false } = {}) {
@@ -269,6 +300,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name === globalThis.CapRemoteControls?.ALARM) remoteControls?.refresh().catch(() => {});
   if (alarm?.name === RAW_TRANSCRIPT_EXPIRY_ALARM) expireStoredRawTranscript();
   if (alarm?.name === TELEMETRY_RETRY_ALARM) initializeTelemetryDelivery();
 });
@@ -276,6 +308,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 initializeBackground();
 
 function initializeBackground() {
+  initializeRemoteControls();
   registerUninstallFeedback();
   injectIntoOpenSupportedTabs();
   scheduleStoredRawTranscriptExpiry();
@@ -1242,6 +1275,8 @@ async function handleToolbarClick(tab) {
       throw new Error("Open a supported AI chat, then click the extension icon.");
     }
 
+    await checkRemoteControls("transfers", platform);
+
     const pickerResult = await sendMessageWhenReady(
       tab.id,
       { type: "OPEN_DESTINATION_PICKER" },
@@ -1254,7 +1289,7 @@ async function handleToolbarClick(tab) {
     }
   } catch (error) {
     console.error("[Context Generator Relay]", error);
-    setToolbarMessage(tab?.id, getPlatformFromUrl(tab?.url)
+    setToolbarMessage(tab?.id, error.code === "feature_disabled" ? error.message : getPlatformFromUrl(tab?.url)
       ? "Cap Context couldn’t open here. Refresh this chat and try again."
       : "Open a Claude, ChatGPT, Gemini, Grok, or DeepSeek chat to use Cap Context.");
     await setBadge("ERR", "#b42318", 5000);
@@ -1275,6 +1310,15 @@ async function setToolbarMessage(tabId, title = "Carry context to another AI") {
 chrome.action.onClicked.addListener(handleToolbarClick);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "GET_REMOTE_CONTROLS") {
+    if (!Number.isInteger(sender?.tab?.id) || sender.id !== chrome.runtime.id || sender.frameId !== 0
+        || !getPlatformFromUrl(sender.url || sender.tab.url)) {
+      sendResponse({ ok: false }); return false;
+    }
+    Promise.resolve(remoteControls?.refresh()).then(config => sendResponse({ ok: true,
+      config: config || globalThis.CapRemoteControls?.defaults() })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   if (message?.type === "CHECK_USER_NOTICES") {
     if (!Number.isInteger(sender?.tab?.id) || sender.id !== chrome.runtime.id || sender.frameId !== 0
         || !getPlatformFromUrl(sender.url || sender.tab.url)) {
@@ -1645,6 +1689,7 @@ function markInterruptedSummaryResponse(error) {
 }
 
 async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null, sourceTab = null, messages = null, platform = null) {
+  await checkRemoteControls("transfers", getPlatformFromUrl(sourceTab?.url));
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   checkTransferDeadline(deadlineAt);
   await checkTransferSource(operation);
@@ -2270,6 +2315,7 @@ function createTransferTimeoutError() {
 
 async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null,
   deferFinalActivation = false, deadlineAt = null, sourceTab = null, localDirect = false) {
+  await checkRemoteControls("automaticPaste", getPlatformFromUrl(sourceTab?.url), destinationId);
   const trace = createBackgroundTrace();
   trace.localDirect = localDirect;
   trace.diagnostics = { version: 1, diagnostics_revision: 3 };
@@ -2301,6 +2347,7 @@ async function transferToDestinationObserved(
   trace = createBackgroundTrace()
 ) {
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
+  if (operation) operation.destinationId = destinationId;
   if (!text?.trim()) {
     const error = new Error("Context summary text was not available.");
     error.code = "paste_failed";
@@ -2378,6 +2425,7 @@ async function transferToDestinationObserved(
   // A draft is intentional user state. Report the first rejection directly so
   // the source can offer its copy dialog without opening a second destination.
   const pasteErrorCode = pasteResult?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult);
+  if (pasteResult?.code === "feature_disabled") throw remoteDisabledError("automaticPaste");
   if (!pasteResult?.ok && isSignInRecovery(pasteResult?.diagnostics)) {
     throw await createSignInRecoveryError(destinationTabId, destinationId, trimmedText, transferId, trace);
   }
@@ -2641,7 +2689,9 @@ function recordDestinationObservation(operation, event, changes = {}, { destinat
 }
 
 async function prepareDestination(destinationId, deadlineAt = null, sourceTab = null, transferId = null) {
+  await checkRemoteControls("transfers", getPlatformFromUrl(sourceTab?.url), destinationId);
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
+  if (operation) operation.destinationId = destinationId;
   checkTransferDeadline(deadlineAt);
   const startedAt = nowMs();
   const destination = DESTINATIONS[destinationId];
@@ -2833,6 +2883,7 @@ async function pasteIntoDestinationTab(
   transferId = null,
   trace = null
 ) {
+  await checkRemoteControls("automaticPaste", trace?.operation?.sourcePlatform, destinationId);
   // Navigation can redirect after preparation or activation. Recheck the real
   // tab immediately before dispatch, including destinations pasted while hidden.
   const currentTab = await chrome.tabs.get(tabId);
@@ -2900,7 +2951,7 @@ async function pingTab(tabId) {
 
 async function ensureContentScript(tabId, file = PLATFORM_CONTENT_SCRIPT) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: file === PLATFORM_CONTENT_SCRIPT ? ["transfer-diagnostics.js", file] : ["transfer-diagnostics.js", "json-capture-metrics.js", file] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: file === PLATFORM_CONTENT_SCRIPT ? ["transfer-diagnostics.js", "remote-controls.js", file] : ["transfer-diagnostics.js", "json-capture-metrics.js", file] });
     return true;
   } catch (error) {
     const message = String(error?.message || error);

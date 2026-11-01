@@ -4,6 +4,8 @@ This Privacy Policy explains how Cap Context ("we", "our", or "us") handles user
 
 ## Information Collection and Use
 
+- **Emergency Settings**: Updated extensions periodically fetch a small public settings file from our backend to pause broken features. These requests do not include conversations, installation identifiers, page URLs, AI account data or cookies. The last valid settings are cached locally and these checks operate independently of optional diagnostics.
+
 - **Picker Privacy**: With Speed enabled, opening the destination picker reads a saved conversation from its current AI website and keeps the capture temporarily in source-page memory. Closing the picker or turning Speed off discards it. Picker interaction does not send conversation text to our backend or another destination. The picker may preconnect to supported AI websites; those preconnections do not include chat content.
 - **Data Transmission**: Summarization and destination transfer start only after the user selects a destination or explicitly starts a transfer from the extension toolbar. Chats under 10,000 characters or from 350,001 to 500,000 characters are carried entirely in the browser. Chats from 10,000 to 350,000 characters are sent to our backend for summarization.
 - **Processing**: For remote summaries, the backend sends the captured conversation to configured AI providers: OpenRouter (currently Ling 3.1 Flash), Google Gemini and Mistral. OpenRouter requests use a provider filter that excludes endpoints which collect user data. If all configured providers fail, the full conversation is carried over locally.

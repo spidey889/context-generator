@@ -6,6 +6,11 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-11-01
 
+- **Add emergency frontend controls on the existing backend.** Static validated JSON can pause transfers, inline orbs, JSON capture or automatic paste globally or per AI site after one initial extension update. Later changes require only backend deployment, without a database or new permissions.
+  - Share bounded anonymous checks through the worker, refresh about once a minute and update open pages. Retain valid stops across outages, malformed responses and restarts; first use without cached settings stays enabled if the backend is unavailable.
+  - Guard admission and final composer writes while preserving DOM fallback, complete manual-copy recovery, drafts, cancellation and navigation protection. Record delivery delay, already-inserted-text and older-client limits in `docs/emergency-controls.md`.
+  - Add per-site/cache/restart/error/timeout/navigation regressions and an isolated Brave alarm-to-UI/manual-copy smoke in regular CI. Ordinary transfer fixtures stay independent of production switch settings.
+
 - **Move user notices from a deployed JSON file to Supabase `user_notices`.** Keep one current message per existing user number, with private operator writes and read-only access through the existing authenticated relay. Future sends are database upserts, without commits, merges, deployments or extension changes.
   - Preserve the exact message hash, local seen history, polling, ten-second notice and Dismiss behavior. Copy existing live messages unchanged during the storage move so migration does not resend them.
   - Cover live-data replacement, targeting, relay failures, table constraints/access and backup restoration with focused checks. Keep number-only relay lookups compatible during the one-time Edge/Vercel rollout.
