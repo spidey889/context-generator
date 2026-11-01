@@ -31,7 +31,7 @@
 ## Tests and checks
 
 - When fixing a confirmed bug or adding meaningful new behavior, add a regression test.
-- Before adding tests, identify the important behaviors and credible failures, then check existing coverage. Add fast, focused tests that protect those outcomes; extend existing tests where practical and avoid duplicates or implementation-only checks. Choose the count for the coverage needed, not to maximize or minimize tests.
+- Think before adding tests. Use your judgment to add strategic tests that protect what matters for the change. Keep them fast and useful; the goal is quality coverage, not a particular test count.
 - After investigating or fixing a confirmed real-user failure, remind the owner that we can add the complete failing scenario to regular CI to catch a repeat before release. Briefly describe what to cover, such as many attachments, large histories, slow downloads or retries, and say whether existing CI already covers it. Honor the owner's limits on writing or running tests.
 - After a change, run focused tests or checks for the affected behavior. Do not run the full suite automatically after every change.
 - Run the full suite only when the change is large, affects several components, or focused checks are not enough to verify it. Run slow, database and browser checks when the affected behavior needs them.
