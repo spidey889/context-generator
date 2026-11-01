@@ -6,6 +6,8 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-11-01
 
+- **Offer the affected user a one-time retry notice.** Reuse the existing right-side glass notice with the owner's exact message for user #49, for ten seconds on their next visible supported chat after this client update. Match the installation locally using its fingerprint; no new backend request, database change or permission. Consume the notice only after display acknowledgement and retain its seen flag across chats/restarts. Focused tests cover targeting, competing tabs, hidden/login pages, exact copy and expiry; isolated Brave verification confirms automatic display, disappearance and no repeat. Source delivery remains separate from an extension-store release.
+
 - **Retry failed DeepSeek attachments within the same capture.** A file-local download failure previously skipped the attachment immediately, leaving its contents out of the carry.
   - Hosted observations included partial captures with HTTP 429 and 33 skipped files; the existing recovery requested manual re-upload rather than retrying those downloads.
   - Process up to four files per batch and retry each failed file once in the next batch alongside remaining files. Keep successful bodies and the original history instead of downloading them again within that capture.

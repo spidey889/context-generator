@@ -1,9 +1,11 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-deepseek-file-count-v243";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-01-transfer-retry-notice-v244";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let activeCopyNotice = null;
+  let transferRetryNoticeRequested = false;
+  let transferRetryNoticeDisplayed = false;
   let handoffUserCss = "";
   let handoffUserCssRequest = null;
   let handoffScrimPalette = "";
@@ -797,6 +799,12 @@
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
+    if (message?.type === "SHOW_TRANSFER_RETRY_NOTICE") {
+      let shown = false;
+      try { if (_sender?.id === extensionRuntime.id) shown = showTransferRetryNotice(); } catch {}
+      sendResponse({ shown });
+      return false;
+    }
     if (message?.type === "LARGE_SUMMARY_PROGRESS") {
       const trace = activeTransferTrace;
       if (trace?.id === message.transferId && trace.largeSummaryPending && !trace.completed
@@ -1102,6 +1110,7 @@
       delay,
       getHandoffProgressState,
       getHandoffProgressStatusText,
+      showTransferRetryNotice,
       startHandoffActivityProgress,
       stopHandoffActivityProgress,
       reportHandoffCaptureProgress,
@@ -6410,6 +6419,7 @@
       releaseComposerSurface();
       return existingBubble;
     }
+    maybeRequestTransferRetryNotice(input);
     const bubble = existingBubble || createFloatingButton();
     if (currentPlatform.id === "claude") {
       // Claude stays inline through send/docking; unmatched owners hide until remount.
@@ -10180,6 +10190,32 @@
     hideHandoffReassurance();
   }
 
+  function canShowTransferRetryNotice(input = findPlatformInput()) {
+    const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+    const chatRoute = hasSavedSourceConversation() || DESTINATION_LANDING_PATHS[currentPlatform.id]?.includes(pathname);
+    const notice = document.getElementById("context-generator-error-overlay");
+    return instanceActive && chatRoute && document.visibilityState === "visible" && isEditorReady(input)
+      && !isRunning && !isDestinationSheetOpen() && !isHandoffOverlayVisible()
+      && (!notice || notice.style.display === "none");
+  }
+
+  function maybeRequestTransferRetryNotice(input) {
+    if (transferRetryNoticeRequested || transferRetryNoticeDisplayed || !canShowTransferRetryNotice(input)) return;
+    transferRetryNoticeRequested = true;
+    // Use existing composer/visibility updates, with no new polling or network.
+    notifyBackground({ type: "CHECK_TRANSFER_RETRY_NOTICE" }).then(reply => {
+      if (reply?.eligible && !reply.shown) transferRetryNoticeRequested = false;
+    }).catch(() => {});
+  }
+
+  function showTransferRetryNotice() {
+    if (transferRetryNoticeDisplayed || !canShowTransferRetryNotice()) return false;
+    showErrorOverlay("Hey, saw your last DeepSeek transfer failed. We found an issue and fixed it. Your transfer should work now. Give it another try :)",
+      { transferRetryNotice: true });
+    transferRetryNoticeDisplayed = document.getElementById("context-generator-error-overlay")?.style.display === "flex";
+    return transferRetryNoticeDisplayed;
+  }
+
   function showSignInRecoveryNotice(text, destinationName, recovery) {
     showErrorOverlay(`Your summary is ready. Copy it, sign in, then paste it into a new chat.`,
       { text, destinationName, recovery, signInRequired: true, pendingCopy: true });
@@ -10187,9 +10223,10 @@
 
   function showErrorOverlay(error, copiedContext = null) {
     const message = getUserFacingTransferErrorMessage(error);
+    const transferRetryNotice = copiedContext?.transferRetryNotice === true;
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     // Keep recovery until copying succeeds; allow a short read before its exit.
-    const noticeDurationMs = copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
+    const noticeDurationMs = transferRetryNotice ? 10000 : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? null : 2500) : copiedContext ? 16000 : 8000;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
     const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
@@ -10308,7 +10345,7 @@
 
     const title = document.getElementById("context-generator-error-title");
     if (title) {
-      title.textContent = copiedContext?.pasteBackup ? "In case paste did not work" : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? `Sign in to ${copiedContext.destinationName}` : "Summary copied to your clipboard") : copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
+      title.textContent = transferRetryNotice ? "Cap Context" : copiedContext?.pasteBackup ? "In case paste did not work" : copiedContext?.signInRequired ? (copiedContext.pendingCopy ? `Sign in to ${copiedContext.destinationName}` : "Summary copied to your clipboard") : copiedContext ? "Copied to clipboard" : isChatGptLoggedOutError
         ? CHATGPT_LOGGED_OUT_ERROR_TITLE
         : isNoConversationError
           ? NO_CONVERSATION_ERROR_TITLE
@@ -10319,7 +10356,7 @@
 
     const mark = document.getElementById("context-generator-error-mark");
     if (mark) {
-      mark.textContent = copiedContext?.pendingCopy ? "i" : copiedContext ? "✓" : isNoConversationError || isSummaryRetryError || isToolbarSignInNotice ? "i" : "!";
+      mark.textContent = transferRetryNotice || copiedContext?.pendingCopy ? "i" : copiedContext ? "✓" : isNoConversationError || isSummaryRetryError || isToolbarSignInNotice ? "i" : "!";
     }
 
     const textSpan = document.getElementById("context-generator-error-text");
@@ -10331,7 +10368,7 @@
     errorDiv.contextGeneratorPasteBackup = Boolean(copiedContext?.pasteBackup);
     errorDiv.setAttribute("role", copiedContext ? "status" : "alert");
     let copyAgain = document.getElementById("context-generator-error-copy-again");
-    if (copiedContext && !copyAgain) {
+    if (copiedContext && !transferRetryNotice && !copyAgain) {
       const dismiss = document.getElementById("context-generator-error-dismiss");
       const actions = document.createElement("div");
       actions.style.cssText = "position:relative;z-index:1;display:flex;justify-content:flex-end;gap:8px";
@@ -10345,12 +10382,12 @@
       protectOverlayPalette(copyAgain);
     }
     if (copyAgain) {
-      copyAgain.style.display = copiedContext ? "block" : "none";
+      copyAgain.style.display = copiedContext && !transferRetryNotice ? "block" : "none";
       copyAgain.textContent = copiedContext?.pendingCopy ? (copiedContext.pasteBackup ? "Copy Summary" : "Copy summary") : "Copy again";
       // Keep the actions steady when the copy label changes to its confirmation.
       copyAgain.style.minWidth = copiedContext?.pasteBackup ? "112px" : "";
       copyAgain.disabled = false;
-      if (copiedContext) {
+      if (copiedContext && !transferRetryNotice) {
         const owner = errorDiv.contextGeneratorCopyNoticeOwner = {};
         activeCopyNotice = errorDiv;
         const ownsNotice = () => ensureLiveExtensionInstance() && errorDiv.isConnected && errorDiv.contextGeneratorCopyNoticeOwner === owner;

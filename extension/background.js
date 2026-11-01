@@ -34,6 +34,11 @@ const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const RAW_TRANSCRIPT_EXPIRY_ALARM = "expire-latest-run-raw-transcript";
 const TELEMETRY_ENDPOINT_URL = "https://context-generator-five.vercel.app/api/telemetry";
 const TELEMETRY_INSTALL_ID_STORAGE_KEY = "context-generator-install-id-v1";
+// One-off notice for an existing installation. Keep its raw identity out of the
+// bundle; checking this fingerprint is entirely local and creates no identity.
+const TRANSFER_RETRY_NOTICE_TARGET = "8d04a4b58b0d47dd45ac7303c97ff866b9bb13398cd1c962c77e5d1454d1f5f2";
+const TRANSFER_RETRY_NOTICE_SEEN_KEY = "context-generator-deepseek-retry-notice-seen-v1";
+let transferRetryNoticeWork = Promise.resolve();
 const TELEMETRY_OUTBOX_STORAGE_KEY = "context-generator-telemetry-outbox-v1";
 const TELEMETRY_ACTIVE_STORAGE_KEY = "context-generator-active-transfers-v1";
 const TELEMETRY_DIAGNOSTICS_STORAGE_KEY = "context-generator-telemetry-diagnostics-v1";
@@ -900,6 +905,32 @@ function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
   };
 }
 
+function maybeSendTransferRetryNotice(sender) {
+  const work = transferRetryNoticeWork.then(async () => {
+    const stored = await chrome.storage.local.get([TELEMETRY_INSTALL_ID_STORAGE_KEY, TRANSFER_RETRY_NOTICE_SEEN_KEY]);
+    if (stored[TRANSFER_RETRY_NOTICE_SEEN_KEY] === true || !isUuid(stored[TELEMETRY_INSTALL_ID_STORAGE_KEY]))
+      return { eligible: false, shown: false };
+    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stored[TELEMETRY_INSTALL_ID_STORAGE_KEY]));
+    const fingerprint = Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("");
+    if (fingerprint !== TRANSFER_RETRY_NOTICE_TARGET) return { eligible: false, shown: false };
+    let timer;
+    try {
+      const reply = await Promise.race([
+        chrome.tabs.sendMessage(sender.tab.id, { type: "SHOW_TRANSFER_RETRY_NOTICE" },
+          sender.documentId ? { documentId: sender.documentId } : { frameId: 0 }),
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), 2000); })
+      ]);
+      if (reply?.shown !== true) return { eligible: true, shown: false };
+      // Serialize competing tabs and consume the notice only after actual UI
+      // acknowledgement, so a hidden/unloaded page does not lose the message.
+      await chrome.storage.local.set({ [TRANSFER_RETRY_NOTICE_SEEN_KEY]: true });
+      return { eligible: true, shown: true };
+    } finally { clearTimeout(timer); }
+  });
+  transferRetryNoticeWork = work.catch(() => ({ eligible: false, shown: false }));
+  return transferRetryNoticeWork;
+}
+
 async function getOrCreateTelemetryInstallId() {
   if (telemetryInstallIdPromise) return telemetryInstallIdPromise;
 
@@ -1266,6 +1297,14 @@ async function setToolbarMessage(tabId, title = "Carry context to another AI") {
 chrome.action.onClicked.addListener(handleToolbarClick);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "CHECK_TRANSFER_RETRY_NOTICE") {
+    if (!Number.isInteger(sender?.tab?.id) || sender.id !== chrome.runtime.id || sender.frameId !== 0
+        || !getPlatformFromUrl(sender.url || sender.tab.url)) {
+      sendResponse({ ok: false }); return false;
+    }
+    maybeSendTransferRetryNotice(sender).then(result => sendResponse({ ok: true, ...result }));
+    return true;
+  }
   if (message?.type === "CANCEL_TRANSFER") {
     const tabId = sender?.tab?.id;
     let operation = transferOperations.get(message.transferId);

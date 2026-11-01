@@ -3827,6 +3827,44 @@ clockTest("source draft recovery keeps its original copy dialog and prepared car
   }
 });
 
+clockTest("transfer retry notice keeps the owner's exact text, expires after ten seconds and cannot repeat", t => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message DeepSeek" } });
+  const hooks = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice" });
+  const notice = {};
+  for (const id of ["overlay", "title", "text", "mark", "dismiss", "copy-again"]) {
+    notice[id] = new FakeElement();
+    notice[id].style.setProperty = function (name, value) { this[name] = value; };
+    hooks.registerElementId(`context-generator-error-${id}`, notice[id]);
+  }
+  notice.overlay.style.display = "none";
+  assert.equal(hooks.showTransferRetryNotice(), true);
+  assert.equal(notice.text.textContent, "Hey, saw your last DeepSeek transfer failed. We found an issue and fixed it. Your transfer should work now. Give it another try :)");
+  assert.equal(notice.title.textContent, "Cap Context");
+  assert.equal(notice["copy-again"].style.display, "none");
+  assert.equal(notice.overlay.style.right, "20px");
+  assert.equal(notice.overlay.getAttribute("role"), "status");
+  t.mock.timers.tick(9999);
+  assert.equal(notice.overlay.getAttribute("aria-hidden"), "false");
+  t.mock.timers.tick(1);
+  assert.equal(notice.overlay.getAttribute("aria-hidden"), "true");
+  t.mock.timers.tick(280);
+  assert.equal(notice.overlay.style.display, "none");
+  assert.equal(hooks.showTransferRetryNotice(), false);
+});
+
+test("transfer retry notice waits for a visible chat and preserves an existing notice", () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message DeepSeek" } });
+  const hidden = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice", visibilityState: "hidden" });
+  assert.equal(hidden.showTransferRetryNotice(), false);
+  const login = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/sign_in" });
+  assert.equal(login.showTransferRetryNotice(), false);
+  const hooks = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice" });
+  const existing = new FakeElement(); existing.style.display = "flex";
+  hooks.registerElementId("context-generator-error-overlay", existing);
+  assert.equal(hooks.showTransferRetryNotice(), false);
+  assert.equal(existing.style.display, "flex");
+});
+
 clockTest("sign-in recovery retains the complete transfer and uses the existing copy-notice flow", async () => {
   const summary = "Full prepared transfer\nwith every character retained.";
   const registerDialog = hooks => {
