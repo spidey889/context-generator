@@ -4,6 +4,15 @@ Decisions, important regressions and replaced approaches worth remembering. [LOG
 
 Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spidey889/context-generator/blob/9b663fdfbe98204803ec5526f91be2c01c61d62e/CHANGELOG.md) remains in Git with detailed experiments, rollout evidence and superseded iterations.
 
+## 2026-11-01
+
+- **Retry failed DeepSeek attachments within the same capture.** A file-local download failure previously skipped the attachment immediately, leaving its contents out of the carry.
+  - Hosted observations included partial captures with HTTP 429 and 33 skipped files; the existing recovery requested manual re-upload rather than retrying those downloads.
+  - Process up to four files per batch and retry each failed file once in the next batch alongside remaining files. Keep successful bodies and the original history instead of downloading them again within that capture.
+  - Preserve original transcript order, file deduplication, shared byte/deadline limits and cancellation. A second failure keeps the existing missing-file notice; numeric-only measurement retains its no-retry behavior.
+  - A queued retry no longer counts as a skipped file in final capture metrics. Advance DeepSeek hook readiness so existing pages replace the previous reader.
+  - Focused regressions verify retry ordering, four concurrent downloads, exact recovered content, single fetches for successful files and bounded permanent failures, alongside existing guard checks. Live DeepSeek recovery and throughput remain unverified.
+
 ## 2026-10-31
 
 - **Retry transient large-summary failures once.** If a part or final combine encounters a temporary service error, network failure or timeout, retry that request while keeping completed parts. HTTP 429 honors the server's `Retry-After` (60 seconds by default); other transient failures wait two seconds. Stop immediately when the requested wait cannot fit within the existing phase/overall deadlines. Interrupted response-body recovery shares the same single-retry limit. Add coverage for server waits, exhausted deadlines and cancellation; owner testing remains pending.

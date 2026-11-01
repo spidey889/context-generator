@@ -386,7 +386,7 @@ test("DeepSeek: an invalid UTF-8 attachment cannot discard healthy text or later
   assert.equal(capture.jsonCapture.files_skipped,2);
   for (const file of f.uploads) assert.equal(capture.text.includes(f.files[file.id]), !invalid.has(file.id));
   assert.deepEqual(JSON.parse(JSON.stringify(capture.skippedFiles)), [{ name: "source-0.py" }, { name: "source-3.py" }]);
-  assert.equal(h.requests.length, 8, "bad files must not stop queued healthy downloads");
+  assert.equal(h.requests.length, 10, "only the two bad files retry; healthy downloads run once");
   assert.ok(capture.text.includes(f.data.data.biz_data.chat_messages[1].fragments[0].content));
   assert.ok(bodies.every(body => !body.locked));
   assert.equal(h.navigationListeners(), 0);
@@ -468,16 +468,16 @@ test("DeepSeek: separate-file notices retain the exact file boundary while skipp
   assert.ok(!capture.text.includes("File contents"));
   f.uploads[0].file_size = 4100000;
   await assert.rejects(h.window.__capCaptureNetworkJson(undefined, true));
-  assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 1,
+  assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 2,
     "A file equal to 4.1 MB is not omitted; existing combined admission still applies.");
 });
 
 test("DeepSeek: diagnosis distinguishes file fetch rejection, HTTP rejection and interrupted body", async () => {
   for (const phase of ["fetch", "headers", "body"]) {
     const f = deepseekUploads(1);
-    let reads = 0;
     const h = setup("deepseek", f, { fetchImpl: async request => {
       if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+      let reads = 0;
       if (phase === "fetch") throw new TypeError("PRIVATE file address or browser message");
       if (phase === "headers") return new Response("PRIVATE rejected body", { status: 403 });
       return { status: 200, type: "cors", headers: new Headers({ "content-type": "text/plain" }),
@@ -551,7 +551,7 @@ test("DeepSeek: attachment decode failures retain only fixed type clues and the 
       assert.equal(stats.failure_abort, "none");
       assert.doesNotMatch(JSON.stringify(stats), /PRIVATE|SENTINEL|https:|file_name|signed_path/);
     }
-    assert.equal(h.requests.length, 2, "Diagnosis must not make additional requests.");
+    assert.equal(h.requests.length, 3, "The failed file retries once; diagnosis adds no further requests.");
   }
 });
 
@@ -959,7 +959,7 @@ test("DeepSeek: redirected original files retain exact text and byte guards", as
     assert.equal(fileRequest.options.headers, undefined);
     assert.equal(fileRequest.options.referrerPolicy, "no-referrer");
   }
-  assert.equal(redirectedReads, 4, "Capture, measurement and rejected byte guards must reach the redirected file.");
+  assert.equal(redirectedReads, 6, "Capture, measurement and each rejected file's single retry reach the redirected file.");
 });
 
 test("Network: authenticated history never follows a redirect", async t => {
@@ -1026,6 +1026,68 @@ clockTest("DeepSeek: independent uploads overlap in bounded waves and preserve e
   assert.doesNotMatch(JSON.stringify(h.replies), /AUTH_SENTINEL|SIGNED_SENTINEL/);
 });
 
+test("DeepSeek: a failed upload retries in the next batch without downloading successful files again", async () => {
+  const f = deepseekUploads(9);
+  const attempts = new Map(), waiting = new Map(), started = [];
+  let active = 0, peak = 0;
+  const h = setup("deepseek", f, { fetchImpl: async request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    const id = `file-${request.url.searchParams.get("file_id")}`;
+    attempts.set(id, (attempts.get(id) || 0) + 1);
+    started.push(id);
+    active++; peak = Math.max(peak, active);
+    return new Promise(resolve => waiting.set(id, () => {
+      active--;
+      resolve(id === f.uploads[0].id && attempts.get(id) === 1 ? new Response(null, { status: 429 })
+        : new Response(f.files[id], { headers: { "content-type": "text/plain" } }));
+    }));
+  } });
+  await h.observe();
+  const pending = h.window.__capCaptureNetworkJson();
+  await new Promise(setImmediate);
+  assert.deepEqual(started, f.uploads.slice(0, 4).map(file => file.id));
+  waiting.get(f.uploads[0].id)();
+  await new Promise(setImmediate);
+  assert.equal(started.length, 4, "the retry must wait for the next batch");
+  for (const file of f.uploads.slice(1, 4)) waiting.get(file.id)();
+  await new Promise(setImmediate);
+  assert.deepEqual(started.slice(4), [f.uploads[0].id, ...f.uploads.slice(4, 7).map(file => file.id)]);
+  for (const id of started.slice(4)) waiting.get(id)();
+  await new Promise(setImmediate);
+  assert.deepEqual(started.slice(8), f.uploads.slice(7).map(file => file.id));
+  for (const id of started.slice(8)) waiting.get(id)();
+  const capture = await pending;
+  assert.equal(capture.text, f.expected);
+  assert.equal(peak, 4);
+  assert.equal(attempts.get(f.uploads[0].id), 2);
+  for (const file of f.uploads.slice(1)) assert.equal(attempts.get(file.id), 1);
+  assert.equal(capture.jsonCapture.requests, 11, "history is read once and only the failed file is retried");
+  assert.equal(capture.jsonCapture.outcome, "succeeded");
+  assert.equal(capture.jsonCapture.files_skipped, undefined);
+  assert.equal(capture.jsonCapture.failure_check, undefined);
+  assert.equal(capture.skippedFiles, undefined);
+});
+
+test("DeepSeek: a permanently failed upload gets only one retry and keeps its missing-file notice", async () => {
+  const f = deepseekUploads();
+  const attempts = new Map();
+  const h = setup("deepseek", f, { fetchImpl: request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    const id = `file-${request.url.searchParams.get("file_id")}`;
+    attempts.set(id, (attempts.get(id) || 0) + 1);
+    return id === f.uploads[0].id ? new Response(null, { status: 429 })
+      : new Response(f.files[id], { headers: { "content-type": "text/plain" } });
+  } });
+  await h.observe();
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(attempts.get(f.uploads[0].id), 2);
+  for (const file of f.uploads.slice(1)) assert.equal(attempts.get(file.id), 1);
+  assert.equal(capture.jsonCapture.files_skipped, 1);
+  assert.equal(capture.jsonCapture.failure_http_status, 429);
+  assert.equal(capture.jsonCapture.outcome, "partial");
+  assert.deepEqual(JSON.parse(JSON.stringify(capture.skippedFiles)), [{ name: f.uploads[0].file_name }]);
+});
+
 test("DeepSeek: combined text files up to 4.1 MB retain the final transcript limit", async () => {
   for (const lengths of [[470000], [235000, 235000], [350000, 350000], [980000], [550000, 550000]]) {
     const characters = lengths.reduce((sum, length) => sum + length, 0);
@@ -1090,14 +1152,14 @@ test("DeepSeek: one incomplete upload preserves siblings and a fresh capture ret
   await h.observe();
   const capture = await h.window.__capCaptureNetworkJson();
   assert.ok(!capture.text.includes(f.files[f.uploads[0].id]));
-  assert.equal(h.requests.length, 7, "failure must not stop queued downloads");
+  assert.equal(h.requests.length, 8, "only the failed file retries before the missing-file notice");
   assert.equal(aborted.length, 0);
-  assert.equal(h.window.__capNetworkFetchState.version, 35);
+  assert.equal(h.window.__capNetworkFetchState.version, 36);
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
   healthy = true;
   assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
-  assert.equal(h.requests.length, 14);
+  assert.equal(h.requests.length, 15);
   assert.doesNotMatch(JSON.stringify(h.replies), /PRIVATE_FILE_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL/);
 });
 
@@ -1108,13 +1170,17 @@ test("DeepSeek: streamed bodies preserve split UTF-8 and stop oversized reads wi
     f.files[f.uploads[0].id] = text;
     f.uploads[0].file_size = oversized ? 2 : Buffer.byteLength(text);
     let reads = 0, cancelled = false, body;
+    const attemptReads = [];
     const bytes = Buffer.from(text);
     const h = setup("deepseek", f, { fetchImpl: async request => {
       if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+      let fileReads = 0;
+      const attempt = attemptReads.push(0) - 1;
       body = new ReadableStream({
         pull(controller) {
-          if (reads === bytes.length) return controller.close();
-          controller.enqueue(bytes.subarray(reads, ++reads));
+          if (fileReads === bytes.length) return controller.close();
+          reads++; attemptReads[attempt]++;
+          controller.enqueue(bytes.subarray(fileReads, ++fileReads));
         },
         cancel() { cancelled = true; }
       });
@@ -1125,7 +1191,8 @@ test("DeepSeek: streamed bodies preserve split UTF-8 and stop oversized reads wi
       const capture = await h.window.__capCaptureNetworkJson();
       assert.ok(!capture.text.includes("File contents"));
       assert.equal(cancelled, true);
-      assert.ok(reads <= 4, "stop after the first extra byte, allowing one prefetched chunk");
+      assert.equal(attemptReads.length, 2);
+      assert.ok(attemptReads.every(count => count <= 4), "each attempt stops after the first extra byte, allowing one prefetched chunk");
     } else {
       const capture = await h.window.__capCaptureNetworkJson();
       assert.ok(capture.text.includes(`File contents (${bytes.length} UTF-8 bytes):\n${text}\nEnd attachment:`));
@@ -1169,10 +1236,10 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   await h.observe();
   const old = h.window.__capNetworkFetchState;
   // Open tabs may retain the preceding reader after extension reload.
-  old.version = platform === "deepseek" ? 34 : platform === "gemini" ? 20 : 23;
+  old.version = platform === "deepseek" ? 35 : platform === "gemini" ? 20 : 23;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 35 : platform === "grok" ? 24 : 21);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 36 : platform === "grok" ? 24 : 21);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

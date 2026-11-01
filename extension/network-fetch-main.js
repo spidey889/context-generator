@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 35 : platform === "grok" ? 24 : 21, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 36 : platform === "grok" ? 24 : 21, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the larger transcript cap does not raise
@@ -456,30 +456,32 @@
         }
         // Independent original-file reads overlap; serialization still follows
         // branch/fragment order. Validate all descriptors before any download.
-        const pending = [...uploads.values()].filter(upload => !upload.omitted);
-        let next = 0, failure;
-        const download = async () => {
+        const pending = [...uploads.values()].filter(upload => !upload.omitted)
+          .map((upload, index) => ({ ...upload, fileIndex: index + 1, retried: false }));
+        let failure;
+        const download = async (upload) => {
           try {
-            while (next < pending.length) {
-              check();
-              const fileIndex = next++;
-              const { file, url } = pending[fileIndex];
-              try {
-                const extension = typeof file.file_name === "string" ? file.file_name.match(/\.([a-z0-9]+)$/i)?.[1].toLowerCase() : undefined;
-                const content = await read(url.href, { credentials: "omit" }, "file", file.file_size, fileIndex + 1, extension);
-                if (content.size !== file.file_size) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", content.size, file.file_size); throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed"); }
-                files[file.id] = content.text;
-                if (measureOnly) {
-                  measureDeepseek();
-                  if (reply.characterCount > 4000000) { controller.abort("size_limit"); return; }
-                }
-              } catch (error) {
-                if (!measureOnly && error.captureFailureReason === "size_limit") throw error;
-                // read() has cancelled/released this body's reader. Continue
-                // healthy siblings and queued files; do not accept partial bytes.
-                check();
-                metrics.recoverFile(error, "attachment_body");
+            check();
+            const { file, url, fileIndex } = upload;
+            try {
+              const extension = typeof file.file_name === "string" ? file.file_name.match(/\.([a-z0-9]+)$/i)?.[1].toLowerCase() : undefined;
+              const content = await read(url.href, { credentials: "omit" }, "file", file.file_size, fileIndex, extension);
+              if (content.size !== file.file_size) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", content.size, file.file_size); throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed"); }
+              files[file.id] = content.text;
+              if (measureOnly) {
+                measureDeepseek();
+                if (reply.characterCount > 4000000) { controller.abort("size_limit"); return; }
               }
+            } catch (error) {
+              if (!measureOnly && error.captureFailureReason === "size_limit") throw error;
+              // Retry only this file in the next batch, retaining successful
+              // bodies. A second failure keeps the existing missing-file note.
+              check();
+              if (!measureOnly && !upload.retried) {
+                metrics.retryFile(fileIndex);
+                return { ...upload, retried: true };
+              }
+              metrics.recoverFile(error, "attachment_body");
             }
           } catch (error) {
             if (!failure) { failure = error; if (!measureOnly) controller.abort("attachment_failed"); }
@@ -487,7 +489,10 @@
         };
         // Global cancellation/size failures still settle every owned read before
         // releasing capture. File-local failures leave healthy siblings running.
-        await Promise.all(Array.from({ length: Math.min(4, pending.length) }, download));
+        while (pending.length && !failure) {
+          const retry = await Promise.all(pending.splice(0, 4).map(download));
+          pending.unshift(...retry.filter(Boolean));
+        }
         if (failure && !measureOnly) throw failure;
         if (measureOnly) {
           if (controller.signal.reason !== "size_limit") check();

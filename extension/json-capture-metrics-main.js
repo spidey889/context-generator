@@ -483,6 +483,13 @@
       add("files_skipped");
       recoveredFileFailure = true;
     };
+    const retryFile = fileIndex => {
+      // A queued retry is not a skipped file. Keep earlier permanent skips,
+      // but let this retry publish progress and its own eventual failure.
+      if (data.failure_file_index !== undefined && data.failure_file_index !== fileIndex) return;
+      for (const key of Object.keys(data)) if (key.startsWith("failure_") || key === "incomplete_reason") delete data[key];
+      recoveredFileFailure = Boolean(data.skipped_file_check);
+    };
     const response = (stage, limit, header, countRequest = true) => {
       const began = clock();
       if (countRequest) add("requests");
@@ -549,7 +556,7 @@
       return contract.validateJsonAttempt(data);
     };
     set(initial);
-    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception, checkpoint, recoverFile,
+    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception, checkpoint, recoverFile, retryFile,
       adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) { set(safe); recoveredFileFailure = ["partial", "started"].includes(safe.outcome) && Boolean(safe.skipped_file_check); checkpoint(safe.step, safe.step_stage); } } };
   }
   root.CapJsonCaptureMetrics = { create };
