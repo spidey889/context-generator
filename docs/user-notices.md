@@ -36,6 +36,6 @@ This implementation was prepared locally; these rollout steps are separate actio
 
 ## Verification
 
-`test/user-notices.test.js` covers targeting, validation, private-relay authentication, read-only lookup, cache/retry limits, concurrent tabs, restarts, the legacy seen flag, storage/network failures and lost acknowledgements. The existing background/content tests cover sender boundaries, visible-page gating, exact text, no controls and expiry. Firefox packaging checks the new dependency.
+Five focused tests in `test/user-notices.test.js` cover authenticated targeting, once-only delivery and later messages, uncertain acknowledgements, privacy/failure handling, and legacy/installation history. The existing background/content tests cover sender boundaries, visible-page gating, exact text, no controls and expiry. Firefox packaging checks the new dependency.
 
 `node scripts/run-user-notices-smoke.js` runs the actual unpacked extension in a new isolated Brave window. Synthetic lookups and a backend-only message change exercise automatic delivery, the real fallback Copy confirmation, matching notice styles/transitions, literal text, no buttons, expiry, no-repeat after reload and another user's exclusion. It runs in regular browser CI. Optional `CAP_CONTEXT_NOTICE_SCREENSHOT_DIR` saves comparison screenshots outside the repository.

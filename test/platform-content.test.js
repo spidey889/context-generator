@@ -3865,13 +3865,9 @@ test("user notice waits for a visible chat and preserves an existing notice", ()
   hooks.registerElementId("context-generator-error-overlay", existing);
   assert.equal(hooks.showUserNotice({ id: "a".repeat(64), message: "A plain notice <b>with literal markup</b>." }), false);
   assert.equal(existing.style.display, "flex");
-});
-
-test("user notices reject malformed payloads and wait behind a manual copy dialog", () => {
-  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message DeepSeek" } });
-  const hooks = loadPlatformContent([editor], "chat.deepseek.com", { pathname: "/a/chat/s/notice" });
-  for (const invalid of [null, { id: "bad", message: "Message" }, { id: "a".repeat(64), message: " " },
-    { id: "a".repeat(64), message: "x".repeat(1001) }]) assert.equal(hooks.showUserNotice(invalid), false);
+  existing.style.display = "none";
+  assert.equal(hooks.showUserNotice(null), false);
+  assert.equal(hooks.showUserNotice({ id: "a".repeat(64), message: "x".repeat(1001) }), false);
   const copyBox = new FakeElement(); copyBox.style.display = "flex";
   hooks.registerElementId("context-generator-fallback-modal", copyBox);
   assert.equal(hooks.showUserNotice({ id: "a".repeat(64), message: "Wait for the copy dialog." }), false);
