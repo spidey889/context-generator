@@ -1154,7 +1154,7 @@ test("DeepSeek: one incomplete upload preserves siblings and a fresh capture ret
   assert.ok(!capture.text.includes(f.files[f.uploads[0].id]));
   assert.equal(h.requests.length, 8, "only the failed file retries before the missing-file notice");
   assert.equal(aborted.length, 0);
-  assert.equal(h.window.__capNetworkFetchState.version, 36);
+  assert.equal(h.window.__capNetworkFetchState.version, 37);
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
   healthy = true;
@@ -1202,7 +1202,63 @@ test("DeepSeek: streamed bodies preserve split UTF-8 and stop oversized reads wi
   }
 });
 
-clockTest("DeepSeek: navigation, auth changes and timeouts abort every overlapping upload", async () => {
+clockTest("DeepSeek: attachment retry can finish after the old 25-second limit", { tickMs: 1000 }, async () => {
+  const f = deepseekUploads(1);
+  let attempts = 0;
+  const h = setup("deepseek", f, { fetchImpl: async request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    if (++attempts === 1) return new Response(null, { status: 429 });
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, 30000);
+      request.options.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("aborted")); }, { once: true });
+    });
+    return new Response(f.files[f.uploads[0].id], { headers: { "content-type": "text/plain" } });
+  } });
+  await h.observe();
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text, f.expected);
+  assert.equal(attempts, 2);
+  assert.equal(h.requests.length, 3, "The longer deadline must not restart history or completed downloads.");
+  assert.equal(capture.jsonCapture.deadline_ms, 60000);
+  assert.equal(capture.skippedFiles, undefined);
+});
+
+clockTest("Network: only DeepSeek gets a 60-second native capture deadline", { tickMs: 1000, maxElapsedMs: 150000 }, async () => {
+  for (const platform of ["deepseek", "gemini", "grok"]) {
+    let requestStartedAt, abortedAt;
+    const h = setup(platform, undefined, { fetchImpl: request => new Promise((_resolve, reject) => {
+      requestStartedAt = Date.now();
+      request.options.signal.addEventListener("abort", () => { abortedAt = Date.now(); reject(new Error("aborted")); }, { once: true });
+    }) });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.equal(error.captureFailureReason, "timeout");
+      assert.equal(error.jsonCapture.deadline_ms, platform === "deepseek" ? 60000 : 25000);
+      return true;
+    });
+    assert.equal(abortedAt - requestStartedAt, platform === "deepseek" ? 60000 : 25000);
+    assert.equal(h.navigationListeners(), 0);
+  }
+});
+
+clockTest("Network: DeepSeek bridge allows 62 seconds for a lost reply; other platforms keep 27", { tickMs: 1000, maxElapsedMs: 150000 }, async () => {
+  for (const platform of ["deepseek", "gemini", "grok"]) {
+    let requestStartedAt;
+    const h = setup(platform, undefined, { beforeMessage: message => {
+      if (message.type === "request") requestStartedAt = Date.now();
+      if (message.type === "response") message.id = "lost-reply";
+    } });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.equal(error.captureFailureReason, "timeout");
+      return true;
+    });
+    assert.equal(Date.now() - requestStartedAt, platform === "deepseek" ? 62000 : 27000);
+    assert.equal(h.navigationListeners(), 0);
+  }
+});
+
+clockTest("DeepSeek: navigation, auth changes and timeouts abort every overlapping upload", { maxElapsedMs: 90000 }, async () => {
   for (const reason of ["navigate", "auth", "timeout"]) {
     const f = deepseekUploads();
     const aborted = [];
@@ -1236,10 +1292,10 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   await h.observe();
   const old = h.window.__capNetworkFetchState;
   // Open tabs may retain the preceding reader after extension reload.
-  old.version = platform === "deepseek" ? 35 : platform === "gemini" ? 20 : 23;
+  old.version = platform === "deepseek" ? 36 : platform === "gemini" ? 20 : 23;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 36 : platform === "grok" ? 24 : 21);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 37 : platform === "grok" ? 24 : 21);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

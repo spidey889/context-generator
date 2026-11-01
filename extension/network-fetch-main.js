@@ -3,7 +3,9 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 36 : platform === "grok" ? 24 : 21, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 37 : platform === "grok" ? 24 : 21, channel = "cap-context-network-json-v1";
+  // Keep the bridge's reply timeout two seconds beyond this download budget.
+  const captureTimeoutMs = platform === "deepseek" ? 60000 : 25000;
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the larger transcript cap does not raise
@@ -136,7 +138,7 @@
     if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable", captureDetail: "busy", captureRequestStage: "history" }, location.origin); return; }
     const controller = new AbortController();
     let storedAuth = null;
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: maxCaptureBytes, raw_bytes: 0, requests: 0 }, progress => {
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: captureTimeoutMs, raw_limit_bytes: maxCaptureBytes, raw_bytes: 0, requests: 0 }, progress => {
       if (request.measureOnly !== true) window.postMessage({ ...reply, type: "capture_progress", jsonCapture: progress }, location.origin);
     });
     metrics.stage("history");
@@ -156,7 +158,7 @@
     };
     active = controller;
     activeMeasurementId = measureOnly ? request.id : null;
-    const timer = setTimeout(() => controller.abort("capture_timeout"), 25000);
+    const timer = setTimeout(() => controller.abort("capture_timeout"), captureTimeoutMs);
     const check = () => {
       const now = current();
       if (controller.signal.aborted) throw new api.CaptureError("The capture request timed out or was cancelled.", controller.signal.reason === "capture_timeout" ? "timeout" : "request_failed", controller.signal.reason === "capture_timeout" ? "timeout" : "conversation_changed");

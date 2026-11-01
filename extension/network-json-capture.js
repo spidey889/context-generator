@@ -2,6 +2,7 @@
   const platform = ({ "gemini.google.com": "gemini", "grok.com": "grok", "chat.deepseek.com": "deepseek" })[location.hostname];
   if (!platform) return;
   const channel = "cap-context-network-json-v1";
+  const replyTimeoutMs = platform === "deepseek" ? 62000 : 27000;
   window.__capNetworkReplyObserver?.();
   const observeReply = event => {
     const reply = event.data;
@@ -34,8 +35,8 @@
     const receive = event => {
       const reply = event.data;
       if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id
-          && reply.version !== (platform === "deepseek" ? 36 : platform === "grok" ? 24 : 21)) metrics?.set({ hook_status: "version_mismatch" });
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 36 : platform === "grok" ? 24 : 21)) finish(true);
+          && reply.version !== (platform === "deepseek" ? 37 : platform === "grok" ? 24 : 21)) metrics?.set({ hook_status: "version_mismatch" });
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 37 : platform === "grok" ? 24 : 21)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
@@ -123,7 +124,7 @@
             resolve(capture);
           } catch (error) { reject(error); }
         };
-        const timer = setTimeout(() => { cleanup(); reject(captureError("Fast capture timed out. Refresh this chat and try again.", "timeout", "timeout", "history")); }, 27000);
+        const timer = setTimeout(() => { cleanup(); reject(captureError("Fast capture timed out. Refresh this chat and try again.", "timeout", "timeout", "history")); }, replyTimeoutMs);
         signal?.addEventListener("abort", onAbort, { once: true });
         window.addEventListener("message", receive);
         window.postMessage({ channel, platform, type: "request", id, ...before, ...(measureOnly ? { measureOnly: true } : {}), ...(omitLargeFiles ? { omitLargeFiles: true } : {}) }, location.origin);
@@ -141,9 +142,9 @@
   // picker snapshots stay in memory and never create telemetry reports.
   const readCapture = window.__capCaptureNetworkJson;
   window.__capMeasureNetworkJson = (expectedPath, signal, onEstimate) => readCapture(expectedPath,
-    globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }), true, signal, onEstimate);
+    globalThis.CapJsonCaptureMetrics.create({ deadline_ms: replyTimeoutMs }), true, signal, onEstimate);
   window.__capCaptureNetworkJson = async (expectedPath, omitLargeFiles = false, onProgress) => {
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }, onProgress);
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: replyTimeoutMs }, onProgress);
     metrics.stage("hook");
     try {
       const capture = await readCapture(expectedPath, metrics, false, undefined, undefined, omitLargeFiles);

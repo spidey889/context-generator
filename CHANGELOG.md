@@ -11,7 +11,8 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
   - Process up to four files per batch and retry each failed file once in the next batch alongside remaining files. Keep successful bodies and the original history instead of downloading them again within that capture.
   - Preserve original transcript order, file deduplication, shared byte/deadline limits and cancellation. A second failure keeps the existing missing-file notice; numeric-only measurement retains its no-retry behavior.
   - A queued retry no longer counts as a skipped file in final capture metrics. Advance DeepSeek hook readiness so existing pages replace the previous reader.
-  - Focused regressions verify retry ordering, four concurrent downloads, exact recovered content, single fetches for successful files and bounded permanent failures, alongside existing guard checks. Live DeepSeek recovery and throughput remain unverified.
+  - Give DeepSeek native capture 60 seconds instead of 25, with a matching 62-second reply timeout. User #49's capture reached the former 25-second cutoff after reading its history and only part of its attachments; Gemini/Grok keep their 25/27-second bounds. Timed regressions cover recovery beyond 25 seconds, the firm 60-second stop and the bridge grace period; actual native-account completion time remains unmeasured.
+  - Regressions verify retry ordering, four concurrent downloads, exact recovered content, single fetches for successful files and bounded permanent failures, alongside existing guard checks. The full local Node 22 gate passes regular/slow tests, database replay and installed Brave smoke. Live DeepSeek recovery and throughput remain unverified.
 
 ## 2026-10-31
 
