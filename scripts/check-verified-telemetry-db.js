@@ -473,6 +473,26 @@ async function main() {
     providerRules.model.values.sort(); expectedProviderRules.model.values.sort();
     equal(providerRules, expectedProviderRules);
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
+    // Notice edits are data-only, private, bounded and isolated from counters.
+    const noticeUser = (await one("select user_no from public.users order by user_no limit 1")).user_no;
+    const usersBeforeNotice = (await db.query("select to_jsonb(u) as row from public.users u order by user_no")).rows;
+    const upsertNotice = message => db.query(`insert into public.user_notices(user_no,message) values ($1,$2)
+      on conflict (user_no) do update set message=excluded.message`, [noticeUser, message]);
+    await upsertNotice("First message");
+    await upsertNotice("Updated message");
+    equal((await db.query("select * from public.user_notices")).rows, [{ user_no: noticeUser, message: "Updated message" }]);
+    for (const message of ["", " \n\t", "x".repeat(1001), "🙂".repeat(501)])
+      await rejectsCode(() => upsertNotice(message), "23514");
+    await upsertNotice("🙂".repeat(500));
+    await rejectsCode(() => db.query("insert into public.user_notices values (9223372036854775807,'Unknown user')"), "23503");
+    for (const role of ["anon", "authenticated"])
+      await asRole(role, () => rejectsCode(() => db.query("select * from public.user_notices"), "42501"));
+    await asRole("service_role", async () => {
+      equal((await one("select message from public.user_notices where user_no=$1", [noticeUser])).message, "🙂".repeat(500));
+      await rejectsCode(() => upsertNotice("Not allowed"), "42501");
+    });
+    equal((await db.query("select to_jsonb(u) as row from public.users u order by user_no")).rows, usersBeforeNotice);
+    equal((await one("select relrowsecurity from pg_class where oid='public.user_notices'::regclass")).relrowsecurity, true);
     // One default restore at the complete current schema covers file-size
     // reasons and provider evidence together, including the later validators.
     // Backup JSON tooling may reorder nested object keys; array order and all
@@ -483,6 +503,7 @@ async function main() {
     equal((await checkSnapshot({
       transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => reverseObjectKeys(value.row)),
       users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
+      user_notices: (await db.query("select to_jsonb(n) as row from public.user_notices n")).rows.map(value => value.row),
       migrations: appliedMigrations,
       users_sequence: await one("select last_value::text,is_called from public.users_user_no_seq")
     })).originalValuesPreserved, true);

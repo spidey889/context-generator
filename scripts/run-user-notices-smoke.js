@@ -14,12 +14,13 @@ async function run() {
   const entries = {}, requests = [];
   const installId = "11111111-1111-4111-8111-111111111111";
   const message = "Hello from Cap Context. Your transfer is ready to try again. 🙂 <b>This stays plain text.</b>";
-  const handler = createHandler({ entries, rateLimit: async () => ({ allowed: true }),
+  const handler = createHandler({ rateLimit: async () => ({ allowed: true }),
     env: { SUPABASE_TELEMETRY_FUNCTION_URL: "https://example.invalid", SUPABASE_TELEMETRY_PUBLISHABLE_KEY: "synthetic",
       TELEMETRY_RELAY_SECRET: "synthetic-private-relay-secret-0123456789abcdef" },
-    fetchImpl: async (_url, options) => new Response(JSON.stringify({
-      userNumber: JSON.parse(options.body).install_id === installId ? 49 : 50
-    }))
+    fetchImpl: async (_url, options) => {
+      const userNumber = JSON.parse(options.body).install_id === installId ? 49 : 50;
+      return new Response(JSON.stringify({ userNumber, message: entries[userNumber] ?? null }));
+    }
   });
   const server = http.createServer(async (req, res) => {
     if (req.url === "/api/user-notices") {

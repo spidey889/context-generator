@@ -1,22 +1,23 @@
 # User notices
 
-To send a notice, edit [`backend/user-notices.json`](../backend/user-notices.json):
+To send a notice, upsert `public.user_notices` in the existing Cap Context Supabase project (`iqkzynzxbmemhtiupwwu`), using private operator database access:
 
-```json
-{
-  "49": "Your transfer should work now. Give it another try :)"
-}
+```sql
+insert into public.user_notices (user_no, message)
+values (49, 'Your transfer should work now. Give it another try :)')
+on conflict (user_no) do update set message = excluded.message
+returning user_no;
 ```
 
-Use the existing Supabase `users.user_no` number as the key and the exact message as its value. Keep messages to 1,000 characters. The file contains one current message per user; preserve other users' entries when editing it. Messages are plain text, including literal markup, and are tracked repository content. Never put credentials or chat contents in them.
+Use the existing `users.user_no` number and exact message. The primary/foreign key allows one current message per existing user; an unknown number fails instead of allocating a user. Keep messages nonblank and within 1,000 JavaScript UTF-16 units (an emoji can count as two). Other users' rows stay unchanged. Messages are plain text, including literal markup; never put credentials or chat contents in them.
 
-After the initial rollout below, deploy the backend with this file change to send the notice. An extension source edit or Chrome Store submission is unnecessary for later messages. A feature-branch push alone is not a production deployment. When the owner gives a number and message, update this file, validate it with `node --test test/user-notices.test.js`, and deploy within the owner's authorized scope. Do not claim delivery merely because the backend is deployed: the user must open a supported chat with the updated extension.
+When the owner gives a number and message, validate them, execute the upsert through `supabase db query --linked --project-ref iqkzynzxbmemhtiupwwu` and verify the stored row and targeted `/api/user-notices` response. Use a SQL file with `--file` for complex text and escape SQL quotes correctly; never interpolate unescaped message text into a shell command. A normal send needs no code edits, tests, commits, merges or deployments. Do not claim the user saw it merely because the database/API contains it: there are no delivery receipts.
 
-The current file preserves the previously approved notice for #49. Its old local seen flag is recognized, so users who already saw that bundled message do not see it again.
+The storage move preserves the exact live messages for #1 and #49. Existing hashes and the original #49 local seen flag remain recognized, so migration does not resend them.
 
 ## Delivery
 
-The worker POSTs only the existing installation UUID to `/api/user-notices`. An exact Vercel rewrite dispatches to the notice module through the existing telemetry API entry, keeping within the project's twelve-function limit. The notice module uses the existing private telemetry relay to read that installation's `users.user_no`; the client cannot choose a user number. The read neither creates a user nor changes counters or transfer diagnostics. Vercel returns only the matched notice, not the messages file or user directory. The existing relay URL, publishable key and private relay secret are reused; the database key stays in Edge.
+The worker POSTs only the existing installation UUID to `/api/user-notices`. An exact Vercel rewrite dispatches to the separate notice module through the existing telemetry API entry, keeping within the project's twelve-function limit. The existing private telemetry relay resolves `users.user_no`, then reads only that number's `user_notices.message`; the client cannot choose a user number. RLS has no client policies, and anon/authenticated have no table grants. Edge's service role has SELECT only; operator access writes messages. The read neither creates users nor changes counters or transfer diagnostics. Vercel returns only the matched notice. Existing relay configuration is reused; the database key stays in Edge.
 
 A visible supported chat with a ready composer checks through the worker. The worker shares a five-minute cache across tabs and restarts; failed requests retry after one minute. Composer/visibility changes and a lifecycle-owned one-minute timer give an already open page another opportunity. Hidden tabs, sign-in pages, active transfers, the picker, handoff and copy/recovery notices wait. A refused display stays pending. Firefox diagnostics opt-out prevents installation-linked notice checks.
 
@@ -24,18 +25,18 @@ The notice uses the fallback-copy confirmation's existing glass material, 80px t
 
 The stable notice ID hashes the user number and exact message. Changing the text makes a new notice; reusing identical text keeps the same ID and does not show it again. Delivery is serialized across tabs, with IDs retained in local extension storage across page/browser/worker restarts. The cache is tied to the installation UUID so an identity change cannot reuse another user's message. A reservation is persisted before display to avoid repeats if the acknowledgement is lost; explicit refusal or a definitely absent recipient releases it. A crash between reservation and display can therefore lose a notice rather than repeat it. Clearing extension storage resets local delivery history. There is no server delivery/read receipt.
 
-Removing an entry stops future successful fetches from returning it. An already fetched, unseen message can still display while offline; removing an entry does not recall it. This is a small current-message system, not an inbox or a guaranteed delivery queue.
+Removing a row stops future successful fetches from returning it. An already fetched, unseen message can still display while offline; removing a row does not recall it. This is a small current-message system, not an inbox or a guaranteed delivery queue.
 
-## Initial rollout
+## Storage rollout (one time)
 
-1. Deploy the updated `transfer-telemetry` Edge function, including `user-notices.mjs`. Its existing authenticated writer continues to handle ordinary telemetry; the new operation only reads a user number. No SQL migration is needed.
-2. Deploy the Vercel backend, including `backend/user-notices.js` and `backend/user-notices.json`.
-3. Publish one extension update containing `extension/user-notices.js` and the content/worker integration. Existing version 40 clients cannot fetch remote notices. Firefox packaging loads the same worker dependency in order.
+1. Back up/restore-check the existing database, apply `20261101170000_user_notices.sql`, and copy the exact current live messages into the table. Keep historical migration-number differences separate; never use `--include-all` to replay unrelated SQL.
+2. Deploy `transfer-telemetry` with the new optional `include_message: true` lookup. Number-only requests remain supported so the old Vercel backend works during rollout or rollback.
+3. Deploy the updated Vercel notice module once. Its extension-facing response and stable hash are unchanged; existing notice-compatible extensions need no update. Remove the old JSON source rather than retaining two sources of truth.
 
-This implementation was prepared locally; these rollout steps are separate actions.
+Backups include `user_notices`; older snapshots without the table remain restorable.
 
 ## Verification
 
-Five focused tests in `test/user-notices.test.js` cover authenticated targeting, once-only delivery and later messages, uncertain acknowledgements, privacy/failure handling, and legacy/installation history. The existing background/content tests cover sender boundaries, visible-page gating, exact text, Dismiss and expiry. Firefox packaging checks the new dependency.
+The focused tests in `test/user-notices.test.js` cover authenticated database targeting and replacement, once-only delivery and later messages, uncertain acknowledgements, privacy/failure handling, and legacy/installation history. Database replay covers the actual table's bounds, foreign key, upsert, grants/RLS, unchanged counters and backup restoration. The existing background/content tests cover sender boundaries, visible-page gating, exact text, Dismiss and expiry.
 
 `node scripts/run-user-notices-smoke.js` runs the actual unpacked extension in a new isolated Brave window. Synthetic lookups and a backend-only message change exercise automatic delivery, the real fallback Copy confirmation, matching notice styles/transitions, literal text, Dismiss, ten-second expiry, no-repeat after reload and another user's exclusion. It runs in regular browser CI. Optional `CAP_CONTEXT_NOTICE_SCREENSHOT_DIR` saves comparison screenshots outside the repository.

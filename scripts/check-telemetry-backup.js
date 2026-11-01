@@ -82,9 +82,11 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     assert.equal(transferKeys.length, 1, "Snapshot must contain exactly one transfer table");
     const transferTable = transferKeys[0];
     const tables = [transferTable, "users"];
-    if (Object.hasOwn(snapshot, "provider_failures")) {
-      assert.ok(Array.isArray(snapshot.provider_failures));
-      tables.push("provider_failures");
+    for (const table of ["provider_failures", "user_notices"]) {
+      if (Object.hasOwn(snapshot, table)) {
+        assert.ok(Array.isArray(snapshot[table]));
+        tables.push(table);
+      }
     }
     assert.ok(Array.isArray(snapshot[transferTable]) && Array.isArray(snapshot.users));
     assert.ok(Array.isArray(snapshot.migrations) && snapshot.migrations.length > 0);
@@ -292,6 +294,7 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
       "Restored next identity must be above the existing maximum");
     return { transferEvents: snapshot[transferTable].length, users: snapshot.users.length,
       providerFailures: snapshot.provider_failures?.length || 0,
+      userNotices: snapshot.user_notices?.length || 0,
       capturedMigrations: captured.length, pendingMigrations: pending.length,
       originalColumnHashes: hashes, originalValuesPreserved: removedColumns.length === 0 && reclassifiedFileSizeFailures === 0,
       removedColumns, retainedValuesPreserved: true, reclassifiedFileSizeFailures,

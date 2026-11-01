@@ -6,7 +6,7 @@ const { createHandler, noticeForUser } = require("../backend/user-notices");
 const INSTALL = "11111111-1111-4111-8111-111111111111";
 const KEY = "context-generator-user-notices-v1";
 const entries = { 49: "Your transfer is ready to try again. 🙂", 50: "A different user's message." };
-const notice = noticeForUser(49, entries);
+const notice = noticeForUser(49, entries[49]);
 const sender = tabId => ({ tab: { id: tabId }, documentId: `document-${tabId}` });
 const json = value => new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
 
@@ -37,25 +37,36 @@ const request = changes => ({ method: "POST", headers: { "content-type": "applic
 
 test("notice backend authenticates its lookup and returns only the matching user message", async () => {
   const { createTelemetryHandler } = await import("../supabase/functions/transfer-telemetry/handler.mjs");
-  let selectedUser, queries = 0;
+  let selectedUser, lookupError = false;
+  const queries = [];
+  const messages = { ...entries };
   const edge = createTelemetryHandler({
     getEnv: name => ({ ...env, SUPABASE_URL: "https://example.invalid", SUPABASE_SERVICE_ROLE_KEY: "private-test-key" })[name],
     createClient: () => ({ from: table => ({ select: column => ({ eq: (key, id) => ({ maybeSingle: async () => {
-      assert.deepEqual({ table, column, key, id }, { table: "users", column: "user_no", key: "install_id", id: INSTALL });
-      queries++; return { data: selectedUser === null ? null : { user_no: selectedUser } };
+      queries.push({ table, column, key, id });
+      if (table === "users") {
+        assert.deepEqual({ column, key, id }, { column: "user_no", key: "install_id", id: INSTALL });
+        return { data: selectedUser === null ? null : { user_no: selectedUser } };
+      }
+      assert.deepEqual({ table, column, key, id }, { table: "user_notices", column: "message", key: "user_no", id: selectedUser });
+      return { data: messages[selectedUser] ? { message: messages[selectedUser] } : null,
+        error: lookupError ? { message: "PRIVATE_DATABASE_ERROR" } : null };
     } }) }) }) })
   });
-  for (const userNumber of [49, 50, null]) {
+  for (const userNumber of [49, 50, 51, null, 49]) {
     selectedUser = userNumber;
+    // Change stored data after constructing the relay; no code/deployment or
+    // extension change is involved. Escaped text exceeds the old 128-byte reply.
+    if (queries.length) messages[49] = "\n".repeat(998) + "hi";
     const calls = [];
-    const handler = createHandler({ entries, env, rateLimit: async () => ({ allowed: true }), fetchImpl: async (...args) => {
+    const handler = createHandler({ env, rateLimit: async () => ({ allowed: true }), fetchImpl: async (...args) => {
       calls.push(args); return edge(new Request(args[0], args[1]));
     } });
     const res = response(); await handler(request(), res);
     assert.equal(res.code, 200);
     assert.equal(res.headers["cache-control"], "no-store");
-    assert.deepEqual(res.body, { notice: noticeForUser(userNumber, entries) });
-    assert.deepEqual(JSON.parse(calls[0][1].body), { kind: "user_notice_lookup", install_id: INSTALL });
+    assert.deepEqual(res.body, { notice: noticeForUser(userNumber, messages[userNumber]) });
+    assert.deepEqual(JSON.parse(calls[0][1].body), { kind: "user_notice_lookup", install_id: INSTALL, include_message: true });
     assert.equal(calls[0][1].headers["X-Cap-Context-Relay"], env.TELEMETRY_RELAY_SECRET);
     assert.doesNotMatch(JSON.stringify(res.body), /install_id|userNumber|private-test|public-test/);
   }
@@ -64,10 +75,20 @@ test("notice backend authenticates its lookup and returns only the matching user
     body: JSON.stringify({ kind: "user_notice_lookup", install_id: INSTALL }) }));
   assert.equal(unauthorized.status, 401);
   const rejected = response();
-  await createHandler({ entries, env, fetchImpl: () => assert.fail("Client cannot select another user") })(
+  await createHandler({ env, fetchImpl: () => assert.fail("Client cannot select another user") })(
     request({ body: { install_id: INSTALL, userNumber: 50 } }), rejected);
   assert.equal(rejected.code, 400);
-  assert.equal(queries, 3);
+  assert.equal(queries.length, 9);
+  // Keep number-only lookups compatible while the new Edge function rolls out
+  // before Vercel. Failure to read a notice must not leak database details.
+  const lookup = includeMessage => edge(new Request(env.SUPABASE_TELEMETRY_FUNCTION_URL, { method: "POST",
+    headers: { "content-type": "application/json", "x-cap-context-relay": env.TELEMETRY_RELAY_SECRET },
+    body: JSON.stringify({ kind: "user_notice_lookup", install_id: INSTALL, ...(includeMessage ? { include_message: true } : {}) }) }));
+  assert.deepEqual(await (await lookup(false)).json(), { userNumber: 49 });
+  lookupError = true;
+  const unavailable = await lookup(true);
+  assert.equal(unavailable.status, 503);
+  assert.deepEqual(await unavailable.json(), { code: "notices_unavailable" });
   const config = require("../vercel.json");
   assert.deepEqual(config.rewrites.find(rule => rule.source === "/api/user-notices"),
     { source: "/api/user-notices", destination: "/api/telemetry?cap_user_notices=1" });
@@ -90,7 +111,7 @@ test("notice delivery waits for a free tab, survives restarts and accepts later 
   assert.equal((await restarted.client.check(sender(3))).shown, false);
   assert.equal(restarted.fetched.length, 0);
   assert.equal(restarted.sent.length, 0);
-  const newer = noticeForUser(49, { 49: "A later backend message" });
+  const newer = noticeForUser(49, "A later backend message");
   const refreshed = delivery({ storage: first.storage, now: () => Date.now() + 300001,
     fetchImpl: async () => json({ notice: newer }) });
   assert.equal((await refreshed.client.check(sender(4))).shown, true);
@@ -128,14 +149,14 @@ test("notice checks respect privacy choices and fail quietly when the backend is
 });
 
 test("notice history survives upgrades and a changed installation cannot receive the old cached message", async () => {
-  const original = noticeForUser(49);
+  const original = noticeForUser(49, "Hey, saw your last DeepSeek transfer failed. We found an issue and fixed it. Your transfer should work now. Give it another try :)");
   const run = delivery({ storage: { "context-generator-install-id-v1": INSTALL,
     "context-generator-deepseek-retry-notice-seen-v1": true }, fetchImpl: async () => json({ notice: original }) });
   assert.equal((await run.client.check(sender(1))).shown, false);
   assert.equal(run.sent.length, 0);
   assert.ok(run.storage[KEY].seen.includes(original.id));
   let ready = false;
-  const other = noticeForUser(50, entries);
+  const other = noticeForUser(50, entries[50]);
   const changed = delivery({ fetchImpl: async (_url, options) => json({
     notice: JSON.parse(options.body).install_id === INSTALL ? notice : other
   }), sendMessage: async () => ({ shown: ready }) });

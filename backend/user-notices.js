@@ -1,19 +1,16 @@
 const { createHash } = require("node:crypto");
-const messages = require("./user-notices.json");
 const { applyCorsHeaders, isValidPreflightRequest, isTrustedExtensionRequest } = require("../api/request-security");
 const { getHeader, parseBoundedJsonBody } = require("../api/request-validation");
 const { consumeTelemetryRateLimit } = require("../api/telemetry-rate-limit");
 
-// The file is server data, never executable client code. Keeping one current
-// message per number makes sending a notice a backend-only text edit.
-function noticeForUser(userNumber, entries = messages) {
+// Preserve IDs across the JSON-to-Supabase move so seen messages stay seen.
+function noticeForUser(userNumber, message) {
   if (!Number.isSafeInteger(userNumber) || userNumber < 1) return null;
-  const message = entries[String(userNumber)];
   if (typeof message !== "string" || !message.trim() || message.length > 1000) return null;
   return { id: createHash("sha256").update(`${userNumber}\n${message}`).digest("hex"), message };
 }
 
-function createHandler({ fetchImpl = (...args) => fetch(...args), entries = messages, timeoutMs = 5000,
+function createHandler({ fetchImpl = (...args) => fetch(...args), timeoutMs = 5000,
   rateLimit = consumeTelemetryRateLimit, env = process.env } = {}) {
   return async (req, res) => {
     const cors = applyCorsHeaders(req, res);
@@ -32,7 +29,6 @@ function createHandler({ fetchImpl = (...args) => fetch(...args), entries = mess
     if (!input || Object.keys(input).length !== 1 || typeof input.install_id !== "string"
         || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.install_id))
       return res.status(400).json({ code: "invalid_payload" });
-    if (!Object.keys(entries).length) return res.status(200).json({ notice: null });
     const upstream = env.SUPABASE_TELEMETRY_FUNCTION_URL, key = env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
     const secret = env.TELEMETRY_RELAY_SECRET;
     if (!upstream || !key || !secret || Buffer.byteLength(secret) < 32)
@@ -45,20 +41,23 @@ function createHandler({ fetchImpl = (...args) => fetch(...args), entries = mess
     const controller = new AbortController();
     let timer;
     try {
-      // Reuse the authenticated relay's existing read access to users. The
-      // extension never supplies a user number or receives the users directory.
+      // Only Edge reads user_notices with its private database credentials.
+      // The extension never supplies a user number or receives the directory.
       const result = await Promise.race([(async () => {
         const response = await fetchImpl(upstream, {
           method: "POST", redirect: "error", signal: controller.signal,
           headers: { "Content-Type": "application/json", apikey: key, "X-Cap-Context-Relay": secret },
-          body: JSON.stringify({ kind: "user_notice_lookup", install_id: input.install_id })
+          body: JSON.stringify({ kind: "user_notice_lookup", install_id: input.install_id, include_message: true })
         });
         if (!response.ok) throw new Error("lookup_failed");
         const body = await response.text();
-        if (body.length > 128) throw new Error("lookup_invalid");
-        const { userNumber } = JSON.parse(body);
+        if (body.length > 7000) throw new Error("lookup_invalid");
+        const { userNumber, message } = JSON.parse(body);
         if (userNumber !== null && (!Number.isSafeInteger(userNumber) || userNumber < 1)) throw new Error("lookup_invalid");
-        return noticeForUser(userNumber, entries);
+        if (message === null) return null;
+        const notice = noticeForUser(userNumber, message);
+        if (!notice) throw new Error("lookup_invalid");
+        return notice;
       })(), new Promise((_, reject) => {
         timer = setTimeout(() => { controller.abort(); reject(new Error("lookup_timeout")); }, timeoutMs);
       })]);

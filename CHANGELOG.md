@@ -6,6 +6,10 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-11-01
 
+- **Move user notices from a deployed JSON file to Supabase `user_notices`.** Keep one current message per existing user number, with private operator writes and read-only access through the existing authenticated relay. Future sends are database upserts, without commits, merges, deployments or extension changes.
+  - Preserve the exact message hash, local seen history, polling, ten-second notice and Dismiss behavior. Copy existing live messages unchanged during the storage move so migration does not resend them.
+  - Cover live-data replacement, targeting, relay failures, table constraints/access and backup restoration with focused checks. Keep number-only relay lookups compatible during the one-time Edge/Vercel rollout.
+
 - **Fix the notice branch's Offline checks and use version 1.4.40.**
   - The integer manifest version `40` failed the existing three-part telemetry version contract. Summary requests carrying that metadata were rejected as `invalid_schema`, and worker outbox validation rejected the same reports.
   - Use the owner's requested `1.4.40` version instead of changing the worker, backend, Edge or receipt validation rules. The version remains exact in reports and signed receipts.

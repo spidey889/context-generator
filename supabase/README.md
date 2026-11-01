@@ -74,6 +74,8 @@ Retained metadata is kept at the current small volume. There is no automatic eve
 
 RLS is enabled on both tables with no client policies. anon and authenticated cannot access tables, views, sequences or RPC. service_role receives explicit SELECT/INSERT/UPDATE and necessary sequence/RPC permissions, without DELETE/TRUNCATE. Functions are security invoker with empty search paths; there are no active public reporting views. New objects created by the application postgres role default private. Hosted postgres cannot change platform-owned supabase_admin defaults: application migrations must run as postgres, never impersonate the managed owner.
 
+The separate `user_notices` table also has RLS with no client policies. It stores only `user_no` (a primary/foreign key to `users`) and `message`. Its service-role grant is SELECT only; operators upsert through private database access. This changes notice data without a deployment and leaves telemetry counters untouched. [Notice operations](../docs/user-notices.md) describe sending and delivery limits.
+
 Vercel and Edge require the same private TELEMETRY_RELAY_SECRET and TELEMETRY_SIGNING_KEY (at least 32 UTF-8 bytes). A publishable key alone cannot invoke the Edge writer. Existing unsigned extension reports remain diagnostics through the Vercel relay. The summary response includes both legacy v1 and timestamped v2 receipts. Current keys must remain stable while seven-day retry queues can contain receipts; future key rotation needs verification-key overlap or a drained queue, not an immediate destructive replacement.
 
 Deploy in this order: backup/restore check → migration dry run → additive migrations → matching backend/Edge secrets → Edge → Vercel → extension. During an Edge/backend relay-secret mismatch, requests return a retryable configuration failure; durable queue entries survive it. Never ship proof-producing code to an old validator/schema. Roll back code with the updated compatible validator/schema retained, rather than dropping new columns or rewriting migration history.
@@ -90,7 +92,7 @@ The standalone install index was removed after hosted EXPLAIN confirmed the reta
 
 ## Backup and verification
 
-scripts/backup-telemetry.ps1 exports both application tables, the user-number sequence, recorded migration SQL, public function/view definitions and cron jobs in one consistent query. It encrypts the artifact with Windows DPAPI outside Git and verifies the saved bytes decrypt correctly. DPAPI recovery needs the same Windows credential/profile context; retain that context or re-encrypt under your off-device backup policy. This is an application recovery export, not a full managed-project/Auth/Storage/PITR backup. The hosted backup list currently exposes no available physical restore points or PITR.
+scripts/backup-telemetry.ps1 exports the transfer, user and user-notice tables, the user-number sequence, recorded migration SQL, public function/view definitions and cron jobs in one consistent query. It encrypts the artifact with Windows DPAPI outside Git and verifies the saved bytes decrypt correctly. DPAPI recovery needs the same Windows credential/profile context; retain that context or re-encrypt under your off-device backup policy. This is an application recovery export, not a full managed-project/Auth/Storage/PITR backup. The hosted backup list currently exposes no available physical restore points or PITR.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/backup-telemetry.ps1
