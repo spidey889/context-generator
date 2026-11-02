@@ -17,20 +17,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;1,400&amp;display=swap" rel="stylesheet">
   <title>Privacy Policy — Cap Context</title>
+  <!-- Keep policy wording aligned with PRIVACY.md. -->
   <style>
     :root {
       --night: #09090d;
       --night-soft: #111117;
       --paper: #f5f3ed;
-      --paper-deep: #ebe8df;
       --ink: #17161c;
-      --ink-soft: #64616b;
       --line: rgba(23, 22, 28, 0.13);
       --line-dark: rgba(255, 255, 255, 0.11);
       --violet: #a87cff;
       --violet-deep: #7442dd;
       --mint: #8de7c1;
-      --amber: #ffcb6b;
       --container: 1180px;
       --sans: "Segoe UI Variable", "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
       --serif: "EB Garamond", Iowan Old Style, Baskerville, "Times New Roman", serif;
@@ -725,9 +723,9 @@
             <ul class="policy-list">
               <li><strong>Notice Dismissals:</strong> When you click Dismiss on a Cap Context user notice, updated clients report the existing installation identifier and notice ID so the backend can log the corresponding installation's internal user number and notice ID. These logs include no notice/chat text or page URL. Automatic expiration does not report a click, and optional diagnostics consent applies.</li>
               <li><strong>Emergency Settings:</strong> Updated extensions periodically fetch a small public settings file from our backend to pause broken features. These requests do not include conversations, installation identifiers, page URLs, AI account data or cookies. The last valid settings are cached locally and these checks operate independently of optional diagnostics.</li>
-              <li><strong>Picker Privacy:</strong> With Speed enabled, opening the destination picker reads a saved conversation from its current AI website and keeps the capture temporarily in source-page memory. Closing the picker or turning Speed off discards it. Picker interaction does not send conversation text to our backend or another destination. The picker may preconnect to supported AI websites; those preconnections do not include chat content.</li>
+              <li><strong>Picker Privacy:</strong> Opening the destination picker reads a saved conversation from its current AI website and keeps the capture temporarily in source-page memory. Closing the picker discards it. Picker interaction does not send conversation text to our backend or another destination. The picker may preconnect to supported AI websites; those preconnections do not include chat content.</li>
               <li><strong>Data Transmission:</strong> Summarization and transfer start after you select a destination. Chats under 10,000 characters stay in your browser; larger chats are sent to our backend for summarization.</li>
-              <li><strong>Processing:</strong> For chats over 1,000,000 characters, we may use NVIDIA models. According to NVIDIA’s policy, NVIDIA may use the data it receives to train or improve its models.</li>
+              <li><strong>Processing:</strong> Depending on the route, remote summaries are processed through OpenRouter, TokenHarbor, Google Gemini or Mistral. Ordinary OpenRouter requests exclude endpoints that collect user data. For chats over 1,000,000 characters, we may use NVIDIA models. According to NVIDIA’s policy, NVIDIA may use the data it receives to train or improve its models. If summarization fails, the complete captured conversation remains available for local transfer or manual copying.</li>
               <li><strong>Purpose:</strong> Conversation data is used to provide summarization. Metadata-only transfer analytics is used to measure usage and diagnose transfer reliability.</li>
               <li><strong>Transfer Analytics:</strong> Each transfer attempt sends metadata to our Supabase analytics system: a random extension-install identifier, a random attempt identifier, timestamp, source and destination platform, captured character count when known, success or failure status, the last predefined pipeline stage reached, a predefined non-sensitive failure category, extension version, and the serving model when recorded. The closed stages cover intent, capture, summary request/response/completion, paste, and completion. Telemetry never includes chat text, generated summaries, page URLs, stack traces, arbitrary error messages, or provider response bodies. The random install identifier is created once in local extension storage and is not tied to a Cap Context account, name, email address, or AI account. When an install's first transfer attempt reaches our database, including local carries and empty or unfinished attempts, one protected internal <code>users</code> row assigns a sequential number and cosmetic random name. It tracks lifetime and daily counts of verified summaries and new successful local transfers, plus daily reported failures. Daily counters reset at midnight in Asia/Kolkata (IST). Empty-chat attempts do not create a counted failure. These labels identify an extension installation, not a person or AI account; the aggregate row contains no conversation content.</li>
               <li><strong>Transfer Diagnostics:</strong> Updated clients send bounded diagnostic codes, component timelines, capture method and turn/size counts, capture request steps/statuses and validation categories, summary size/timing and fixed provider failure categories/statuses, runtime error types and packaged extension filenames with numeric line references, retry/recovery counts, browser family, visibility/online flags and editor presence/connection/draft/insertion/verification observations. Successful attempts include measurements for comparison. Claude transfers can also include a fixed destination-page label (such as new chat, login, or saved chat with its ID removed), the platform/new-chat checks, and the number of detected conversation messages. These contain no chat or summary text, raw page URLs, query strings, fragments, chat/project IDs, account details, stacks, arbitrary errors or provider bodies. Draft observations record only presence/length. Unknown causes remain explicitly unknown; these are client reports, not verified identities or causes.</li>
