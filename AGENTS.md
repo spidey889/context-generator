@@ -3,7 +3,9 @@
 ## Start here
 
 - Always work from `C:\Users\vinit\Desktop\context-generator`. Do not use older OneDrive copies or `C:\Users\vinit\Desktop\coding projects\context-generator` unless the user explicitly asks.
-- At the beginning of every new chat, always read `AGENTS.md`, `LOGIC.md`, `CHANGELOG.md` and `To-do.md` when they exist. Create missing `LOGIC.md` or `CHANGELOG.md` when needed.
+- At the beginning of every new chat, read `AGENTS.md` and `To-do.md` when they exist.
+- For startup context, read only the newest three dated sections at the top of `CHANGELOG.md`, covering the last few days of recorded changes. Read older entries only when relevant to the task; do not read the full changelog by default. Git retains the full history; do not create a changelog archive.
+- Read `LOGIC.md` only when the task touches the architecture, behavior or verification it documents. Read the relevant sections and applicable invariants, rather than the whole file at startup. Create missing `LOGIC.md` or `CHANGELOG.md` only when needed for the task.
 - Use [MARAUDERS_MAP.md](MARAUDERS_MAP.md) as an optional navigation guide when finding files, code ownership or connections between components. Reading it is not required for every task.
 - `To-do.md` is the local source of truth for pending tasks. When the owner asks "What's next?", including at the start of a new session, answer from this file. If it is empty, say no tasks are listed; if missing, create an empty list. Do not repopulate it from old trackers or remembered tasks unless asked. Reading the list does not authorize automatically executing its tasks. Keep this file local and Git-ignored; never commit or push its contents.
 - Keep work lean: inspect the relevant files, use focused checks and avoid unrelated changes. Preserve other work already present in the checkout.
