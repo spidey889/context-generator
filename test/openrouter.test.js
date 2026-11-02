@@ -8,7 +8,7 @@ const PAUSED = [
   ["OPENROUTER_QWEN_ENABLED", "qwen/qwen3.8-27b:free"],
   ["OPENROUTER_GEMMA_ENABLED", "google/gemma-4-26b-a4b-it:free"]
 ];
-const ENV_NAMES = ["OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_APODEX_ENABLED",
+const ENV_NAMES = ["OPENROUTER_API_KEY", "OPENROUTER_MAIN_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_APODEX_ENABLED",
   "OPENROUTER_LING_ENABLED", "OPENROUTER_DOTS_ENABLED",
   ...PAUSED.map(([name]) => name), "GEMINI_API_KEY", "MISTRAL_API_KEY", "MISTRAL_ENABLED"];
 function isolateEnv(values = {}) {
@@ -87,6 +87,28 @@ test("Dots serves first with full input, private free routing, usage and truthfu
     assert.equal(tiny.timing.openrouterMs, 0);
     assert.deepEqual(tiny.timing.openrouterModelsTried, []);
     assert.equal(calls.length, 1);
+  } finally { global.fetch = originalFetch; restore(); }
+});
+
+test("ordinary summaries through 1M use the main-account key, with the existing key as a configuration fallback", async () => {
+  const restore = isolateEnv();
+  const originalFetch = global.fetch;
+  const authorizations = [];
+  global.fetch = async (_url, options) => {
+    authorizations.push(options.headers.Authorization);
+    return response();
+  };
+  try {
+    const conversation = "x".repeat(1000000);
+    process.env.OPENROUTER_API_KEY = "test-large";
+    process.env.OPENROUTER_MAIN_API_KEY = "  test-main  ";
+    await request(conversation);
+    delete process.env.OPENROUTER_API_KEY;
+    await request(conversation);
+    process.env.OPENROUTER_API_KEY = "test-large";
+    process.env.OPENROUTER_MAIN_API_KEY = "   ";
+    await request(conversation);
+    assert.deepEqual(authorizations, ["Bearer test-main", "Bearer test-main", "Bearer test-large"]);
   } finally { global.fetch = originalFetch; restore(); }
 });
 

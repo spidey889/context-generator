@@ -27,7 +27,7 @@ For generated summaries of up to 350,000 characters, routes run in this order. M
 
 | Order | Route | Server-side configuration |
 | --- | --- | --- |
-| 1 | OpenRouter `dots-studio/dots-3-note-preview:free` | `OPENROUTER_API_KEY`; enabled by default, `OPENROUTER_DOTS_ENABLED=false` pauses it |
+| 1 | OpenRouter `dots-studio/dots-3-note-preview:free` | `OPENROUTER_MAIN_API_KEY`, or `OPENROUTER_API_KEY` when absent/blank; enabled by default, `OPENROUTER_DOTS_ENABLED=false` pauses it |
 | 2 | OpenRouter `qwen/qwen3.8-27b:free`, then `google/gemma-4-26b-a4b-it:free` | Paused by default; enable individually with `OPENROUTER_QWEN_ENABLED=true` or `OPENROUTER_GEMMA_ENABLED=true` |
 | 3 | TokenHarbor `deepseek-v4.1-flash:free`, main key | `TOKENHARBOR_API_KEY`; the global `TOKENHARBOR_ENABLED` and model's `enabled` flag are code switches in `api/summarize.js` |
 | 4 | TokenHarbor `deepseek-v4.1-flash:free`, second key | Optional `TOKENHARBOR_BACKUP_API_KEY`; shares the main route's time slice |
@@ -38,6 +38,8 @@ For generated summaries of up to 350,000 characters, routes run in this order. M
 `OPENROUTER_ENABLED=false` bypasses every OpenRouter model. Enabling a paused candidate requires the exact value `true`; check its availability and data policy first. The main TokenHarbor key uses the first enabled `TOKENHARBOR_MODELS` entry, currently DeepSeek. The backup uses the pinned DeepSeek model, including if the main key is absent; blank or duplicate keys are skipped. A failed main key may fall back to the second key only while shared time remains. There is no picker setting, random model selection, paid substitute or automatic provider model list. Ling and Apodex are retired from current routing; historical Ling/Space Bunny 2 receipts remain valid.
 
 For **350,001–1,000,000 characters**, use only enabled OpenRouter Dots once, then the first configured TokenHarbor key once. No Qwen, Gemma, second TokenHarbor attempt, Google or Mistral route runs for these larger inputs. A backup key may be the first configured key when the main key is absent. If neither attempt succeeds, return the exact local carry.
+
+The optional `OPENROUTER_MAIN_API_KEY` selects the main account for this ordinary endpoint through 1M characters. An absent/blank setting keeps the existing `OPENROUTER_API_KEY`; provider errors do not switch between these OpenRouter keys. Above-1M part requests and final consolidation keep using `OPENROUTER_API_KEY` through `/api/large-summary`, even though each individual part is smaller than 1M. Configure the new key server-side and deploy the backend to activate the split.
 
 ## Time budgets and retry rules
 

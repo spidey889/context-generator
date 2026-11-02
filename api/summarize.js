@@ -323,7 +323,9 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
 
   try {
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    const openrouterApiKey = process.env.OPENROUTER_API_KEY;
+    // Keep the existing credential on /large-summary; switch ordinary chats only
+    // after the main-account key is configured, without interrupting rollout.
+    const openrouterApiKey = process.env.OPENROUTER_MAIN_API_KEY?.trim() || process.env.OPENROUTER_API_KEY;
     const mistralApiKey = process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY;
     const tokenharborApiKey = TOKENHARBOR_ENABLED ? process.env.TOKENHARBOR_API_KEY : undefined;
     const tokenharborBackupApiKey = TOKENHARBOR_ENABLED ? process.env.TOKENHARBOR_BACKUP_API_KEY : undefined;

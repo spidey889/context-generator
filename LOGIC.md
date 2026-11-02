@@ -534,7 +534,7 @@ OpenRouter: dots-studio/dots-3-note-preview:free
 | --- | --- | --- |
 | TokenHarbor DeepSeek `deepseek-v4.1-flash:free` | `TOKENHARBOR_API_KEY`; global `TOKENHARBOR_ENABLED` and model's `enabled` flag in `api/summarize.js` | Enabled with server-side key |
 | Same DeepSeek, second key | `TOKENHARBOR_BACKUP_API_KEY`; same global switch | Backup within remaining shared time |
-| All OpenRouter routes | `OPENROUTER_API_KEY`; `OPENROUTER_ENABLED=false` bypasses all | Enabled with key |
+| Ordinary OpenRouter routes (through 1M characters) | `OPENROUTER_MAIN_API_KEY`, falling back to `OPENROUTER_API_KEY` when absent/blank; `OPENROUTER_ENABLED=false` bypasses all | Enabled with key |
 | Dots `dots-studio/dots-3-note-preview:free` | `OPENROUTER_DOTS_ENABLED=false` pauses | Enabled |
 | Qwen `qwen/qwen3.8-27b:free` | `OPENROUTER_QWEN_ENABLED=true` | Paused |
 | Gemma `google/gemma-4-26b-a4b-it:free` | `OPENROUTER_GEMMA_ENABLED=true` | Paused |

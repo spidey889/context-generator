@@ -101,6 +101,7 @@ test("parts use only one NVIDIA OpenRouter request and return no completed-summa
     calls.push({ url, options });
     return new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }), { status: 200 });
   });
+  process.env.OPENROUTER_MAIN_API_KEY = "test-normal-only";
   const res = response();
   await handler(request({ conversation: "a".repeat(600000), large: metadata, telemetry }), res);
   assert.equal(res.statusCode, 200);
@@ -149,9 +150,11 @@ test("large streams acknowledge the request before waiting for a model without e
 test("only a verified complete final consolidation receives one original-transfer summary proof", async t => {
   const calls = [];
   setup(t, async (url, options) => {
+    assert.equal(options.headers.Authorization, "Bearer test-primary");
     calls.push(JSON.parse(options.body));
     return new Response(JSON.stringify({ choices: [{ message: { content: usefulSummary }, finish_reason: "stop" }] }), { status: 200 });
   });
+  process.env.OPENROUTER_MAIN_API_KEY = "test-normal-only";
   const res = response(), body = finalBody();
   await handler(request(body), res);
   assert.equal(res.statusCode, 200);

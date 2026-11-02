@@ -6,6 +6,8 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-11-02
 
+- **Allow a separate OpenRouter main-account key for ordinary chats.** `/api/summarize` uses optional `OPENROUTER_MAIN_API_KEY` through 1,000,000 characters, retaining `OPENROUTER_API_KEY` while the new setting is absent or blank. Above-1M part requests and final consolidation continue using the existing key and provider race. This separates configured credentials without introducing key rotation on errors; activation requires the new server setting and a backend deployment.
+
 - **Log explicit user-notice dismissal clicks.** Reuse the notice endpoint and private user-number lookup to write `cap_context_user_notice_dismiss` runtime logs with only `user_no` and the original notice ID. Automatic expiry, replacement and ordinary copy/error dismissals stay silent. Respect diagnostics consent; logging is best-effort and adds no database table, counter or retry queue. Cover attribution and expiry with one new regression plus existing UI/Brave checks; backend and client rollout remain separate from this source change.
 
 ## 2026-11-01
