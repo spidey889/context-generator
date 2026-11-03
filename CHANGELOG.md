@@ -6,7 +6,7 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-11-04
 
-- **Temporarily remove the required Offline checks status from master at the owner's request.** Allow direct pushes while keeping the existing CI workflow and other branch protections. The 1.4.44 version bump uses `[skip ci]` and runs no local tests, as requested; future pushes still trigger CI normally unless explicitly skipped.
+- **Temporarily pause required CI for version 1.4.44, then restore the original rule.** The owner requested a direct master push without tests; the version bump and follow-up notes use `[skip ci]`. Restore the saved **Offline checks** requirement, including its strict up-to-date check and GitHub Actions app binding, after those pushes. Other branch protections stay unchanged, and future master commits again require prior Offline checks evidence.
 
 ## 2026-11-02
 
