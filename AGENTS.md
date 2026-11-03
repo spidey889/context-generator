@@ -62,5 +62,5 @@
 
 - After a coding task, commit the intended files and always push to the branch being worked on. Do not ask for confirmation. Stage only the task's files.
 - This repository pushes to `https://github.com/spidey889/context-generator.git`.
-- `master` requires the GitHub Actions **Offline checks** result before accepting a commit. If working on `master`, validate the exact commit on a temporary `codex/` verification branch first, push that same commit to `master` after it passes, then remove the temporary branch. Do not bypass protection.
+- The owner temporarily removed `master`'s required **Offline checks** status on 2026-11-04. Direct pushes do not need a verification branch while that requirement is disabled. Keep the CI workflow and other branch protections; skip tests only when the owner explicitly requests it.
 - A Git push, a ready backend deployment and a Chrome Web Store release are separate states. Verify the relevant deployed artifact before claiming a production release.

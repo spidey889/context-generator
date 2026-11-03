@@ -4,6 +4,10 @@ Decisions, important regressions and replaced approaches worth remembering. [LOG
 
 Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spidey889/context-generator/blob/9b663fdfbe98204803ec5526f91be2c01c61d62e/CHANGELOG.md) remains in Git with detailed experiments, rollout evidence and superseded iterations.
 
+## 2026-11-04
+
+- **Temporarily remove the required Offline checks status from master at the owner's request.** Allow direct pushes while keeping the existing CI workflow and other branch protections. The 1.4.44 version bump uses `[skip ci]` and runs no local tests, as requested; future pushes still trigger CI normally unless explicitly skipped.
+
 ## 2026-11-02
 
 - **Allow a separate OpenRouter main-account key for ordinary chats.** `/api/summarize` uses optional `OPENROUTER_MAIN_API_KEY` through 1,000,000 characters, retaining `OPENROUTER_API_KEY` while the new setting is absent or blank. Above-1M part requests and final consolidation continue using the existing key and provider race. This separates configured credentials without introducing key rotation on errors; activation requires the new server setting and a backend deployment.
