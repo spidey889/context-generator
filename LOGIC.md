@@ -607,6 +607,7 @@ Bounded `validationReason` / `qualityFlags`: `bad_structure`, `missing_section`,
 - Responses are `no-store`; return bounded user-safe errors, never raw provider bodies. Both Vercel endpoints share bounded JSON parsing and case-insensitive headers through `api/request-validation.js`.
 - Vercel/Supabase telemetry validators remain separate deployment bundles; parity tests enforce their shared closed schema.
 - Backend release claims require the production alias to resolve to the intended source commit with production environment settings and a real summary receipt. A ready branch preview or successful push alone is insufficient. Extension distribution still requires its own package/store release.
+- Extension releases use the three-part numeric manifest `version` for updates and telemetry, and `version_name` for the display label. The Store already published `40` (equivalent to `40.0.0`), so numeric update versions must exceed it while display labels can continue in `1.4.x`. Increment both separately for future releases; telemetry and signed receipts continue using `version`, never the display label.
 
 ## Telemetry and local receipts
 

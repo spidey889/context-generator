@@ -6,7 +6,14 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-11-04
 
-- **Temporarily pause required CI for version 1.4.44, then restore the original rule.** The owner requested a direct master push without tests; the version bump and follow-up notes use `[skip ci]`. Restore the saved **Offline checks** requirement, including its strict up-to-date check and GitHub Actions app binding, after those pushes. Other branch protections stay unchanged, and future master commits again require prior Offline checks evidence.
+- **Recover Web Store updates after accidentally publishing numeric version 40.** The Store rejected the subsequent `1.4.44` upload because Chrome compares numeric components from left to right and treats `40` as `40.0.0`.
+  - The owner's dashboard screenshot confirms the published version and rejection; the repository's previous `1.4.40` value did not describe the actual Store update floor.
+  - Set the update version to `40.0.1` and add display-only `version_name: "1.4.44"`, preserving the owner's release numbering while satisfying the update comparison.
+  - Keep a three-part numeric version for existing worker/backend telemetry validation and signed receipts; no telemetry schema or runtime routing changes are needed.
+  - Future releases must increase the numeric update version and display label separately. Changing only the display label cannot deliver an update.
+  - Review the manifest and diff without running tests at the owner's request. Store upload and acceptance remain separate verification steps; this source change creates no package or Store release.
+
+- **Temporarily pause required CI for version 1.4.44, then restore the original rule.** The owner requested a direct master push without tests; the version bump, numbering repair and follow-up notes use `[skip ci]`. Restore the saved **Offline checks** requirement, including its strict up-to-date check and GitHub Actions app binding, after those pushes. Other branch protections stay unchanged, and future master commits again require prior Offline checks evidence.
 
 ## 2026-11-02
 
