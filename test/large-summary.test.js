@@ -612,7 +612,7 @@ test("the NVIDIA beta exception does not change ordinary OpenRouter routing or i
   assert.equal(ordinary.provider.data_collection, "deny", "The model ID alone cannot opt into collection.");
   assert.equal(ordinary.temperature, 0.1);
   assert.equal(ordinary.top_p, undefined);
-  const unrelated = shared.getProviderRequestBody({ id: "openrouter", allowNvidiaDataCollection: true }, messages, profile,
+  const unrelated = shared.getProviderRequestBody({ id: "openrouter", allowLargeChatDataCollection: true }, messages, profile,
     "dots-studio/dots-3-note-preview:free");
   assert.equal(unrelated.provider.data_collection, "deny");
   assert.equal(unrelated.temperature, 0.1);

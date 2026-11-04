@@ -1,12 +1,26 @@
 // Server observations only. Never add prompt text, reasoning text, URLs, keys,
 // arbitrary errors or upstream bodies to this contract.
 (function (root) {
+  // BEGIN GENERATED SUMMARY MODELS — npm run models:sync
   const models = {
-    tokenharbor: ["deepseek-v4.1-flash:free"],
-    openrouter: ["dots-studio/dots-3-note-preview:free", "qwen/qwen3.8-27b:free", "google/gemma-4-26b-a4b-it:free", "nvidia/nemotron-3.5-super-vl:free"],
-    gemini: ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
-    mistral: ["ministral-14b-2512"]
+    "tokenharbor": [
+      "deepseek-v4.1-flash:free"
+    ],
+    "openrouter": [
+      "dots-studio/dots-3-note-preview:free",
+      "qwen/qwen3.8-27b:free",
+      "google/gemma-4-26b-a4b-it:free",
+      "nvidia/nemotron-3.5-super-vl:free"
+    ],
+    "gemini": [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash-lite"
+    ],
+    "mistral": [
+      "ministral-14b-2512"
+    ]
   };
+  // END GENERATED SUMMARY MODELS
   const enumeration = values => ({ type: "string", values });
   const integer = (min = 0, max = 2147483647) => ({ type: "number", min, max });
   const schema = {

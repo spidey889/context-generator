@@ -33,6 +33,8 @@
 
 ## Tests and checks
 
+- For model swaps within existing providers, edit `config/summary-models.json` and run `npm run models:sync`; do not hand-edit generated model catalogs. Keep historical entries. New IDs generate a SQL migration and require matching backend/Edge/client rollout; see `docs/provider-fallbacks.md`.
+
 - When fixing a confirmed bug or adding meaningful new behavior, add a regression test.
 - Think before adding tests. Use your judgment to add strategic tests that protect what matters for the change. Keep them fast and useful; the goal is quality coverage, not a particular test count.
 - After investigating or fixing a confirmed real-user failure, remind the owner that we can add the complete failing scenario to regular CI to catch a repeat before release. Briefly describe what to cover, such as many attachments, large histories, slow downloads or retries, and say whether existing CI already covers it. Honor the owner's limits on writing or running tests.

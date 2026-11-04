@@ -1,0 +1,31 @@
+{
+  "summary": {
+    "openrouter": [
+      { "model": "dots-studio/dots-3-note-preview:free", "enabledEnv": "OPENROUTER_DOTS_ENABLED", "defaultEnabled": true },
+      { "model": "qwen/qwen3.8-27b:free", "enabledEnv": "OPENROUTER_QWEN_ENABLED", "defaultEnabled": false },
+      { "model": "google/gemma-4-26b-a4b-it:free", "enabledEnv": "OPENROUTER_GEMMA_ENABLED", "defaultEnabled": false }
+    ],
+    "tokenharborEnabled": true,
+    "tokenharbor": [{ "model": "deepseek-v4.1-flash:free", "enabled": true }],
+    "tokenharborBackup": "deepseek-v4.1-flash:free",
+    "gemini": ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
+    "mistral": "ministral-14b-2512"
+  },
+  "largeSummary": {
+    "openrouter": "nvidia/nemotron-3.5-super-vl:free",
+    "tokenharbor": "deepseek-v4.1-flash:free"
+  },
+  "models": [
+    { "id": "local-direct", "provider": "local", "label": "Local carry" },
+    { "id": "gemini-3.6-flash", "provider": "gemini", "label": "Gemini 3.6 Flash", "thinkingLevel": "MEDIUM" },
+    { "id": "gemini-3.5-flash-lite", "provider": "gemini", "label": "Gemini 3.5 Flash-Lite", "thinkingLevel": "MINIMAL" },
+    { "id": "ministral-14b-2512", "provider": "mistral", "label": "Ministral 3 14B" },
+    { "id": "inclusionai/ling-3.1-flash", "provider": "openrouter", "label": "Space Bunny 2", "legacyOnly": true },
+    { "id": "dots-studio/dots-3-note-preview:free", "provider": "openrouter", "label": "Dots3-Note Preview" },
+    { "id": "qwen/qwen3.8-27b:free", "provider": "openrouter", "label": "Qwen3.8 27B" },
+    { "id": "google/gemma-4-26b-a4b-it:free", "provider": "openrouter", "label": "Gemma 4 26B A4B" },
+    { "id": "claude-haiku-5.5:free", "provider": "apodex", "label": "Haiku 5.5 (free)", "legacyOnly": true },
+    { "id": "deepseek-v4.1-flash:free", "provider": "tokenharbor", "label": "DeepSeek V4.1 Flash (Free)", "reasoningTokens": 8192, "firstAnswerTimeoutMs": 45000 },
+    { "id": "nvidia/nemotron-3.5-super-vl:free", "provider": "openrouter", "label": "NVIDIA Nemotron 3.5 Super VL (Free)", "largeChatSampling": { "temperature": 1, "top_p": 0.95 }, "allowLargeChatDataCollection": true }
+  ]
+}

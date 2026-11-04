@@ -72,7 +72,9 @@ function loadBaseline(ref) {
     // lack that file; avoid archiving the full extension and its large media.
     const diagnostics = execFileSync("git", ["ls-tree", "--name-only", ref, "--", "extension/transfer-diagnostics.js"],
       { cwd: root, encoding: "utf8" }).trim();
-    const sources = ["api", "supabase/functions/_shared", ...(diagnostics ? [diagnostics] : [])];
+    const optional = execFileSync("git", ["ls-tree", "--name-only", ref, "--", "config", "lib"],
+      { cwd: root, encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+    const sources = ["api", "supabase/functions/_shared", ...optional, ...(diagnostics ? [diagnostics] : [])];
     fs.writeFileSync(archive, execFileSync("git", ["archive", "--format=tar", ref, ...sources], { cwd: root }));
     execFileSync("tar", ["-xf", archive, "-C", directory]);
     const backend = require(path.join(directory, "api", "summarize.js")).__test;
@@ -191,4 +193,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(() => { console.error("Prompt comparison failed; inspect configuration and retained safe results."); process.exitCode = 1; });
-module.exports = { assessSummary, comparePrompts, withLongHistory };
+module.exports = { assessSummary, comparePrompts, withLongHistory, loadBaseline };

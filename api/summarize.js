@@ -4,6 +4,7 @@ const PROVIDER_MAX_ATTEMPTS = 2;
 const LARGE_CONVERSATION_THRESHOLD = 350000;
 const LARGE_CONVERSATION_MAX_TOKENS = 10000;
 const transferDiagnostics = require("../extension/transfer-diagnostics");
+const SUMMARY_MODEL_CONFIG = require("../config/summary-models.json");
 const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const { getHeader } = require("./request-validation");
 const { readProviderStream } = require("./provider-stream");
@@ -30,37 +31,29 @@ const PROVIDER_ATTEMPT_TIMEOUT_MS = 90000;
 const PROVIDER_FIRST_ANSWER_TIMEOUT_MS = 30000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
 const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
-const GEMINI_PRIMARY_MODEL = "gemini-3.6-flash";
+const [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL] = SUMMARY_MODEL_CONFIG.summary.gemini;
 const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
-const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
-const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
+const MISTRAL_PRIMARY_MODEL = SUMMARY_MODEL_CONFIG.summary.mistral;
 const REMOTE_CHAIN_BUDGET_MS = 270000;
 const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
 // Owner-controlled code switch. Keep the key in server environment variables;
 // changing this flag never adds a picker/settings control or a paid route.
-const TOKENHARBOR_ENABLED = true;
+const TOKENHARBOR_ENABLED = SUMMARY_MODEL_CONFIG.summary.tokenharborEnabled;
 // Select the main key's first enabled model. The second key has its own pinned
 // backup model; both attempts share one TokenHarbor slice, including retries.
-const TOKENHARBOR_MODELS = [
-  { model: "deepseek-v4.1-flash:free", enabled: true }
-];
-const TOKENHARBOR_BACKUP_MODEL = "deepseek-v4.1-flash:free";
+const TOKENHARBOR_MODELS = SUMMARY_MODEL_CONFIG.summary.tokenharbor;
+const TOKENHARBOR_BACKUP_MODEL = SUMMARY_MODEL_CONFIG.summary.tokenharborBackup;
 const TOKENHARBOR_CHAT_COMPLETIONS_URL = "https://tokenharbor.ai/v1/chat/completions";
 const OPENROUTER_PRIMARY_SLICE_MS = 45000;
 const TOKENHARBOR_SHARED_SLICE_MS = 45000;
-// DeepSeek counts thinking against max_tokens. The shared summary caps alone
-// can end a response before any answer; reserve separate room without changing
-// its default thinking mode, the desired carry length or the route deadline.
-const TOKENHARBOR_DEEPSEEK_REASONING_TOKENS = 8192;
-// A single key serves these pinned routes. Dots leads; other OpenRouter routes are paused.
-// Enabling another model must be deliberate and cannot extend the deadline.
-const OPENROUTER_MODELS = [
-  { model: "dots-studio/dots-3-note-preview:free", enabledEnv: "OPENROUTER_DOTS_ENABLED", defaultEnabled: true },
-  { model: "qwen/qwen3.8-27b:free", enabledEnv: "OPENROUTER_QWEN_ENABLED", defaultEnabled: false },
-  { model: "google/gemma-4-26b-a4b-it:free", enabledEnv: "OPENROUTER_GEMMA_ENABLED", defaultEnabled: false }
-];
+// Model IDs and model-specific quirks live together; swapping a route must not
+// accidentally carry the previous model's reasoning or data-policy exception.
+const OPENROUTER_MODELS = SUMMARY_MODEL_CONFIG.summary.openrouter;
+function getModelSettings(provider, model) {
+  return SUMMARY_MODEL_CONFIG.models.find(entry => entry.provider === provider && entry.id === model) || {};
+}
 const SUMMARY_PROVIDERS = {
   tokenharbor: {
     id: "tokenharbor",
@@ -889,7 +882,7 @@ function getProviderRequestBody(provider, messages, profile, model) {
         // Gemini-only totals leave Mistral on the shared profile caps.
         maxOutputTokens: generationBudget.maxOutputTokens,
         thinkingConfig: {
-          thinkingLevel: model === FLASH_LITE_FALLBACK_MODEL ? "MINIMAL" : "MEDIUM"
+          thinkingLevel: getModelSettings(provider.id, model).thinkingLevel || "MEDIUM"
         }
       },
       store: false
@@ -897,8 +890,9 @@ function getProviderRequestBody(provider, messages, profile, model) {
   }
 
   const body = { model, temperature: 0.1, max_tokens: profile.maxTokens, messages };
-  if (provider.id === "tokenharbor" && model === "deepseek-v4.1-flash:free") {
-    body.max_tokens += TOKENHARBOR_DEEPSEEK_REASONING_TOKENS;
+  if (provider.id === "tokenharbor") {
+    // Thinking uses the same output cap on reasoning models such as DeepSeek.
+    body.max_tokens += getModelSettings(provider.id, model).reasoningTokens || 0;
   }
   if (provider.id === "openrouter") {
     // Do not let a reasoning model spend the summary allowance on hidden text,
@@ -909,14 +903,14 @@ function getProviderRequestBody(provider, messages, profile, model) {
     body.reasoning = { enabled: false, exclude: true };
     // The owner approved NVIDIA's free-endpoint policy for the isolated >1M
     // beta. Only its explicit server route can opt in; ordinary routing denies.
-    const nvidiaBeta = provider.allowNvidiaDataCollection === true && model === "nvidia/nemotron-3.5-super-vl:free";
-    if (nvidiaBeta) {
+    const settings = getModelSettings(provider.id, model);
+    const largeChatCollection = provider.allowLargeChatDataCollection === true && settings.allowLargeChatDataCollection === true;
+    if (provider.allowLargeChatDataCollection === true && settings.largeChatSampling) {
       // NVIDIA recommends these text sampling values. The inherited 0.1
       // produced a whitespace-only loop in the synthetic large-chat trial.
-      body.temperature = 1;
-      body.top_p = 0.95;
+      Object.assign(body, settings.largeChatSampling);
     }
-    body.provider = { require_parameters: true, data_collection: nvidiaBeta ? "allow" : "deny",
+    body.provider = { require_parameters: true, data_collection: largeChatCollection ? "allow" : "deny",
       max_price: { prompt: 0, completion: 0, request: 0 } };
   }
   return body;
@@ -1196,9 +1190,8 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
     // disarms this watchdog; the full completion deadline stays in force.
     // DeepSeek thinking stays on. The larger-chat policy explicitly overrides
     // the normal 30s/45s first-answer limits with its full 90s attempt budget.
-    const firstAnswerBudgetMs = context.firstAnswerTimeoutMs ?? (context.provider === "tokenharbor" && context.model === "deepseek-v4.1-flash:free"
-      ? TOKENHARBOR_SHARED_SLICE_MS
-      : PROVIDER_FIRST_ANSWER_TIMEOUT_MS);
+    const firstAnswerBudgetMs = context.firstAnswerTimeoutMs
+      ?? getModelSettings(context.provider, context.model).firstAnswerTimeoutMs ?? PROVIDER_FIRST_ANSWER_TIMEOUT_MS;
     const firstAnswerDeadline = context.onDelta ? Math.min(attemptDeadline, Date.now() + firstAnswerBudgetMs) : null;
     let answerStarted = false;
     const observed = { provider: context.provider, model: context.model,
@@ -1361,7 +1354,7 @@ function createTimeoutError() {
 }
 
 function getProviderRequestBudgetMs(model) {
-  return [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL, MISTRAL_PRIMARY_MODEL,
+  return [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL, MISTRAL_PRIMARY_MODEL, TOKENHARBOR_BACKUP_MODEL,
     ...TOKENHARBOR_MODELS.map((route) => route.model), ...OPENROUTER_MODELS.map((route) => route.model)].includes(model) ? PROVIDER_ATTEMPT_TIMEOUT_MS : 15000;
 }
 

@@ -23,7 +23,7 @@ async function checkNvidiaLargeModel(db, sql) {
   // JSON enumeration order does not affect the closed set of accepted models.
   sqlRules.model.values.sort(); expectedRules.model.values.sort();
   equal(sqlRules, expectedRules);
-  equal(JSON.parse(definition.match(/models constant jsonb := '([^']+)'::jsonb/)[1]), contract.models);
+  equal(JSON.parse(definition.match(/models constant jsonb := '([^']+)'::jsonb/)[1]), require("./diagnostics-history").historicalProviderModels());
   const target = (await rows("select attempt_id::text from public.transfers order by attempt_id limit 1"))[0];
   const event = { id: "c0de5729-0000-4000-8000-000000000001", request_id: "c0de5729-0000-4000-8000-000000000002",
     attempt_id: target.attempt_id, occurred_at: new Date().toISOString(), environment: "development",

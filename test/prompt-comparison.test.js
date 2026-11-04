@@ -1,8 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { assessSummary, comparePrompts, withLongHistory } = require("../scripts/compare-summary-prompts");
+const { assessSummary, comparePrompts, withLongHistory, loadBaseline } = require("../scripts/compare-summary-prompts");
 const fixture = require("../evaluation/handoff-quality-cases.json");
 const { getSummaryProfile } = require("../api/summarize").__test;
+
+test("a pinned baseline includes its shared backend dependencies and model config", () => {
+  const baseline = loadBaseline("HEAD");
+  try { assert.equal(baseline.backend.getSummaryProfile("x".repeat(9000)).id, "medium"); }
+  finally { baseline.cleanup(); }
+});
 
 test("long-history cases preserve source turns and their order across two distracting blocks", () => {
   for (const [caseId, target, profile] of [

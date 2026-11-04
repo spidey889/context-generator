@@ -5,11 +5,21 @@ const encoder = new TextEncoder();
 // Keep this bounded catalog aligned with summary routing. Store workers released
 // before v3 forward the proof/time but omit model; only an HMAC match may recover it.
 // Retain retired entries while seven-day outboxes can still contain their receipts.
+// BEGIN GENERATED SUMMARY MODELS — npm run models:sync
 export const LEGACY_RECEIPT_MODELS = Object.freeze([
-  "local-direct", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512",
-  "inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free",
-  "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free", "claude-haiku-5.5:free", "deepseek-v4.1-flash:free", "nvidia/nemotron-3.5-super-vl:free"
+  "local-direct",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
+  "ministral-14b-2512",
+  "inclusionai/ling-3.1-flash",
+  "dots-studio/dots-3-note-preview:free",
+  "qwen/qwen3.8-27b:free",
+  "google/gemma-4-26b-a4b-it:free",
+  "claude-haiku-5.5:free",
+  "deepseek-v4.1-flash:free",
+  "nvidia/nemotron-3.5-super-vl:free"
 ]);
+// END GENERATED SUMMARY MODELS
 
 function confirmationMessage(payload) {
   const version = payload.model !== undefined ? 3 : payload.summary_confirmed_at === undefined ? 1 : 2;

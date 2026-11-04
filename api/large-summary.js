@@ -7,10 +7,11 @@ const { createHash } = require("node:crypto");
 const { createSummaryWithProvider, getInitialSummaryMessages, getProviderRequestBody,
   getSummaryProfile, createLongSummaryResponse } = require("./summarize").__test;
 
-const MODEL = "nvidia/nemotron-3.5-super-vl:free";
+const { largeSummary } = require("../config/summary-models.json");
+const MODEL = largeSummary.openrouter;
 const PROVIDER = Object.freeze({ id: "openrouter", label: "OpenRouter",
-  url: "https://openrouter.ai/api/v1/chat/completions", allowNvidiaDataCollection: true });
-const BACKUP_MODEL = "deepseek-v4.1-flash:free";
+  url: "https://openrouter.ai/api/v1/chat/completions", allowLargeChatDataCollection: true });
+const BACKUP_MODEL = largeSummary.tokenharbor;
 const BACKUP_PROVIDER = Object.freeze({ id: "tokenharbor", label: "TokenHarbor",
   url: "https://tokenharbor.ai/v1/chat/completions" });
 const REQUEST_TIMEOUT_MS = 75000;

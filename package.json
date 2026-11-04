@@ -6,6 +6,8 @@
     "@electric-sql/pglite": "0.5.8"
   },
   "scripts": {
+    "models:sync": "node scripts/sync-summary-models.js",
+    "models:check": "node scripts/sync-summary-models.js --check",
     "package:firefox": "node scripts/prepare-firefox-extension.js",
     "package:firefox-submission": "node scripts/prepare-firefox-submission.js",
     "test:firefox-smoke": "node scripts/run-firefox-smoke.js",

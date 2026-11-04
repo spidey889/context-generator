@@ -1,6 +1,15 @@
 # Provider routing and fallbacks
 
-This is the detailed reference for the summary provider chain, settings, deadlines and recovery. [LOGIC.md](../LOGIC.md#configured-provider-order) retains the production architecture and its summary of this contract. The implementation is [api/summarize.js](../api/summarize.js); deployment configuration and available provider routes can change independently of source.
+This is the detailed reference for the summary provider chain, settings, deadlines and recovery. [LOGIC.md](../LOGIC.md#configured-provider-order) retains the production architecture and its summary of this contract. Route selections and model settings live in [config/summary-models.json](../config/summary-models.json); request/fallback execution remains in [api/summarize.js](../api/summarize.js). Deployment configuration and available provider routes can change independently of source.
+
+## Changing a model
+
+1. Edit the relevant slot under `summary` or `largeSummary` in `config/summary-models.json`. These routes are independent; changing the ordinary primary does not change the above-1M route. Keep the existing environment switch name unless an operational rename is intended.
+2. If the ID is new, add a `models` entry with its provider and display `label`; include required thinking/reasoning settings there. Keep previous entries so queued receipts and historical reports remain valid. A new provider/API shape still needs an adapter; this config supports the existing four provider APIs.
+3. Run `npm run models:sync`, then `npm run models:check` and `node --test --test-timeout=30000 test/summary-models.test.js` plus affected provider checks. Generated blocks and `config/summary-models-db.json` are maintained by the command. Update documentation of the active order when selections change.
+4. New IDs produce a SQL migration automatically. Deploy that migration and the Edge validator before enabling the matching backend route; release matching extension worker catalogs separately. A config edit cannot update already-installed extensions. Review availability, quality and the provider's terms before selecting a replacement; data-collection exceptions need owner approval.
+
+Current selections are unchanged by this centralization. No database migration is needed when switching between IDs already in the catalog.
 
 ## When providers are used
 
@@ -29,7 +38,7 @@ For generated summaries of up to 350,000 characters, routes run in this order. M
 | --- | --- | --- |
 | 1 | OpenRouter `dots-studio/dots-3-note-preview:free` | `OPENROUTER_MAIN_API_KEY`, or `OPENROUTER_API_KEY` when absent/blank; enabled by default, `OPENROUTER_DOTS_ENABLED=false` pauses it |
 | 2 | OpenRouter `qwen/qwen3.8-27b:free`, then `google/gemma-4-26b-a4b-it:free` | Paused by default; enable individually with `OPENROUTER_QWEN_ENABLED=true` or `OPENROUTER_GEMMA_ENABLED=true` |
-| 3 | TokenHarbor `deepseek-v4.1-flash:free`, main key | `TOKENHARBOR_API_KEY`; the global `TOKENHARBOR_ENABLED` and model's `enabled` flag are code switches in `api/summarize.js` |
+| 3 | TokenHarbor `deepseek-v4.1-flash:free`, main key | `TOKENHARBOR_API_KEY`; `summary.tokenharborEnabled` and the model's `enabled` flag live in `config/summary-models.json` |
 | 4 | TokenHarbor `deepseek-v4.1-flash:free`, second key | Optional `TOKENHARBOR_BACKUP_API_KEY`; shares the main route's time slice |
 | 5 | Google `gemini-3.6-flash`, then `gemini-3.5-flash-lite` | `GEMINI_API_KEY` |
 | 6 | Mistral `ministral-14b-2512` | `MISTRAL_API_KEY`; `MISTRAL_ENABLED=false` pauses it |

@@ -6,6 +6,11 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-11-04
 
+- **Make summary-model swaps a shared configuration change.** Move ordinary/large-chat selections, switches, display names and model-specific thinking/sampling settings to `config/summary-models.json`; keep the current model order, keys, deadlines and privacy defaults.
+  - `npm run models:sync` updates the worker, Vercel/Edge validation, receipt recovery, provider diagnostics and Latest Run labels. New IDs generate an append-only SQL allowance migration while retaining historical IDs; no manual edits to those matching lists are needed.
+  - CI rejects stale generated lists and tests config-only model swaps, isolation of the large-chat data-policy exception, old receipt preservation and generated SQL with retained rows/function privileges. Pin older database cutover checks to their historical models so adding a new model does not rewrite their expectations.
+  - Synchronizing source does not deploy SQL, Edge, backend or extension artifacts. Existing installed workers keep their released model catalog until updated.
+
 - **Recover Web Store updates after accidentally publishing numeric version 40.** The Store rejected the subsequent `1.4.44` upload because Chrome compares numeric components from left to right and treats `40` as `40.0.0`.
   - The owner's dashboard screenshot confirms the published version and rejection; the repository's previous `1.4.40` value did not describe the actual Store update floor.
   - Set the update version to `40.0.1` and add display-only `version_name: "1.4.44"`, preserving the owner's release numbering while satisfying the update comparison.

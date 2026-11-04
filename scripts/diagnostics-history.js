@@ -1,5 +1,13 @@
 // Historical migration checks must exclude fields introduced by later migrations.
 // Keep the old-schema comparisons complete rather than filtering to whatever SQL contains.
+function historicalProviderModels() {
+  const fs = require("node:fs"), path = require("node:path");
+  const read = name => fs.readFileSync(path.join(__dirname, "../supabase/migrations", name), "utf8");
+  const initial = read("20261023111856_provider_failure_logs.sql");
+  const models = JSON.parse(initial.match(/models constant jsonb := '([^']+)'::jsonb/)[1]);
+  models.openrouter.push(read("20261029050000_nvidia_large_summary_model.sql").match(/model text := '([^']+)'/)[1]);
+  return models;
+}
 function beforePasteDiagnosis(schema) {
   const result = structuredClone(schema);
   delete result.insertion_blocked_reason;
@@ -22,6 +30,9 @@ function beforeRetentionRecovery(schema) {
 }
 function beforeProviderLogging(schema) {
   const result = structuredClone(schema);
+  // Model config sync may append new IDs long after these historical cutovers.
+  const models = Object.values(historicalProviderModels()).flat();
+  result.model.values = result.model.values.filter(model => models.includes(model));
   for (const key of ["upstream_code", "upstream_type", "upstream_message", "retry_after_ms", "upstream_request_id", "failure_detail",
     "summary_phase", "part_index", "part_total", "skip_reason"]) delete result[key];
   result.failure_reason.values = result.failure_reason.values.filter(value => value !== "provider_skipped");
@@ -29,4 +40,4 @@ function beforeProviderLogging(schema) {
   for (const key of ["request_attempt", "max_output_tokens", "budget_ms"]) result[key].min = 1;
   return result;
 }
-module.exports = { withoutPasteEditorFields, beforePasteDiagnosis, beforeRetentionRecovery, beforeProviderLogging };
+module.exports = { withoutPasteEditorFields, beforePasteDiagnosis, beforeRetentionRecovery, beforeProviderLogging, historicalProviderModels };

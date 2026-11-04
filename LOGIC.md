@@ -58,7 +58,7 @@ Transfer shutdown checks source and destination and cancels active source attemp
 | Cross-tab orchestration, backend transport, destination recovery and summary cache | [extension/background.js](extension/background.js): `summarizeWithBackend`, `transferToDestination`, `sendMessageWhenReady`, `prepareDestination` | `test/background.test.js`, `test/json-transfer-fallback.test.js` |
 | JSON routing/auth observation and fresh reads | `extension/claude-fetch-main.js`, `extension/chatgpt-fetch-main.js`, `extension/network-fetch-main.js` | Corresponding JSON tests and reload/auth smoke modes |
 | JSON serialization and page-to-extension bridges | `extension/claude-json-capture.js`, `extension/chatgpt-json-capture.js`, `extension/network-json-capture.js`; shared Gemini/Grok/DeepSeek formats in `extension/network-json-data.js` | `test/claude-json-capture.test.js`, `test/chatgpt-json-capture.test.js`, `test/network-json-capture.test.js` |
-| Summary profiles, provider order and output policy; shared prompt/template | [api/summarize.js](api/summarize.js): `handleSummary`, `createSummaryWithFallback`, `createSummaryWithProvider`, `validateContextCarrySummary`; [api/summary-prompt.js](api/summary-prompt.js): `getSummarySystemPrompt`, `getContextCarryTemplate` | `test/summarize.test.js`, `test/summary-prompt.test.js`, routing/body-timeout tests, live evaluation for quality changes |
+| Model selections/settings, summary profiles, provider order and output policy; shared prompt/template | [config/summary-models.json](config/summary-models.json), `scripts/sync-summary-models.js`; [api/summarize.js](api/summarize.js): `handleSummary`, `createSummaryWithFallback`, `createSummaryWithProvider`, `validateContextCarrySummary`; [api/summary-prompt.js](api/summary-prompt.js): `getSummarySystemPrompt`, `getContextCarryTemplate` | `test/summary-models.test.js`, `test/summarize.test.js`, `test/summary-prompt.test.js`, routing/body-timeout tests, live evaluation for quality changes |
 | Large-chat orchestration and verified part consolidation | `extension/large-transfer.js`, `api/large-summary.js`, `api/large-summary-protocol.js` | `test/large-transfer.test.js`, `test/large-summary.test.js`, `scripts/run-large-transfer-smoke.js` |
 | Backend request boundaries | `api/request-security.js`, `api/request-validation.js` | `test/request-security.test.js` |
 | Telemetry producer, queue, expiry and recovery | `extension/platform-content.js`, `extension/background.js`: `recordTransferTelemetry`, outbox and active-attempt helpers | `test/telemetry-delivery.test.js`, `test/telemetry.test.js` |
@@ -507,6 +507,10 @@ Before that local fallback, a summary response whose body read rejects with a ne
 
 ### Configured provider order
 
+Model IDs, route selections/switches, display labels and model-specific request settings live in [config/summary-models.json](config/summary-models.json). Both summary endpoints read their route selections there. For an existing model, change the relevant `summary` or `largeSummary` slot; for a new model, also add its catalog entry with the correct provider and any required reasoning/thinking settings. Keep old entries for queued receipts and historical attribution. Never copy the previous model's data-collection exception to a replacement without owner approval.
+
+Run `npm run models:sync` after editing the config. It updates marked model catalogs in the worker, Vercel/Edge validators, receipt recovery, provider diagnostics and Latest Run labels. New IDs also produce an append-only SQL migration extending existing attribution/diagnostic contracts; `config/summary-models-db.json` is its generated baseline, not another hand-edited config. `npm run models:check` and `test/summary-models.test.js` reject stale generated output, unknown routes and removal of historical IDs. The sync command changes source files only: deploy new SQL/Edge contracts before enabling new backend routes, and distribute matching worker changes separately. Existing installed workers still have their released catalog.
+
 Provider HTTP failures inspect at most 8 KiB of error JSON for at most 150 ms within the existing attempt deadline. Only allowlisted upstream code/type, a fixed canonical message (capped at 120 characters) and bounded retry-after milliseconds enter server diagnostics; raw/unknown message text is never saved. Error-body cleanup is not awaited. These additive fields need compatible database/Edge validators before backend rollout; local migrations alone do not deploy them.
 
 Named provider request-ID headers may supply one ASCII correlation token of 8–128 characters; controls, URLs and arbitrary body fields are rejected. HTTP-200 JSON/SSE errors, choice-level errors and Google safety feedback are identified before success validation and retain the same safe code/type/message metadata. HTTP status remains the actual transport status, separate from the upstream error code; a numeric error cannot fabricate an HTTP rejection.
@@ -532,7 +536,7 @@ OpenRouter: dots-studio/dots-3-note-preview:free
 
 | Route | Key / switch | Default |
 | --- | --- | --- |
-| TokenHarbor DeepSeek `deepseek-v4.1-flash:free` | `TOKENHARBOR_API_KEY`; global `TOKENHARBOR_ENABLED` and model's `enabled` flag in `api/summarize.js` | Enabled with server-side key |
+| TokenHarbor DeepSeek `deepseek-v4.1-flash:free` | `TOKENHARBOR_API_KEY`; `summary.tokenharborEnabled` and model's `enabled` flag in `config/summary-models.json` | Enabled with server-side key |
 | Same DeepSeek, second key | `TOKENHARBOR_BACKUP_API_KEY`; same global switch | Backup within remaining shared time |
 | Ordinary OpenRouter routes (through 1M characters) | `OPENROUTER_MAIN_API_KEY`, falling back to `OPENROUTER_API_KEY` when absent/blank; `OPENROUTER_ENABLED=false` bypasses all | Enabled with key |
 | Dots `dots-studio/dots-3-note-preview:free` | `OPENROUTER_DOTS_ENABLED=false` pauses | Enabled |
@@ -868,7 +872,7 @@ Explicit notice Dismiss clicks in updated clients send only the existing install
 | --- | --- |
 | Platform/host support | Manifest matches/permissions, content `PLATFORMS`, background `DESTINATIONS` / `DESTINATION_HOST_RULES`, telemetry platform lists, tests and smoke fixtures |
 | Transcript limits | Capture/source-local recovery, request-security character/byte/envelope bounds, analysis display and tests |
-| Model/profile routing | Provider constants/flags/budgets, prompts/cache namespace, Latest Run labels, served-model validation/signing and evaluation expectations |
+| Model/profile routing | `config/summary-models.json` + `npm run models:sync`; provider budgets, prompts/cache namespace and evaluation expectations; deploy generated model contracts before enabling new IDs |
 | JSON capture contract | MAIN hook, serializer/bridge, readiness versions, manifest/on-demand installation and identity/transport/content fixtures |
 | Telemetry field/outcome | Client sanitizer/producer, worker compaction/persistence, Vercel validator, Edge validator/proof verification, SQL constraints/functions and parity/replay tests |
 | Local receipt | Producer, background retention, bridge, analysis renderer and tests |
