@@ -6,6 +6,11 @@ Condensed on 2026-10-28. The [complete earlier changelog](https://github.com/spi
 
 ## 2026-11-04
 
+- **Copy context without opening another AI tab.** Add **Copy to clipboard** at the picker’s top right, sharing the existing capture, summary routing, retries, cancellation and size limits.
+  - Finish on the source page with automatic clipboard copying and the existing full copy box; denied copying retains its user-activated button and manual selection. Add write-only clipboard permission so delayed summaries can copy after the original click expires.
+  - Keep Clipboard in local Latest Run as `copy_ready`, outside hosted platform-transfer accounting. No destination tab, activation or composer insertion occurs; source drafts remain untouched.
+  - Cover local/remote/large recovery in focused regressions and add installed Brave coverage for desktop/mobile fit, exact copied content, clipboard denial/retry and zero new tabs to regular CI. Source changes still require an extension update for installed users.
+
 - **Make summary-model swaps a shared configuration change.** Move ordinary/large-chat selections, switches, display names and model-specific thinking/sampling settings to `config/summary-models.json`; keep the current model order, keys, deadlines and privacy defaults.
   - `npm run models:sync` updates the worker, Vercel/Edge validation, receipt recovery, provider diagnostics and Latest Run labels. New IDs generate an append-only SQL allowance migration while retaining historical IDs; no manual edits to those matching lists are needed.
   - CI rejects stale generated lists and tests config-only model swaps, isolation of the large-chat data-policy exception, old receipt preservation and generated SQL with retained rows/function privileges. Pin older database cutover checks to their historical models so adding a new model does not rewrite their expectations.

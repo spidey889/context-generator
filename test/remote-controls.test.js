@@ -91,7 +91,7 @@ test("the published controls are valid, bypass CDN caches and add no host or API
   for (const key of ["Cache-Control", "CDN-Cache-Control", "Vercel-CDN-Cache-Control"])
     assert.equal(headers.find(header => header.key === key).value, "no-store");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "extension/manifest.json")));
-  assert.deepEqual(manifest.permissions, ["alarms", "scripting", "storage"]);
+  assert.deepEqual(manifest.permissions, ["alarms", "clipboardWrite", "scripting", "storage"]);
   assert.equal(manifest.host_permissions.length, 6);
   assert.deepEqual(manifest.content_scripts.find(entry => entry.js.includes("platform-content.js")).js,
     ["transfer-diagnostics.js", "remote-controls.js", "platform-content.js"]);

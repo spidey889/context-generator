@@ -3090,6 +3090,58 @@ test("large summary errors and worker local carries preserve every captured char
   }
 });
 
+test("clipboard output reuses local, remote and large recovery summaries without preparing, revealing or pasting a tab", async () => {
+  const flowStart = PLATFORM_CONTENT_SOURCE.indexOf("  async function runContextFlow(");
+  const flowEnd = PLATFORM_CONTENT_SOURCE.indexOf("  function showContextTransferFailure(", flowStart);
+  const prepStart = PLATFORM_CONTENT_SOURCE.indexOf("  function prepareDestinationTab(");
+  const prepEnd = PLATFORM_CONTENT_SOURCE.indexOf("  function checkTransferDeadline(", prepStart);
+  const code = new vm.Script(PLATFORM_CONTENT_SOURCE.slice(prepStart, prepEnd)
+    + PLATFORM_CONTENT_SOURCE.slice(flowStart, flowEnd) + "\nglobalThis.runFlow = runContextFlow;");
+  for (const mode of ["local", "remote", "large-recovery"]) {
+    const messages = [];
+    const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+      messages.push(message);
+      if (message.type === "SUMMARIZE_WITH_BACKEND") return mode === "large-recovery"
+        ? { ok: false, code: "summary_failed" } : { ok: true, summary: "Exact prepared summary π" };
+      return { ok: true };
+    } });
+    const trace = hooks.beginTransferAttempt("clipboard", "destination tile");
+    const text = mode === "local" ? "User: Exact short conversation π" : "x".repeat(mode === "remote" ? 10000 : 1000001);
+    hooks.markCaptureDone(trace, text);
+    let shown, copies = 0, resets = 0;
+    const forbidden = () => { throw new Error("Clipboard must never use a destination tab"); };
+    const context = vm.createContext({
+      MIN_BACKEND_CONVERSATION_CHARS: 10000, OVERLAY_ID: "context-generator-overlay", activeTransferTrace: trace, instanceActive: true,
+      currentPlatform: { id: "chatgpt" }, remoteFeatureDisabled: () => true,
+      startTransferTelemetry() {}, checkTransferDeadline: attempt => attempt.sourceGuard?.check(),
+      isHandoffOverlayVisible: () => true, hideDestinationSheet() {}, showOverlay() {}, releaseDestinationSheetBackdrop() {},
+      createEarlyDestinationReveal: forbidden, completeLocalHandoff: forbidden,
+      summarizeWithBackend: hooks.summarizeWithBackend, stopHandoffCountdown() {}, setHandoffProgress() {},
+      document: { getElementById: () => ({ getAttribute: () => "false", contextGeneratorCopy: () => { copies++; } }) },
+      markTransferTrace: (attempt, label, detail) => attempt.marks.push({ label, detail }),
+      showFallbackModal: (summary, destination, backup, _unconfirmed, _draft, options) => {
+        shown = { summary, destination, backup, options }; return true;
+      },
+      finishTransferTrace: hooks.finishTransferTrace, resetRunningFlag: () => { resets++; hooks.resetRunningFlag(); },
+      notifyBackground: forbidden, recordTransferFailureDiagnostics: hooks.recordTransferFailureDiagnostics,
+      getSafeTelemetryFailureReason: hooks.getSafeTelemetryFailureReason, showContextTransferFailure: error => { throw error; }
+    });
+    code.runInContext(context);
+    await context.runFlow("clipboard", null, text, trace);
+    if (mode === "remote") assert.equal(shown.summary, "Exact prepared summary π");
+    else assert.ok(shown.summary.includes(text), "The complete original transcript survives local preparation");
+    assert.equal(shown.options.clipboardOnly, true);
+    assert.equal(shown.backup, false);
+    assert.equal(copies, 1);
+    assert.equal(resets, 1);
+    const stats = hooks.buildLatestTransferStats(trace, 1);
+    assert.equal(stats.status, "copy_ready");
+    assert.equal(stats.destination.name, "Clipboard");
+    assert.equal(messages.filter(m => m.type === "SUMMARIZE_WITH_BACKEND").length, mode === "local" ? 0 : 1);
+    assert.ok(messages.every(m => m.type === "SUMMARIZE_WITH_BACKEND"), "No destination commands or fabricated platform telemetry");
+  }
+});
+
 test("large local recovery offers the full transcript before destination waits and never counts a box as delivery", async () => {
   const flowStart = PLATFORM_CONTENT_SOURCE.indexOf("  async function runContextFlow(");
   const flowEnd = PLATFORM_CONTENT_SOURCE.indexOf("  function showContextTransferFailure(", flowStart);

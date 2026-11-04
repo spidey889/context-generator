@@ -797,6 +797,85 @@ function serveEmptyUserNotice(request, response) {
   return true;
 }
 
+async function verifyClipboardOnly(session, browser, state) {
+  const context = session.getExtensionContextId();
+  const pages = async () => (await browser.call("Target.getTargets")).targetInfos.filter(t => t.type === "page").map(t => t.targetId).sort();
+  const initialPages = await pages();
+  await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await session.evaluate(`window.__clipboardWrites = []; window.__clipboardDenied = false;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => {
+      if (window.__clipboardDenied) throw new Error('Synthetic clipboard denial');
+      window.__clipboardWrites.push(text);
+    } } });
+    document.execCommand = () => false;`, context);
+  await session.evaluate(`document.getElementById('prompt-textarea').textContent = 'Keep my unsent draft';`);
+  for (const scenario of ["remote", "local", "denied"]) {
+    if (scenario === "local") await session.evaluate(`document.querySelector('[data-message-author-role="user"]').textContent = 'Preserve this short conversation π.';`);
+    await session.evaluate(`window.__clipboardDenied = ${scenario === "denied"};`, context);
+    await session.evaluate(`document.getElementById('context-generator-bubble').click()`);
+    await waitFor(() => session.evaluate(`document.getElementById('context-generator-destination-sheet')?.getAttribute('aria-hidden') === 'false'`), "clipboard picker");
+    for (const width of scenario === "remote" ? [1180, 320] : []) {
+      await session.evaluate(`document.getElementById('context-generator-destination-backdrop').click()`);
+      await waitFor(() => session.evaluate(`document.getElementById('context-generator-destination-sheet').style.display === 'none'`), "picker closed before resize");
+      await session.call("Emulation.setDeviceMetricsOverride", { width, height: 820, deviceScaleFactor: 1, mobile: false });
+      await session.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      await session.evaluate(`document.getElementById('context-generator-bubble').click()`);
+      await waitFor(() => session.evaluate(`getComputedStyle(document.getElementById('context-generator-destination-sheet')).opacity === '1'`), "resized clipboard picker");
+      const layout = await session.evaluate(`(() => {
+        const button = document.getElementById('context-generator-copy-to-clipboard');
+        const r = button.getBoundingClientRect(), s = button.closest('[role="dialog"]').getBoundingClientRect();
+        return { label: button.textContent, width: r.width, scrollWidth: button.scrollWidth,
+          right: r.right, left: r.left, sheetLeft: s.left, sheetRight: s.right, height: r.height };
+      })()`);
+      assert.ok(layout.label === 'Copy to clipboard' && layout.width >= layout.scrollWidth
+        && layout.right <= width && layout.left >= layout.sheetLeft && layout.right <= layout.sheetRight
+        && layout.height >= 24, `Clipboard action fits at ${width}px: ${JSON.stringify(layout)}`);
+      if (width === 1180) {
+        if (PICKER_SCREENSHOT_PATH) {
+          const shot = await session.call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+          await fs.promises.mkdir(path.dirname(PICKER_SCREENSHOT_PATH), { recursive: true });
+          await fs.promises.writeFile(PICKER_SCREENSHOT_PATH, Buffer.from(shot.data, "base64"));
+        }
+        const inspectMs = Math.min(30000, Number(process.env.CAP_CONTEXT_CLIPBOARD_INSPECT_MS || 0));
+        if (inspectMs > 0) await new Promise(resolve => setTimeout(resolve, inspectMs));
+      }
+    }
+    if (scenario === "remote") {
+      await session.evaluate(`document.getElementById('context-generator-destination-backdrop').click()`);
+      await waitFor(() => session.evaluate(`document.getElementById('context-generator-destination-sheet').style.display === 'none'`), "picker closed before restoring viewport");
+      await session.call("Emulation.clearDeviceMetricsOverride");
+      await session.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      await session.evaluate(`document.getElementById('context-generator-bubble').click()`);
+      await waitFor(() => session.evaluate(`getComputedStyle(document.getElementById('context-generator-destination-sheet')).opacity === '1'`), "restored clipboard picker");
+    }
+    const point = await waitFor(() => session.evaluate(`(() => {
+      const button = document.getElementById('context-generator-copy-to-clipboard');
+      const r = button.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2;
+      return document.elementFromPoint(x, y) === button ? { x, y } : null;
+    })()`), "visible clipboard button hit target");
+    for (const type of ["mousePressed", "mouseReleased"]) await session.call("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
+    await waitFor(() => session.evaluate(`document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'`), "clipboard result box");
+    const text = await session.evaluate(`document.getElementById('context-generator-fallback-text').value`);
+    if (scenario === "remote") assert.equal(text, SUMMARY_TEXT);
+    else assert.match(text, /Preserve this short conversation π\./);
+    if (scenario === "denied") {
+      await waitFor(() => session.evaluate(`document.getElementById('context-generator-fallback-copy').textContent === 'Select text and copy manually'`), "clipboard denial recovery");
+      assert.doesNotMatch(await session.evaluate(`document.getElementById('context-generator-fallback-desc').textContent`), /Copied to your clipboard/);
+      await session.evaluate(`window.__clipboardDenied = false;`, context);
+      await session.evaluate(`document.getElementById('context-generator-fallback-copy').click()`);
+    }
+    await waitFor(() => session.evaluate(`window.__clipboardWrites.at(-1) === ${JSON.stringify(text)}`, context), "exact complete clipboard contents");
+    assert.match(await session.evaluate(`document.getElementById('context-generator-fallback-desc').textContent`), /Copied to your clipboard/);
+    assert.equal(await session.evaluate(`document.getElementById('prompt-textarea').textContent`), "Keep my unsent draft");
+    assert.deepEqual(await pages(), initialPages, "Clipboard never creates a tab");
+    assert.equal(state.destinationRequests, 0);
+    assert.equal(state.summaryRequests.length, 1, "Only the long chat needs the summary backend");
+    assert.equal(state.summaryRequests[0].telemetry, undefined, "Clipboard does not fabricate an AI destination");
+    await session.evaluate(`document.getElementById('context-generator-fallback-modal').contextGeneratorClose()`, context);
+    console.log(`✓ Clipboard ${scenario}: complete carry, same tab, preserved draft and working copy box.`);
+  }
+}
+
 async function startFixtureServer() {
   const state = { summaryRequests: [], destinationRequests: 0, jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, fileRedirects: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
   const pickerLoadResponses = new Set();
@@ -1316,7 +1395,7 @@ async function verifyPickerProductChanges(session, state) {
   const product = await session.evaluate(`(() => {
     const sheet = document.getElementById("context-generator-destination-sheet");
     const home = sheet.querySelector(".context-generator-destination-home-link");
-    const controls = [...sheet.querySelectorAll(".context-generator-destination-tile")]
+    const controls = [...sheet.querySelectorAll(".context-generator-destination-tile, #context-generator-copy-to-clipboard")]
       .filter(node => !node.disabled && node.getAttribute("aria-disabled") !== "true");
     controls[0].focus();
     return { href: home.href, target: home.target, rel: home.rel, label: home.getAttribute("aria-label"),
@@ -1340,7 +1419,7 @@ async function verifyPickerProductChanges(session, state) {
   assert.equal(product.bubbleTabIndex, -1);
   const focusedPickerIndex = `(() => {
     const sheet = document.getElementById("context-generator-destination-sheet");
-    return [...sheet.querySelectorAll(".context-generator-destination-tile")]
+    return [...sheet.querySelectorAll(".context-generator-destination-tile, #context-generator-copy-to-clipboard")]
       .filter(node => !node.disabled && node.getAttribute("aria-disabled") !== "true")
       .indexOf(document.activeElement);
   })()`;
@@ -1359,7 +1438,7 @@ async function verifyPickerProductChanges(session, state) {
     assert.equal(reached.size, product.controlCount, "Every enabled picker control must remain reachable.");
   }
   assert.equal(product.speedControlCount, 0, "The picker must not expose a Speed control.");
-  assert.equal(product.controlCount, 4, "All four destinations must remain reachable.");
+  assert.equal(product.controlCount, 5, "Four destinations and Copy to clipboard must remain reachable.");
   if (PICKER_SCREENSHOT_PATH) {
     const clip = await session.evaluate(`(() => {
       const sheet = document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
@@ -2816,6 +2895,10 @@ async function run() {
     assert.deepEqual([state.summaryRequests.length, state.jsonRequests], preloadRequests,
       "Preparing UI before the first click must not start conversation work.");
     process.stdout.write("✓ Picker, logos and title font ready before window.load and the first click; no capture or summary request.\n");
+    if (process.env.CAP_CONTEXT_CLIPBOARD_SMOKE === "1") {
+      await verifyClipboardOnly(sourceSession, browserSession, state);
+      return;
+    }
     if (GEMINI_LARGE_PASTE_SMOKE) {
       await verifyGeminiLargePaste({ sourceSession, devToolsPort, origin, state, destinationSessions });
       return;

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-02-notice-dismiss-v248";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-11-04-clipboard-v249";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1212,6 +1212,7 @@
 
   async function runContextFlow(destinationId, preparedDestinationPromise = null, scrapedConversationText = null, trace = null) {
     const transferTrace = trace || createTransferTrace(destinationId, "transfer");
+    const clipboardOnly = destinationId === "clipboard";
     transferTrace.destinationId = destinationId;
     startTransferTelemetry(transferTrace);
     let transferStage = "capture";
@@ -1258,7 +1259,7 @@
         releaseDestinationSheetBackdrop();
       }
       transferStage = "summary";
-      const earlyReveal = localDirect || remoteFeatureDisabled("automaticPaste", currentPlatform.id, destinationId)
+      const earlyReveal = clipboardOnly || localDirect || remoteFeatureDisabled("automaticPaste", currentPlatform.id, destinationId)
         ? null : createEarlyDestinationReveal(transferTrace, destinationPrepPromise);
       try {
         summary = await summarizeWithBackend(conversationText, transferTrace, earlyReveal?.onNearEnd);
@@ -1271,6 +1272,18 @@
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       if (!localDirect) setHandoffProgress("summary", "done");
+      if (clipboardOnly) {
+        if (!instanceActive || activeTransferTrace !== transferTrace || transferTrace.completed || transferTrace.manualCopy) return;
+        transferTrace.copyBoxShown = showFallbackModal(summary, "clipboard", false, false, false,
+          { clipboardOnly: true, largeTranscript: Boolean(transferTrace.largeLocalRecovery) }) === true;
+        markTransferTrace(transferTrace, "copy box shown");
+        finishTransferTrace(transferTrace);
+        resetRunningFlag();
+        // Clipboard access can be denied after asynchronous summarization. The
+        // same box keeps its user-activated Copy button and manual selection.
+        document.getElementById("context-generator-fallback-modal")?.contextGeneratorCopy?.();
+        return;
+      }
       if (transferTrace.largeLocalRecovery) {
         // A full multi-million-character transcript is safe in this local box;
         // attempting to inject it into a composer can freeze or overwrite a draft.
@@ -1616,6 +1629,9 @@
   }
 
   function prepareDestinationTab(destinationId, trace = null) {
+    // Clipboard is an output action, never a browser destination. Guard every
+    // preparation path, including capture fallback and the final retry.
+    if (destinationId === "clipboard") return null;
     markTransferTrace(trace, "tab open start", { destination: destinationId });
     return notifyBackground({
       type: "PREPARE_DESTINATION",
@@ -3025,6 +3041,9 @@
   }
 
   function sendTransferTelemetrySnapshot(trace, status, failureReason) {
+    // The hosted contract counts transfers between AI platforms. Keep clipboard
+    // runs in local Latest Run without inventing a destination or paste outcome.
+    if (trace.destinationId === "clipboard") return;
     sendTransferTelemetry({
       attemptId: trace.id,
       attemptedAt: new Date(trace.startedAtEpoch).toISOString(),
@@ -3127,7 +3146,7 @@
       },
       destination: {
         id: trace.destinationId || null,
-        name: trace.destinationId ? getPlatform(trace.destinationId)?.name || trace.destinationId : null
+        name: trace.destinationId === "clipboard" ? "Clipboard" : trace.destinationId ? getPlatform(trace.destinationId)?.name || trace.destinationId : null
       },
       startedAt: new Date(trace.startedAtEpoch || Date.now()).toISOString(),
       completedAt: new Date(completedAtEpoch).toISOString(),
@@ -7792,6 +7811,18 @@
     title.textContent = DESTINATION_TITLE_TEXT;
     title.style.cssText = "font-family:'Cap Context EB Garamond',Georgia,'Times New Roman',serif;font-size:18px;font-style:normal;font-weight:400;letter-spacing:-0.015em;color:#ffffff !important;line-height:1.05;text-rendering:geometricPrecision";
     topLine.appendChild(brandLockup);
+    const clipboardButton = document.createElement("button");
+    clipboardButton.id = "context-generator-copy-to-clipboard";
+    clipboardButton.type = "button";
+    clipboardButton.textContent = "Copy to clipboard";
+    clipboardButton.style.cssText = "flex-shrink:0;padding:7px 8px;border:1px solid rgba(185,158,228,0.3) !important;border-radius:9px;background:rgba(189,158,238,0.1) !important;color:#f8f6fa !important;font:600 10.5px/1.2 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;cursor:pointer";
+    addOwnedEventListener(clipboardButton, "click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (isRunning) return;
+      startDestinationTransfer("clipboard");
+    });
+    topLine.appendChild(clipboardButton);
     header.appendChild(topLine);
     header.appendChild(title);
     sheet.appendChild(header);
@@ -7982,7 +8013,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, #context-generator-copy-to-clipboard")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
@@ -9658,7 +9689,7 @@
       clearTimeout(handoffScrimHideTimer);
       handoffOverlayHideTimer = null;
       handoffScrimHideTimer = null;
-      const destinationName = getPlatform(destinationId)?.name || "destination";
+      const destinationName = destinationId === "clipboard" ? "clipboard" : getPlatform(destinationId)?.name || "destination";
       overlay.dataset.contextGeneratorDestinationName = destinationName;
       overlay.setAttribute("aria-hidden", "false");
       overlay.setAttribute("aria-busy", "true");
@@ -9791,7 +9822,7 @@
 
       return {
         id: stage.id,
-        label: stage.id === "paste" ? `Pasting into ${destinationName || "destination"}` : stage.label,
+        label: stage.id === "paste" ? (destinationName === "clipboard" ? "Copying to clipboard" : `Pasting into ${destinationName || "destination"}`) : stage.label,
         state
       };
     });
@@ -10711,7 +10742,7 @@
   }
 
   function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false,
-    { destinationCopy = false, recovery = null, largeTranscript = false, signInRequired = false, pasteFailed = false, pastePaused = false } = {}) {
+    { destinationCopy = false, recovery = null, largeTranscript = false, signInRequired = false, pasteFailed = false, pastePaused = false, clipboardOnly = false } = {}) {
     // A new destination recovery owns the carry. A pending Copy again from an
     // older notice must not reopen its text over this dialog after rejection.
     const copyNotice = document.getElementById("context-generator-error-overlay");
@@ -10931,7 +10962,7 @@
         button.style.outlineOffset = active ? "3px" : "0";
       };
 
-      addOwnedEventListener(copyBtn, "click", async () => {
+      modal.contextGeneratorCopy = async () => {
         const copyOwner = modal.contextGeneratorCopyOwner;
         const recovery = modal.contextGeneratorRecovery;
         // A concise preview must not shorten a carry. Large-chat copying also
@@ -10970,6 +11001,10 @@
         copyBtn.textContent = "Copied!";
         copyBtn.style.setProperty("background", draftPresent ? "#cbebd8" : "linear-gradient(180deg,#69e6a2,#21b36b)", "important");
         copyBtn.style.setProperty("color", draftPresent ? "#173e27" : "#07150d", "important");
+        if (modal.contextGeneratorClipboardOnly) {
+          const desc = document.getElementById("context-generator-fallback-desc");
+          if (desc) desc.textContent = "Copied to your clipboard. Copy it again here whenever you need it.";
+        }
 
         if (modal.contextGeneratorDestinationCopy) {
           const copiedContext = { text: currentText, destinationName: modal.contextGeneratorDestinationName, draftPresent, recovery,
@@ -10996,7 +11031,8 @@
           copyBtn.style.setProperty("background", copyBackground, "important");
           copyBtn.style.setProperty("color", copyColor, "important");
         }, 2000);
-      });
+      };
+      addOwnedEventListener(copyBtn, "click", () => modal.contextGeneratorCopy());
 
       const closeModal = () => {
         clearTimeout(modal.contextGeneratorCopyCloseTimer);
@@ -11078,6 +11114,7 @@
     modal.contextGeneratorCopyOwner = {};
     modal.contextGeneratorRecovery = recovery;
     modal.contextGeneratorDestinationCopy = destinationCopy;
+    modal.contextGeneratorClipboardOnly = clipboardOnly;
     modal.contextGeneratorSignInRequired = signInRequired;
     modal.contextGeneratorDestinationName = destinationName;
     modal.contextGeneratorResetCopyFeedback?.();
@@ -11091,6 +11128,8 @@
     if (desc) {
       desc.textContent = signInRequired
         ? `You're not signed in to ${destinationName}, so we couldn't paste here. Your summary is ready to copy. Sign in, then paste it into a new chat.`
+        : clipboardOnly
+        ? "Your context is ready. Use Copy Context below if it wasn't copied automatically."
         : pastePaused
         ? `Automatic paste is temporarily paused. Copy your context and paste it into ${destinationName}'s message box.`
         : largeTranscript
